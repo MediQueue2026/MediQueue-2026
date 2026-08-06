@@ -1,0 +1,10 @@
+{
+  "description": "Streamline patient flow and enhance clinic efficiency with real-time queue tracking, appointment management, and live doctor availability for healthcare providers and patients.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
