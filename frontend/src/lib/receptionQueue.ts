@@ -57,7 +57,7 @@ export interface ReceptionDoctor {
   room: string
   /** Token series this doctor issues under. */
   series: string
-  status: 'active' | 'break' | 'delayed'
+  status: 'active' | 'break' | 'delayed' | 'offline'
   /** Drives the estimated-wait projection. */
   avgConsultMinutes: number
 }

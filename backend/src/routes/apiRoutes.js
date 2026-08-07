@@ -4,7 +4,7 @@ import { loginUser, registerUser } from '../controllers/authController.js';
 import { getCenters, createCenter } from '../controllers/centerController.js';
 import { createAppointment, getAppointments } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors } from '../controllers/doctorController.js';
-import { issueWalkinToken, callNextPatient } from '../controllers/queueController.js';
+import { getQueue, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
 import { uploadHealthRecord, getPatientRecords } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs } from '../controllers/adminController.js';
 
@@ -95,8 +95,10 @@ router.get('/appointments', getAppointments);
 router.post('/appointments', createAppointment);
 
 // Queue & Reception Routes
+router.get('/queue', getQueue);
 router.post('/queue/walkin', issueWalkinToken);
 router.post('/queue/call-next', callNextPatient);
+router.patch('/queue/:id/status', updateQueueEntryStatus);
 
 // Health Records Routes
 router.post('/records/upload', uploadHealthRecord);

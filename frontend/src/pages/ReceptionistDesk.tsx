@@ -75,8 +75,8 @@ export default function ReceptionistDesk() {
     setFormName(''); setFormNic(''); setFormPhone(''); setPhysicalToken('')
   }
 
-  const handleIssueToken = () => {
-    const result = queue.issue({
+  const handleIssueToken = async () => {
+    const result = await queue.issue({
       patientName: formName,
       nic: formNic,
       phone: formPhone,
@@ -193,6 +193,21 @@ export default function ReceptionistDesk() {
         <StatPill icon={<Clock size={15} />} label="Avg. Wait" value={`${avgWait} min`} accent="var(--blue)" />
         <StatPill icon={<Activity size={15} />} label="Doctors On Duty" value={`${activeDoctors}/${queue.doctors.length}`} accent="#10B981" />
       </div>
+
+      {(queue.offline || queue.migrationPending) && (
+        <div style={{ padding: '14px 24px 0' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600,
+            color: 'var(--amber)', background: 'var(--amber-dim)', border: '1px solid var(--amber-border)',
+            borderRadius: 9, padding: '9px 14px',
+          }}>
+            <AlertCircle size={14} />
+            {queue.offline
+              ? "Backend not reachable — showing demo data. Start the backend (npm run dev in backend/) to use the live queue."
+              : "Connected to the backend, but the walk-in queue table doesn't exist yet — run backend/src/db/migrations/002_walk_in_queue.sql in the Supabase SQL Editor, then refresh."}
+          </div>
+        </div>
+      )}
 
       {/* CHECK-IN & COUNTER QUEUE TAB */}
       {activeTab === 'checkin' && (

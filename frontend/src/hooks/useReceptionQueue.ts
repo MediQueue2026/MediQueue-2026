@@ -1,4 +1,6 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ApiError, api } from '../lib/api'
+import type { ApiQueueEntry } from '../lib/api'
 import {
   QueueError,
   RECEPTION_DOCTORS,
@@ -6,7 +8,6 @@ import {
   completeCurrent as completeCurrentReducer,
   currentFor,
   estimateWaitMinutes,
-  findDoctor,
   forDoctor,
   formatToken,
   issueToken as issueTokenReducer,
@@ -16,29 +17,72 @@ import {
   seedQueue,
   waitingFor,
 } from '../lib/receptionQueue'
-import type { IssueTokenInput, QueueEntry, QueueStatus } from '../lib/receptionQueue'
+import type { IssueTokenInput, QueueEntry, QueueStatus, ReceptionDoctor } from '../lib/receptionQueue'
+
+function fromApiEntry(e: ApiQueueEntry): QueueEntry {
+  return {
+    id: e.id,
+    series: e.series,
+    tokenNumber: e.tokenNumber,
+    patientName: e.patientName,
+    nic: e.nic,
+    phone: e.phone,
+    doctorId: e.doctorId,
+    source: e.source,
+    status: e.status,
+    issuedAt: new Date(e.issuedAt),
+    calledAt: e.calledAt ? new Date(e.calledAt) : undefined,
+  }
+}
 
 /**
  * Live reception queue for one counter.
  *
- * Holds the whole clinic's queue but exposes the selected doctor's slice, so
- * the desk can switch doctors without losing the other queues. State is
- * in-memory; when the API is ready, swap each handler's reducer call for the
- * matching request (the SQL is documented in `lib/receptionQueue.ts`) and keep
- * the same return shape.
+ * Talks to the real backend (Supabase-backed `walk_in_queue` + `doctors`
+ * tables — see backend/src/controllers/queueController.js) whenever it's
+ * reachable. If the API can't be reached at all — e.g. previewing the
+ * frontend standalone with no backend running — it transparently falls back
+ * to the bundled in-memory demo data and the original pure reducers, so the
+ * desk stays fully usable either way.
  */
-export function useReceptionQueue(initialDoctorId = RECEPTION_DOCTORS[0]?.id ?? '') {
+export function useReceptionQueue() {
+  const [doctors, setDoctors] = useState<ReceptionDoctor[]>(RECEPTION_DOCTORS)
   const [entries, setEntries] = useState<QueueEntry[]>(seedQueue)
-  const [selectedDoctorId, setSelectedDoctorId] = useState(initialDoctorId)
+  const [selectedDoctorId, setSelectedDoctorId] = useState(RECEPTION_DOCTORS[0]?.id ?? '')
 
-  // Pending flags — the buttons stay disabled while a transition is in flight,
-  // which is also what we'll want once these become real requests.
+  const [loading, setLoading] = useState(true)
+  const [offline, setOffline] = useState(false)
+  const [migrationPending, setMigrationPending] = useState(false)
+
   const [issuing, setIssuing] = useState(false)
   const [calling, setCalling] = useState(false)
   const [completing, setCompleting] = useState(false)
   const [error, setError] = useState('')
 
-  const selectedDoctor = useMemo(() => findDoctor(selectedDoctorId), [selectedDoctorId])
+  // Load the real clinic roster + today's queue once on mount.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [doctorsRes, queueRes] = await Promise.all([api.getDoctors(), api.getQueue()])
+        if (cancelled) return
+        setDoctors(doctorsRes.doctors)
+        setEntries(queueRes.entries.map(fromApiEntry))
+        setMigrationPending(!!queueRes.migrationPending)
+        setSelectedDoctorId(prev =>
+          doctorsRes.doctors.some(d => d.id === prev) ? prev : (doctorsRes.doctors[0]?.id ?? ''),
+        )
+      } catch {
+        if (cancelled) return
+        setOffline(true) // keep the bundled demo data (RECEPTION_DOCTORS / seedQueue)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const selectedDoctor = useMemo(() => doctors.find(d => d.id === selectedDoctorId), [doctors, selectedDoctorId])
 
   const doctorQueue = useMemo(() => forDoctor(entries, selectedDoctorId), [entries, selectedDoctorId])
   const waiting = useMemo(() => waitingFor(entries, selectedDoctorId), [entries, selectedDoctorId])
@@ -55,48 +99,116 @@ export function useReceptionQueue(initialDoctorId = RECEPTION_DOCTORS[0]?.id ?? 
   const upNext = waiting[0]
 
   const issue = useCallback(
-    (input: Omit<IssueTokenInput, 'doctorId'> & { doctorId?: string }) => {
+    async (input: Omit<IssueTokenInput, 'doctorId'> & { doctorId?: string }) => {
+      const doctorId = input.doctorId ?? selectedDoctorId
       setIssuing(true)
       setError('')
+
+      if (offline) {
+        try {
+          const next = issueTokenReducer(entries, { ...input, doctorId })
+          setEntries(next)
+          const added = next.find(e => !entries.some(prev => prev.id === e.id))
+          return { ok: true as const, entry: added }
+        } catch (err) {
+          const message = err instanceof QueueError ? err.message : 'Could not issue this token.'
+          setError(message)
+          return { ok: false as const, message }
+        } finally {
+          setIssuing(false)
+        }
+      }
+
       try {
-        const next = issueTokenReducer(entries, { ...input, doctorId: input.doctorId ?? selectedDoctorId })
-        setEntries(next)
-        // The new row is the one this call added.
-        const added = next.find((e) => !entries.some((prev) => prev.id === e.id))
-        return { ok: true as const, entry: added }
+        const { entry } = await api.issueWalkinToken({
+          doctorId,
+          patientName: input.patientName,
+          nic: input.nic,
+          phone: input.phone,
+          source: input.source,
+          tokenNumber: input.tokenNumber,
+        })
+        const mapped = fromApiEntry(entry)
+        setEntries(prev => [...prev, mapped].sort((a, b) => a.tokenNumber - b.tokenNumber))
+        return { ok: true as const, entry: mapped }
       } catch (err) {
-        const message = err instanceof QueueError ? err.message : 'Could not issue this token.'
+        const message = err instanceof ApiError ? err.message : 'Could not issue this token.'
         setError(message)
         return { ok: false as const, message }
       } finally {
         setIssuing(false)
       }
     },
-    [entries, selectedDoctorId],
+    [entries, offline, selectedDoctorId],
   )
 
-  const callNext = useCallback(() => {
+  const callNext = useCallback(async () => {
     if (waiting.length === 0) return
     setCalling(true)
-    setEntries((prev) => callNextReducer(prev, selectedDoctorId))
-    setCalling(false)
-  }, [selectedDoctorId, waiting.length])
 
-  const completeCurrent = useCallback(() => {
+    if (offline) {
+      setEntries(prev => callNextReducer(prev, selectedDoctorId))
+      setCalling(false)
+      return
+    }
+
+    try {
+      const { entries: updated } = await api.callNext(selectedDoctorId)
+      const mappedUpdated = updated.map(fromApiEntry)
+      setEntries(prev =>
+        [...prev.filter(e => e.doctorId !== selectedDoctorId), ...mappedUpdated].sort(
+          (a, b) => a.tokenNumber - b.tokenNumber,
+        ),
+      )
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not call the next token.')
+    } finally {
+      setCalling(false)
+    }
+  }, [offline, selectedDoctorId, waiting.length])
+
+  const completeCurrent = useCallback(async () => {
     if (!current) return
     setCompleting(true)
-    setEntries((prev) => completeCurrentReducer(prev, selectedDoctorId))
-    setCompleting(false)
-  }, [current, selectedDoctorId])
 
-  const setStatus = useCallback((id: string, status: QueueStatus) => {
-    setEntries((prev) => setEntryStatusReducer(prev, id, status))
-  }, [])
+    if (offline) {
+      setEntries(prev => completeCurrentReducer(prev, selectedDoctorId))
+      setCompleting(false)
+      return
+    }
+
+    try {
+      const { entry } = await api.setQueueEntryStatus(current.id, 'completed')
+      const mapped = fromApiEntry(entry)
+      setEntries(prev => prev.map(e => (e.id === mapped.id ? mapped : e)))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not complete this token.')
+    } finally {
+      setCompleting(false)
+    }
+  }, [current, offline, selectedDoctorId])
+
+  const setStatus = useCallback(
+    async (id: string, status: QueueStatus) => {
+      if (offline) {
+        setEntries(prev => setEntryStatusReducer(prev, id, status))
+        return
+      }
+      try {
+        const { entry } = await api.setQueueEntryStatus(id, status)
+        const mapped = fromApiEntry(entry)
+        setEntries(prev => prev.map(e => (e.id === mapped.id ? mapped : e)))
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Could not update this token.')
+      }
+    },
+    [offline],
+  )
 
   /** Estimated wait for a waiting entry, by its place in line. */
   const waitFor = useCallback(
     (entry: QueueEntry) => {
-      const position = waiting.findIndex((e) => e.id === entry.id)
+      const position = waiting.findIndex(e => e.id === entry.id)
       return estimateWaitMinutes(position + 1, selectedDoctor)
     },
     [waiting, selectedDoctor],
@@ -106,7 +218,7 @@ export function useReceptionQueue(initialDoctorId = RECEPTION_DOCTORS[0]?.id ?? 
     // data
     entries,
     doctorQueue,
-    doctors: RECEPTION_DOCTORS,
+    doctors,
     selectedDoctor,
     selectedDoctorId,
     waiting,
@@ -115,6 +227,10 @@ export function useReceptionQueue(initialDoctorId = RECEPTION_DOCTORS[0]?.id ?? 
     issuedNumbers,
     nextNumber,
     nextToken,
+    // connection state
+    loading,
+    offline,
+    migrationPending,
     // flags
     issuing,
     calling,
