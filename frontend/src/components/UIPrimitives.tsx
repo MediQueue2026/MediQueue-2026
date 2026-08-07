@@ -40,7 +40,7 @@ export function StatusBadge({ status }: { status: 'active' | 'break' | 'delayed'
     urgent:      ['badge-crimson', 'Urgent'],
   }
   const [cls, label] = map[status] ?? ['badge-ghost', status]
-  const dotColor = cls === 'badge-emerald' ? '#10B981' : cls === 'badge-blue' ? '#3B82F6' : cls === 'badge-amber' ? '#F59E0B' : cls === 'badge-crimson' ? '#EF4444' : '#64748B'
+  const dotColor = cls === 'badge-emerald' ? '#10B981' : cls === 'badge-blue' ? '#4F46E5' : cls === 'badge-amber' ? '#F59E0B' : cls === 'badge-crimson' ? '#EF4444' : '#64748B'
   return <Badge cls={cls}><Dot color={dotColor} />{label}</Badge>
 }
 
