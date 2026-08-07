@@ -1,14 +1,14 @@
 import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, Database } from 'lucide-react'
+import { Activity, Database, Home, MonitorPlay, ShieldCheck, Stethoscope, Ticket, User } from 'lucide-react'
 
 const PAGES = [
-  { path: '/',             label: '① Public Landing' },
-  { path: '/patient',      label: '② Patient Dashboard' },
-  { path: '/doctor',       label: '③ Doctor Panel' },
-  { path: '/receptionist', label: '④ Receptionist Desk' },
-  { path: '/admin',        label: '⑤ System Admin' },
-  { path: '/tv-display',   label: '📺 Queue TV' },
+  { path: '/',             label: 'Public Landing',    icon: Home },
+  { path: '/patient',      label: 'Patient Dashboard', icon: User },
+  { path: '/doctor',       label: 'Doctor Panel',      icon: Stethoscope },
+  { path: '/receptionist', label: 'Receptionist Desk', icon: Ticket },
+  { path: '/admin',        label: 'System Admin',      icon: ShieldCheck },
+  { path: '/tv-display',   label: 'Queue TV',          icon: MonitorPlay },
 ]
 
 export function DevNavbar() {
@@ -35,46 +35,66 @@ export function DevNavbar() {
 
   return (
     <div className="page-switcher" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 20, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 18, flexShrink: 0 }}>
         <div style={{
-          width: 20, height: 20, borderRadius: 5,
-          background: 'linear-gradient(135deg,#12c6ba,#0d968d)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
+          width: 26, height: 26, borderRadius: 8,
+          background: 'linear-gradient(135deg, var(--teal), var(--blue))',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)',
         }}>
-          <Activity size={11} color="#fff" />
+          <Activity size={14} color="#fff" strokeWidth={2.5} />
         </div>
-        <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>MediQueue</span>
+        <span style={{ fontSize: 14, fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em' }}>MediQueue</span>
       </div>
 
-      {PAGES.map(p => (
-        <Link
-          key={p.path}
-          to={p.path}
-          className={`page-tab ${location.pathname === p.path ? 'active' : ''}`}
-          style={{ textDecoration: 'none' }}
-        >
-          {p.label}
-        </Link>
-      ))}
+      <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.12)', marginRight: 4 }} className="desktop-only" />
 
-      {/* DB Connection Test Button */}
-      <button
-        onClick={checkDatabaseConnection}
-        disabled={loading}
-        className="page-tab"
-        style={{
-          marginLeft: 10, background: 'rgba(16, 185, 129, 0.15)', color: '#10B981',
-          border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 700, gap: 5,
-          display: 'inline-flex', alignItems: 'center'
-        }}
-      >
-        <Database size={11} /> {loading ? 'Testing...' : '⚡ Test Supabase DB'}
-      </button>
+      {PAGES.map(p => {
+        const Icon = p.icon
+        const isActive = location.pathname === p.path
+        return (
+          <Link
+            key={p.path}
+            to={p.path}
+            className={`page-tab ${isActive ? 'active' : ''}`}
+            style={{ textDecoration: 'none' }}
+          >
+            <Icon size={13} strokeWidth={isActive ? 2.5 : 2} />
+            <span className="desktop-only">{p.label}</span>
+          </Link>
+        )
+      })}
+
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <span
+          className="desktop-only"
+          style={{
+            fontSize: 10.5, fontWeight: 700, color: 'rgba(255,255,255,0.55)',
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 999, padding: '4px 10px', letterSpacing: '0.03em',
+          }}
+        >
+          Dev Preview
+        </span>
+
+        {/* DB Connection Test Button */}
+        <button
+          onClick={checkDatabaseConnection}
+          disabled={loading}
+          className="page-tab"
+          style={{
+            background: 'rgba(16, 185, 129, 0.14)', color: '#34D399',
+            border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 700,
+          }}
+        >
+          <Database size={12} /> <span className="desktop-only">{loading ? 'Testing…' : 'Test Supabase DB'}</span>
+        </button>
+      </div>
 
       {dbStatus && (
         <div style={{
-          position: 'fixed', top: 48, right: 20, zIndex: 99999,
-          background: '#0d2623', color: '#ffffff', border: '1px solid #10B981',
+          position: 'fixed', top: 58, right: 20, zIndex: 99999,
+          background: 'var(--overlay)', color: '#ffffff', border: '1px solid var(--emerald)',
           padding: '12px 18px', borderRadius: 10, fontSize: 12.5, fontWeight: 600,
           boxShadow: '0 10px 30px rgba(0,0,0,0.4)', maxWidth: 460, display: 'flex', alignItems: 'flex-start', gap: 12
         }}>
@@ -82,10 +102,6 @@ export function DevNavbar() {
           <button onClick={() => setDbStatus(null)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 14 }}>✕</button>
         </div>
       )}
-
-      <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-4)', fontWeight: 500 }} className="desktop-only">
-        Modular Router Mode · Member Task Split Ready
-      </div>
     </div>
   )
 }

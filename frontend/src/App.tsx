@@ -10,7 +10,7 @@ import { DevNavbar } from './components/DevNavbar'
 export default function App() {
   return (
     <Router>
-      <div style={{ paddingTop: 42 }}>
+      <div style={{ paddingTop: 52 }}>
         <DevNavbar />
         <Routes>
           <Route path="/" element={<LandingPage />} />
