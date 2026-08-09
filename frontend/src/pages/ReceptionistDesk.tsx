@@ -7,13 +7,15 @@ import {
 import AccountMenu from '../components/AccountMenu'
 import WalkinSmsModal from '../components/WalkinSmsModal'
 import PublicTvDisplay from '../components/PublicTvDisplay'
+import AddDoctorModal from '../components/AddDoctorModal'
+import EditDoctorModal from '../components/EditDoctorModal'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
   STATUS_BADGE, STATUS_LABEL, currentFor, entryToken, fmtTime, formatToken,
   averageWaitMinutes, waitingFor
 } from '../lib/receptionQueue'
-import type { TokenSource } from '../lib/receptionQueue'
+
 
 /** Compact metric — one line, no card chrome, so the strip stays out of the receptionist's way. */
 function StatPill({ icon, label, value, accent = 'var(--text-2)' }: {
@@ -40,10 +42,11 @@ export default function ReceptionistDesk() {
   const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors'>('checkin')
   const [showWalkinModal, setShowWalkinModal] = useState(false)
   const [showTvDisplay, setShowTvDisplay] = useState(false)
+  const [showAddDoctorModal, setShowAddDoctorModal] = useState(false)
+  const [editingDoctor, setEditingDoctor] = useState<any>(null)
   const [patientSearch, setPatientSearch] = useState('')
 
-  // Counter form — mirrors the two ways a token reaches the queue.
-  const [tokenSource, setTokenSource] = useState<TokenSource>('online')
+  // Counter form
   const [formName, setFormName] = useState('')
   const [formNic, setFormNic] = useState('')
   const [formPhone, setFormPhone] = useState('')
@@ -57,9 +60,8 @@ export default function ReceptionistDesk() {
   // needed first is already focused after a source switch or a successful issue.
   useEffect(() => {
     if (activeTab !== 'checkin') return
-    const target = tokenSource === 'physical' ? physicalInputRef.current : nameInputRef.current
-    target?.focus()
-  }, [tokenSource, activeTab])
+    physicalInputRef.current?.focus()
+  }, [activeTab])
 
   const { selectedDoctor, current, waiting, upNext, issuedNumbers } = queue
 
@@ -81,8 +83,8 @@ export default function ReceptionistDesk() {
       patientName: formName,
       nic: formNic,
       phone: formPhone,
-      source: tokenSource,
-      tokenNumber: tokenSource === 'physical' ? Number(physicalToken) : undefined,
+      source: 'physical',
+      tokenNumber: Number(physicalToken),
     })
     if (result.ok && result.entry) {
       setIssued(entryToken(result.entry))
@@ -90,11 +92,6 @@ export default function ReceptionistDesk() {
       nameInputRef.current?.focus()
       setTimeout(() => setIssued(null), 3000)
     }
-  }
-
-  const switchSource = (source: TokenSource) => {
-    setTokenSource(source)
-    queue.clearError()
   }
 
   // Search spans the whole clinic, not just the selected doctor's queue.
@@ -111,7 +108,7 @@ export default function ReceptionistDesk() {
   const canIssue =
     !queue.issuing &&
     formName.trim().length > 0 &&
-    (tokenSource === 'online' || physicalToken.trim().length > 0)
+    physicalToken.trim().length > 0
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
@@ -135,6 +132,17 @@ export default function ReceptionistDesk() {
         waiting={waiting}
         estimateWait={queue.waitFor}
         onCallNext={queue.callNext}
+      />
+      <AddDoctorModal
+        isOpen={showAddDoctorModal}
+        onClose={() => setShowAddDoctorModal(false)}
+        onCreated={() => { window.location.reload() }}
+      />
+      <EditDoctorModal
+        isOpen={!!editingDoctor}
+        onClose={() => setEditingDoctor(null)}
+        doctor={editingDoctor}
+        onUpdated={() => { window.location.reload() }}
       />
 
       {/* ── HEADER ── */}
@@ -315,75 +323,55 @@ export default function ReceptionistDesk() {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>Issue Token — {selectedDoctor?.name}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>
-                    {tokenSource === 'online'
-                      ? <>Next token: <strong style={{ color: 'var(--blue)' }}>{queue.nextToken}</strong></>
-                      : <>Series <strong style={{ color: 'var(--blue)' }}>{selectedDoctor?.series}</strong> · pre-printed slip</>}
+                    Series <strong style={{ color: 'var(--blue)' }}>{selectedDoctor?.series}</strong> · pre-printed slip
                   </div>
                 </div>
               </div>
 
-              {/* Source switch — a token is either generated here or already on paper */}
-              <div style={{ display: 'flex', gap: 6, marginBottom: 16, background: 'rgba(30, 41, 59, 0.04)', padding: 4, borderRadius: 10 }}>
-                <button
-                  onClick={() => switchSource('online')}
-                  className={`btn btn-sm ${tokenSource === 'online' ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ flex: 1, justifyContent: 'center', gap: 6 }}
-                >
-                  <Wifi size={13} /> Online / System
-                </button>
-                <button
-                  onClick={() => switchSource('physical')}
-                  className={`btn btn-sm ${tokenSource === 'physical' ? 'btn-amber' : 'btn-ghost'}`}
-                  style={{ flex: 1, justifyContent: 'center', gap: 6 }}
-                >
-                  <Hash size={13} /> Physical Slip
-                </button>
-              </div>
+
 
               <form
                 onSubmit={e => { e.preventDefault(); if (canIssue) handleIssueToken() }}
                 style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
               >
-                {tokenSource === 'physical' && (
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Printed Token Number</label>
-                    <input
-                      ref={physicalInputRef}
-                      className="input"
-                      type="number"
-                      min={1}
-                      placeholder="e.g. 16"
-                      value={physicalToken}
-                      onChange={e => { setPhysicalToken(e.target.value); queue.clearError() }}
-                      style={{ height: 42, fontSize: 14, borderColor: queue.error ? 'var(--crimson-border)' : undefined }}
-                    />
-                    {/* Numbers already handed out today — stops the same slip being recorded twice */}
-                    {issuedNumbers.length > 0 && (
-                      <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-4)', width: '100%', marginBottom: 2 }}>Already issued for series {selectedDoctor?.series}:</span>
-                        {issuedNumbers.map(n => {
-                          const entry = queue.doctorQueue.find(e => e.tokenNumber === n)!
-                          const live = entry.status === 'waiting' || entry.status === 'called' || entry.status === 'in_progress'
-                          return (
-                            <span
-                              key={n}
-                              title={live ? 'Still active in the queue' : STATUS_LABEL[entry.status]}
-                              style={{
-                                fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 5,
-                                fontFamily: 'monospace',
-                                background: live ? 'var(--crimson-dim)' : 'rgba(30, 41, 59, 0.04)',
-                                border: `1px solid ${live ? 'var(--crimson-border)' : 'var(--border-md)'}`,
-                                color: live ? 'var(--crimson)' : 'var(--text-4)',
-                              }}
-                            >
-                              {formatToken(entry.series, n)}
-                            </span>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div>
+                  <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Printed Token Number</label>
+                  <input
+                    ref={physicalInputRef}
+                    className="input"
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 16"
+                    value={physicalToken}
+                    onChange={e => { setPhysicalToken(e.target.value); queue.clearError() }}
+                    style={{ height: 42, fontSize: 14, borderColor: queue.error ? 'var(--crimson-border)' : undefined }}
+                  />
+                  {/* Numbers already handed out today — stops the same slip being recorded twice */}
+                  {issuedNumbers.length > 0 && (
+                    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-4)', width: '100%', marginBottom: 2 }}>Already issued for series {selectedDoctor?.series}:</span>
+                      {issuedNumbers.map(n => {
+                        const entry = queue.doctorQueue.find(e => e.tokenNumber === n)!
+                        const live = entry.status === 'waiting' || entry.status === 'called' || entry.status === 'in_progress'
+                        return (
+                          <span
+                            key={n}
+                            title={live ? 'Still active in the queue' : STATUS_LABEL[entry.status]}
+                            style={{
+                              fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 5,
+                              fontFamily: 'monospace',
+                              background: live ? 'var(--crimson-dim)' : 'rgba(30, 41, 59, 0.04)',
+                              border: `1px solid ${live ? 'var(--crimson-border)' : 'var(--border-md)'}`,
+                              color: live ? 'var(--crimson)' : 'var(--text-4)',
+                            }}
+                          >
+                            {formatToken(entry.series, n)}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
 
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Patient Full Name</label>
@@ -443,15 +431,13 @@ export default function ReceptionistDesk() {
                 <button
                   type="submit"
                   disabled={!canIssue}
-                  className={`btn ${tokenSource === 'physical' ? 'btn-amber' : 'btn-primary'}`}
+                  className="btn btn-amber"
                   style={{
                     width: '100%', marginTop: 2, height: 44, fontSize: 14.5, fontWeight: 700, borderRadius: 10,
                     opacity: canIssue ? 1 : 0.55, cursor: canIssue ? 'pointer' : 'not-allowed',
                   }}
                 >
-                  {tokenSource === 'physical'
-                    ? <><Hash size={16} /> {queue.issuing ? 'Recording…' : 'Record Printed Token'}</>
-                    : <><Ticket size={16} /> {queue.issuing ? 'Issuing…' : 'Issue Token & Send SMS'}</>}
+                  <Hash size={16} /> {queue.issuing ? 'Recording…' : 'Record Printed Token'}
                 </button>
               </form>
             </div>
@@ -495,8 +481,8 @@ export default function ReceptionistDesk() {
                       const stripeColor = isCurrent
                         ? 'var(--emerald)'
                         : entry.status === 'waiting' ? 'var(--amber)'
-                        : entry.status === 'left' ? 'var(--crimson-border)'
-                        : 'transparent'
+                          : entry.status === 'left' ? 'var(--crimson-border)'
+                            : 'transparent'
                       return (
                         <tr
                           key={entry.id}
@@ -629,23 +615,47 @@ export default function ReceptionistDesk() {
 
       {/* DOCTOR STATUS ROSTER TAB */}
       {activeTab === 'doctors' && (
-        <div className="responsive-grid-4" style={{ padding: '18px 24px 28px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-          {queue.doctors.map(d => {
-            const serving = currentFor(queue.entries, d.id)
-            const docWaiting = waitingFor(queue.entries, d.id)
-            return (
-              <div key={d.id} className="card glass-form-card" style={{ padding: 20 }}>
-                <Avatar name={d.name} size={44} />
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)', marginTop: 12 }}>{d.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--blue-dark)' }}>{d.dept} · {d.room}</div>
-                <div style={{ marginTop: 12 }}><StatusBadge status={d.status} /></div>
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 11.5, color: 'var(--text-4)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span>Now serving: <strong style={{ color: 'var(--text-2)', fontFamily: 'monospace' }}>{serving ? entryToken(serving) : '—'}</strong></span>
-                  <span>Waiting: <strong style={{ color: 'var(--text-2)' }}>{docWaiting.length}</strong> · Avg {d.avgConsultMinutes} min/consult</span>
+        <div style={{ padding: '18px 24px 28px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>Doctor Roster & Schedules</h3>
+              <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Manage clinic doctors and assigned available hours</div>
+            </div>
+            <button onClick={() => setShowAddDoctorModal(true)} className="btn btn-primary btn-sm" style={{ gap: 6 }}>
+              <Plus size={14} /> Add Doctor & Hours
+            </button>
+          </div>
+          <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+            {queue.doctors.map(d => {
+              const serving = currentFor(queue.entries, d.id)
+              const docWaiting = waitingFor(queue.entries, d.id)
+              return (
+                <div key={d.id} className="card glass-form-card" style={{ padding: 20, position: 'relative' }}>
+                  <button 
+                    onClick={() => setEditingDoctor(d)}
+                    className="btn btn-ghost btn-sm"
+                    style={{ position: 'absolute', top: 12, right: 12, padding: '4px 8px', fontSize: 11 }}
+                  >
+                    Edit
+                  </button>
+                  <Avatar name={d.name} size={44} />
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)', marginTop: 12 }}>{d.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--blue-dark)' }}>{d.dept} · {d.room}</div>
+                  <div style={{ marginTop: 12 }}><StatusBadge status={d.status} /></div>
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 11.5, color: 'var(--text-4)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span>Now serving: <strong style={{ color: 'var(--text-2)', fontFamily: 'monospace' }}>{serving ? entryToken(serving) : '—'}</strong></span>
+                    <span>Waiting: <strong style={{ color: 'var(--text-2)' }}>{docWaiting.length}</strong> · Avg {d.avgConsultMinutes} min/consult</span>
+                    {d.availableHours && (
+                      <span style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-3)', fontSize: 11 }}>
+                        <Clock size={11} color="var(--blue)" />
+                        {d.availableHours.mon?.available ? `Mon-Fri: ${d.availableHours.mon.start}-${d.availableHours.mon.end}` : 'Custom Schedule'}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       )}
 

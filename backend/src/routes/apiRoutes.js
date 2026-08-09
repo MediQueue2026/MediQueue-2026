@@ -12,7 +12,7 @@ import { authMiddleware } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { getCenters, createCenter } from '../controllers/centerController.js';
 import { createAppointment, getAppointments } from '../controllers/appointmentController.js';
-import { updateDoctorStatus, getDoctors } from '../controllers/doctorController.js';
+import { updateDoctorStatus, getDoctors, createDoctor, updateDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
 import { uploadHealthRecord, getPatientRecords } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs } from '../controllers/adminController.js';
@@ -109,11 +109,18 @@ router.get('/queue/board', getPublicBoard);
 
 // ── Staff Routes ────────────────────────────────────────────────────────────
 router.post('/centers', authMiddleware, requireRole(['admin']), createCenter);
+router.post('/doctors', authMiddleware, requireRole(['admin', 'receptionist']), createDoctor);
 router.put(
   '/doctors/:doctorId/status',
   authMiddleware,
   requireRole(['doctor', 'receptionist', 'admin']),
   updateDoctorStatus,
+);
+router.put(
+  '/doctors/:doctorId',
+  authMiddleware,
+  requireRole(['admin', 'receptionist']),
+  updateDoctor
 );
 
 // Appointment Routes
