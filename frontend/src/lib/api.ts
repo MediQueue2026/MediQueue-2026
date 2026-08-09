@@ -172,6 +172,28 @@ export interface IssueWalkinInput {
   tokenNumber?: number
 }
 
+export interface ApiCenter {
+  id: string
+  name: string
+  address: string
+  city: string
+  opening_hours: string
+  services: string[]
+  phone?: string
+  created_at?: string
+}
+
+export interface AuditLog {
+  id: string
+  time: string
+  actor: string
+  actor_role: 'receptionist' | 'patient' | 'doctor' | 'admin' | 'system'
+  event_type: 'approval' | 'request' | 'token_issued' | 'no_show' | 'prescription' | 'system'
+  action: string
+  center: string
+  status: 'approved' | 'pending' | 'completed' | 'rejected'
+}
+
 export const api = {
   // ── Auth ──
   login: (email: string, password: string) =>
@@ -203,9 +225,43 @@ export const api = {
   // ── Clinic data ──
   getDoctors: () => request<{ doctors: ApiDoctor[] }>('/doctors'),
 
+
+
+
   /** Public lobby board — token numbers and counts only, never patient identity. */
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
+
+
+  getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
+  
+  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[] }) =>
+    request<{ message: string; center: ApiCenter }>('/centers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  getAuditLogs: () => request<{ logs: AuditLog[]; source: 'database' | 'dummy' }>('/admin/audit-logs'),
+
+  updateAuditLogStatus: (id: string, status: AuditLog['status']) =>
+    request<{ message: string; entry: AuditLog | null }>(`/admin/audit-logs/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  createAuditLog: (entry: Omit<AuditLog, 'id' | 'time'>) =>
+    request<{ message: string; entry: AuditLog | null }>('/admin/audit-logs', {
+      method: 'POST',
+      body: JSON.stringify({
+        actor_name: entry.actor,
+        actor_role: entry.actor_role,
+        event_type: entry.event_type,
+        action: entry.action,
+        center_name: entry.center,
+        status: entry.status,
+      }),
+    }),
+
 
   getQueue: (date?: string) =>
     request<{ entries: ApiQueueEntry[]; migrationPending?: boolean }>(

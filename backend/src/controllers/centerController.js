@@ -19,9 +19,9 @@ export async function getCenters(req, res, next) {
 
 export async function createCenter(req, res, next) {
   try {
-    const { name, address, openingHours, services } = req.body;
+    const { name, city, address, openingHours, services } = req.body;
     const { data, error } = await supabase.from('medical_centers').insert([
-      { name, address, opening_hours: openingHours, services }
+      { name, city, address: address || city, opening_hours: openingHours || '08:00 - 18:00', services: services || [] }
     ]).select();
 
     if (error) throw error;
