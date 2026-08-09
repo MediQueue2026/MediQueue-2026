@@ -3,10 +3,11 @@ import {
   AlertCircle, AlertTriangle, Bell, Check, Clock, Eye, FileText, Phone,
   Repeat, Search, SkipForward, Ticket, Timer, Users
 } from 'lucide-react'
+import AccountMenu from '../components/AccountMenu'
 import PatientHistoryDrawer from '../components/PatientHistoryDrawer'
 import PrescriptionModal from '../components/PrescriptionModal'
 import DelayAlertModal from '../components/DelayAlertModal'
-import { Avatar, Badge, Dot, StatusBadge } from '../components/UIPrimitives'
+import { Badge, Dot, StatusBadge } from '../components/UIPrimitives'
 
 type Shift = 'online' | 'break' | 'offline'
 
@@ -43,9 +44,8 @@ export default function DoctorPanel() {
       {/* ── TOP BAR ── */}
       <div className="topbar" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <Avatar name="A Silva" size={30} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1, whiteSpace: 'nowrap' }}>Dr. Ethan Carr</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1, whiteSpace: 'nowrap' }}>Doctor Console</div>
             <div style={{ fontSize: 10, color: 'var(--text-4)', whiteSpace: 'nowrap' }} className="desktop-only">General Medicine · Room 04</div>
           </div>
         </div>
@@ -75,6 +75,7 @@ export default function DoctorPanel() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <div style={{ position: 'relative', cursor: 'pointer' }}><Bell size={16} color="var(--text-3)" /><span style={{ position: 'absolute', top: -3, right: -3, width: 7, height: 7, background: 'var(--crimson)', borderRadius: '50%', border: '2px solid var(--bg)' }} /></div>
           <button className="btn btn-danger desktop-only" style={{ gap: 6, padding: '4px 10px', fontSize: 11 }}><AlertTriangle size={13} />Emergency Alert</button>
+          <AccountMenu />
         </div>
       </div>
 

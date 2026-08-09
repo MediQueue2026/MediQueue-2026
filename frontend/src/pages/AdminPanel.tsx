@@ -1,11 +1,14 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Activity, Building2, FileText, GitBranch, LogOut, Menu, Plus,
   Search, Settings, Ticket, UserCheck, Users, X
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
+import AccountMenu from '../components/AccountMenu'
 import AssignDoctorModal from '../components/AssignDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
@@ -49,12 +52,24 @@ export default function AdminPanel() {
   const [chartRange, setChartRange] = useState('Today')
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [showAddCenterModal, setShowAddCenterModal] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
 
   const filteredStaff = STAFF_MEMBERS.filter(s =>
     s.name.toLowerCase().includes(staffSearch.toLowerCase()) ||
     s.role.toLowerCase().includes(staffSearch.toLowerCase()) ||
     s.dept.toLowerCase().includes(staffSearch.toLowerCase())
   )
+
+  const handleSignOut = async () => {
+    setSigningOut(true)
+    // Navigate away first — clearing the session while still on /admin lets the
+    // route guard redirect to the admin login instead of the landing page.
+    navigate('/', { replace: true })
+    await logout()
+  }
 
   return (
     <div className="mobile-layout-flex" style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
@@ -78,11 +93,15 @@ export default function AdminPanel() {
       }}>
         <div style={{ marginBottom: 20, flex: 1, overflowY: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 14px', borderBottom: '1px solid var(--border)', marginBottom: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <Avatar name="SY Admin" size={30} color="#0d968d" text="#ffffff" />
-              <div>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-1)' }}>System Admin</div>
-                <div style={{ fontSize: 10, color: 'var(--text-4)' }}>root@mediqueue.io</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+              <Avatar name={user?.name ?? 'System Admin'} size={30} color="#0d968d" text="#ffffff" />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user?.name ?? 'System Admin'}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user?.email ?? 'admin@mediqueue.io'}
+                </div>
               </div>
             </div>
             <button
@@ -108,7 +127,14 @@ export default function AdminPanel() {
         <div style={{ marginTop: 'auto' }}>
           <hr className="divider" style={{ margin: '0 0 12px' }} />
           <button className="nav-link"><Settings size={14} />Platform Settings</button>
-          <button className="nav-link"><LogOut size={14} />Sign Out</button>
+          <button
+            className="nav-link"
+            onClick={handleSignOut}
+            disabled={signingOut}
+            style={{ color: 'var(--crimson)' }}
+          >
+            <LogOut size={14} />{signingOut ? 'Signing out…' : 'Sign Out'}
+          </button>
         </div>
       </aside>
 
@@ -128,8 +154,9 @@ export default function AdminPanel() {
               <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>MediQueue Platform · v3.2.1</div>
             </div>
           </div>
-          <div style={{ marginLeft: 'auto' }} className="desktop-only">
-            <StatusBadge status="operational" />
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="desktop-only"><StatusBadge status="operational" /></span>
+            <AccountMenu compact />
           </div>
         </div>
 

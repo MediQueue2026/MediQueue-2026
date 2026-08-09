@@ -4,6 +4,7 @@ import {
   Activity, AlertCircle, Bell, BellRing, CheckCircle2, Clock, Hash, Plus, Radio,
   Search, Stethoscope, Ticket, UserX, Users, Wifi
 } from 'lucide-react'
+import AccountMenu from '../components/AccountMenu'
 import WalkinSmsModal from '../components/WalkinSmsModal'
 import PublicTvDisplay from '../components/PublicTvDisplay'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
@@ -144,12 +145,9 @@ export default function ReceptionistDesk() {
             borderRadius: 7, padding: '4px 10px', fontSize: 11.5, fontWeight: 700,
             color: 'var(--blue-dark)', flexShrink: 0,
           }}>Counter A-01</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Avatar name="RE Staff" size={28} />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1, whiteSpace: 'nowrap' }}>Reception Desk</div>
-              <div style={{ fontSize: 10, color: 'var(--text-4)', whiteSpace: 'nowrap' }} className="desktop-only">MediQueue Central Clinic</div>
-            </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1, whiteSpace: 'nowrap' }}>Reception Desk</div>
+            <div style={{ fontSize: 10, color: 'var(--text-4)', whiteSpace: 'nowrap' }} className="desktop-only">MediQueue Central Clinic</div>
           </div>
         </div>
 
@@ -159,6 +157,7 @@ export default function ReceptionistDesk() {
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>Live queue</span>
           </div>
           <div style={{ position: 'relative', cursor: 'pointer' }}><Bell size={16} color="var(--text-3)" /><span style={{ position: 'absolute', top: -3, right: -3, width: 7, height: 7, background: 'var(--crimson)', borderRadius: '50%', border: '2px solid var(--bg)' }} /></div>
+          <AccountMenu />
         </div>
       </div>
 

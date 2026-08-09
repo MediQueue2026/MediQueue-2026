@@ -1,10 +1,19 @@
 import { Router } from 'express';
 import { supabase } from '../config/supabase.js';
-import { loginUser, registerUser } from '../controllers/authController.js';
+import {
+  createStaff,
+  getMe,
+  loginUser,
+  logoutUser,
+  refreshSession,
+  registerUser,
+} from '../controllers/authController.js';
+import { authMiddleware } from '../middleware/authMiddleware.js';
+import { requireRole } from '../middleware/roleMiddleware.js';
 import { getCenters, createCenter } from '../controllers/centerController.js';
 import { createAppointment, getAppointments } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors } from '../controllers/doctorController.js';
-import { getQueue, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
+import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
 import { uploadHealthRecord, getPatientRecords } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs } from '../controllers/adminController.js';
 
@@ -78,34 +87,52 @@ router.get('/db-check', async (req, res) => {
   }
 });
 
-// Auth Routes
+// ── Auth Routes ─────────────────────────────────────────────────────────────
+// Public: anyone can attempt a sign-in, patients can self-register, and the
+// refresh endpoint authenticates via its own httpOnly cookie rather than a
+// Bearer token.
 router.post('/auth/login', loginUser);
 router.post('/auth/register', registerUser);
+router.post('/auth/refresh', refreshSession);
+router.post('/auth/logout', logoutUser);
+router.get('/auth/me', authMiddleware, getMe);
+// Staff accounts (doctor / receptionist / admin) are created by an admin only —
+// there is deliberately no self-service path to a privileged role.
+router.post('/auth/staff', authMiddleware, requireRole(['admin']), createStaff);
 
-// Center Routes
+// ── Public Routes ───────────────────────────────────────────────────────────
+// The landing page reads centres and live doctor status without signing in.
 router.get('/centers', getCenters);
-router.post('/centers', createCenter);
-
-// Doctor Routes
 router.get('/doctors', getDoctors);
-router.put('/doctors/:doctorId/status', updateDoctorStatus);
+// Token numbers and counts only — no patient identity. Safe for a lobby screen.
+router.get('/queue/board', getPublicBoard);
+
+// ── Staff Routes ────────────────────────────────────────────────────────────
+router.post('/centers', authMiddleware, requireRole(['admin']), createCenter);
+router.put(
+  '/doctors/:doctorId/status',
+  authMiddleware,
+  requireRole(['doctor', 'receptionist', 'admin']),
+  updateDoctorStatus,
+);
 
 // Appointment Routes
-router.get('/appointments', getAppointments);
-router.post('/appointments', createAppointment);
+router.get('/appointments', authMiddleware, getAppointments);
+router.post('/appointments', authMiddleware, createAppointment);
 
-// Queue & Reception Routes
-router.get('/queue', getQueue);
-router.post('/queue/walkin', issueWalkinToken);
-router.post('/queue/call-next', callNextPatient);
-router.patch('/queue/:id/status', updateQueueEntryStatus);
+// Queue & Reception Routes — the counter, the doctor's panel and admins.
+const QUEUE_ROLES = ['receptionist', 'doctor', 'admin'];
+router.get('/queue', authMiddleware, requireRole(QUEUE_ROLES), getQueue);
+router.post('/queue/walkin', authMiddleware, requireRole(QUEUE_ROLES), issueWalkinToken);
+router.post('/queue/call-next', authMiddleware, requireRole(QUEUE_ROLES), callNextPatient);
+router.patch('/queue/:id/status', authMiddleware, requireRole(QUEUE_ROLES), updateQueueEntryStatus);
 
 // Health Records Routes
-router.post('/records/upload', uploadHealthRecord);
-router.get('/records/:patientId', getPatientRecords);
+router.post('/records/upload', authMiddleware, requireRole(['doctor', 'admin']), uploadHealthRecord);
+router.get('/records/:patientId', authMiddleware, getPatientRecords);
 
 // Admin Routes
-router.put('/admin/slot-config', updateSlotConfig);
-router.get('/admin/audit-logs', getAuditLogs);
+router.put('/admin/slot-config', authMiddleware, requireRole(['admin']), updateSlotConfig);
+router.get('/admin/audit-logs', authMiddleware, requireRole(['admin']), getAuditLogs);
 
 export default router;
