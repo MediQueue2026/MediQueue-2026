@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Bell, Building2, ClipboardList, Download, FileText, Heart, Home, LogOut,
   Map, Menu, Search, Settings, Ticket, X
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import { Avatar, StatusBadge } from '../components/UIPrimitives'
 
 const DOCTORS_PUBLIC = [
@@ -30,6 +32,22 @@ export default function PatientDashboard() {
   const [docSearch, setDocSearch] = useState('')
   const [selectedSpec, setSelectedSpec] = useState('All')
   const [subscribedIds, setSubscribedIds] = useState<string[]>(['Dr. Aisha Patel', 'Dr. Ethan Carr'])
+  const [signingOut, setSigningOut] = useState(false)
+
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  const displayName = user?.name ?? 'Patient'
+  const firstName = displayName.split(' ')[0]
+
+  const handleSignOut = async () => {
+    setSigningOut(true)
+    // Navigate away first — clearing the session while still on /patient lets
+    // the route guard redirect to the login screen instead of the landing page,
+    // which reads as a failed sign-out.
+    navigate('/', { replace: true })
+    await logout()
+  }
 
   const toggleSubscribe = (docName: string) => {
     if (subscribedIds.includes(docName)) {
@@ -100,13 +118,24 @@ export default function PatientDashboard() {
         </div>
         <hr className="divider" style={{ margin: '12px 0' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 10px' }}>
-          <Avatar name="Rajan Mehta" size={32} />
-          <div style={{ overflow: 'hidden' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>Rajan Mehta</div>
-            <div style={{ fontSize: 11, color: 'var(--text-4)' }}>Patient · ID #P-4821</div>
+          <Avatar name={displayName} size={32} />
+          <div style={{ overflow: 'hidden', minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {displayName}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {user?.email ?? 'Patient'}
+            </div>
           </div>
         </div>
-        <button className="nav-link" style={{ marginTop: 4 }}><LogOut size={14} />Sign Out</button>
+        <button
+          className="nav-link"
+          onClick={handleSignOut}
+          disabled={signingOut}
+          style={{ marginTop: 4, color: 'var(--crimson)' }}
+        >
+          <LogOut size={14} />{signingOut ? 'Signing out…' : 'Sign Out'}
+        </button>
       </aside>
 
       {/* ── MAIN CONTENT AREA ── */}
@@ -136,7 +165,7 @@ export default function PatientDashboard() {
               <Bell size={17} />
               <span style={{ position: 'absolute', top: -3, right: -3, width: 8, height: 8, background: 'var(--crimson)', borderRadius: '50%', border: '2px solid white' }} />
             </div>
-            <Avatar name="Rajan Mehta" size={30} />
+            <Avatar name={displayName} size={30} />
           </div>
         </div>
 
@@ -150,7 +179,7 @@ export default function PatientDashboard() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                   <div>
                     <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text-1)', marginBottom: 4 }}>
-                      Welcome back, Rajan Mehta! 🌿
+                      Welcome back, {firstName}! 🌿
                     </h2>
                     <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
                       You have 1 active queue token for today and 2 subscribed doctor updates.
@@ -408,7 +437,9 @@ export default function PatientDashboard() {
               <div style={{ maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Full Name</label>
-                  <input className="input" defaultValue="Rajan Mehta" style={{ height: 44, fontSize: 14 }} />
+                  {/* `key` forces a remount when the signed-in user changes —
+                      an uncontrolled input ignores a new defaultValue. */}
+                  <input key={user?.id} className="input" defaultValue={displayName} style={{ height: 44, fontSize: 14 }} />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Mobile (for SMS Token Alerts)</label>

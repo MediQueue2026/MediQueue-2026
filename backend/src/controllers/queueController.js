@@ -24,6 +24,52 @@ function mapEntry(row) {
   };
 }
 
+/**
+ * GET /api/queue/board — public waiting-room board.
+ *
+ * Deliberately public, and deliberately thin: token numbers and counts only,
+ * never a patient name, phone or NIC. This is what a screen in the lobby or the
+ * public landing page may show, so it must be safe for anyone standing in the
+ * room to read. Staff use GET /api/queue for the full rows.
+ */
+export async function getPublicBoard(req, res, next) {
+  try {
+    const date = todayDate();
+    const { data, error } = await supabase
+      .from('walk_in_queue')
+      .select('doctor_id, queue_number, status, doctors(series)')
+      .eq('queue_date', date)
+      .in('status', ['waiting', 'called', 'in_progress'])
+      .order('queue_number', { ascending: true });
+
+    if (error) {
+      if (error.code === TABLE_MISSING) return res.json({ board: [], migrationPending: true });
+      throw error;
+    }
+
+    const byDoctor = new Map();
+    for (const row of data || []) {
+      const entry = byDoctor.get(row.doctor_id) ?? {
+        doctorId: row.doctor_id,
+        series: row.doctors?.series ?? '?',
+        nowServing: null,
+        waiting: 0,
+      };
+      // `called` outranks `in_progress` — the board announces the newest call.
+      if (row.status === 'called' || (row.status === 'in_progress' && !entry.nowServing)) {
+        entry.nowServing = row.queue_number;
+      } else if (row.status === 'waiting') {
+        entry.waiting += 1;
+      }
+      byDoctor.set(row.doctor_id, entry);
+    }
+
+    res.json({ board: [...byDoctor.values()] });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** GET /api/queue?date=YYYY-MM-DD — every token for the clinic on that day (defaults to today). */
 export async function getQueue(req, res, next) {
   try {

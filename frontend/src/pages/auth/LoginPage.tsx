@@ -1,191 +1,360 @@
 import React, { useState } from 'react'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { Activity, Shield, Lock, Stethoscope, User, Building2, Key, ArrowRight } from 'lucide-react'
-import { useAuth, UserRole } from '../../context/AuthContext'
+import { useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom'
+import {
+  Activity, AlertCircle, ArrowLeft, ArrowRight, CloudOff, FlaskConical,
+} from 'lucide-react'
+import { HOME_PATH, useAuth } from '../../context/AuthContext'
+import type { UserRole } from '../../context/AuthContext'
+import { ApiError, ApiOfflineError } from '../../lib/api'
+import { DEMO_ACCOUNTS, DEMO_PASSWORD } from '../../lib/demoAccounts'
 
 interface LoginPageProps {
   forcedRole?: UserRole
 }
 
+type Role = Exclude<UserRole, null>
+
+/**
+ * One sign-in screen, four portals.
+ *
+ * The layout is a split rather than a single column: the left panel carries the
+ * portal's identity and the right carries the task. That's what keeps the card
+ * short — the previous version stacked an icon tile, an eyebrow, a title, a
+ * subtitle, the form, a create-account line, a demo block, a four-link portal
+ * switcher and a back link on one vertical axis, and named the portal four
+ * separate times on the way down.
+ */
+
+/**
+ * `accent` doubles as button background behind white text and as link text on
+ * white, so each one is the shade that clears 4.5:1 both ways. The lighter
+ * emerald/amber/red these started from sat at 2.1-3.8:1 against white.
+ */
+const PORTALS: Array<{ role: Role; tab: string; name: string; blurb: string; accent: string }> = [
+  {
+    role: 'patient',
+    tab: 'Patient',
+    name: 'Patient Portal',
+    blurb: 'Track your token, book appointments, and read your records.',
+    accent: '#4F46E5',
+  },
+  {
+    role: 'doctor',
+    tab: 'Doctor',
+    name: 'Doctor Console',
+    blurb: 'Call patients, record consultations, and publish delay notices.',
+    accent: '#047857',
+  },
+  {
+    role: 'receptionist',
+    tab: 'Reception',
+    name: 'Reception Desk',
+    blurb: 'Issue walk-in tokens, run the counter queue, and send SMS alerts.',
+    accent: '#B45309',
+  },
+  {
+    role: 'admin',
+    tab: 'Admin',
+    name: 'System Admin',
+    blurb: 'Manage staff accounts, slot limits, centres, and audit logs.',
+    accent: '#B91C1C',
+  },
+]
+
+const PORTAL_PATH: Record<Role, string> = {
+  patient: '/login',
+  doctor: '/login/doctor',
+  receptionist: '/login/receptionist',
+  admin: '/login/admin',
+}
+
 export default function LoginPage({ forcedRole }: LoginPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login } = useAuth()
+  const [searchParams] = useSearchParams()
+  const { login, register, loginAsDemo, backendOffline } = useAuth()
 
-  // Determine role based on props or query/pathname
-  const getInitialRole = (): UserRole => {
-    if (forcedRole) return forcedRole
-    if (location.pathname.includes('doctor')) return 'doctor'
-    if (location.pathname.includes('receptionist')) return 'receptionist'
-    if (location.pathname.includes('admin')) return 'admin'
-    return 'patient'
-  }
+  const role: Role = forcedRole
+    ?? (location.pathname.includes('doctor') ? 'doctor'
+      : location.pathname.includes('receptionist') ? 'receptionist'
+      : location.pathname.includes('admin') ? 'admin'
+      : 'patient')
 
-  const role = getInitialRole()
+  const portal = PORTALS.find(p => p.role === role)!
+
+  const [mode, setMode] = useState<'signin' | 'signup'>(
+    searchParams.get('new') === '1' ? 'signup' : 'signin',
+  )
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [remember, setRemember] = useState(true)
+  const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [offline, setOffline] = useState(backendOffline)
 
-  const roleConfigs = {
-    patient: {
-      title: 'Patient Portal Sign In',
-      subtitle: 'Access your appointments, live token tracking, and medical records',
-      badge: 'PATIENT ACCESS',
-      accent: 'var(--blue)',
-      icon: <User size={24} color="var(--blue)" />,
-      targetPath: '/patient',
-      defaultEmail: 'patient@mediqueue.io'
-    },
-    doctor: {
-      title: 'Doctor Portal Sign In',
-      subtitle: 'Manage your daily consultations, room assignment, and delay alerts',
-      badge: 'DOCTOR CONSOLE',
-      accent: '#10B981',
-      icon: <Stethoscope size={24} color="#10B981" />,
-      targetPath: '/doctor',
-      defaultEmail: 'dr.carr@mediqueue.io'
-    },
-    receptionist: {
-      title: 'Receptionist Desk Sign In',
-      subtitle: 'Issue walk-in tokens, manage counter queue, and trigger SMS alerts',
-      badge: 'RECEPTION DESK',
-      accent: '#F59E0B',
-      icon: <Building2 size={24} color="#F59E0B" />,
-      targetPath: '/receptionist',
-      defaultEmail: 'reception@mediqueue.io'
-    },
-    admin: {
-      title: 'System Admin Console',
-      subtitle: 'Manage doctor slot limits, staff roles, and platform metrics',
-      badge: 'SYSTEM ADMIN',
-      accent: '#EF4444',
-      icon: <Shield size={24} color="#EF4444" />,
-      targetPath: '/admin',
-      defaultEmail: 'admin@mediqueue.io'
+  /** Back to where they were headed before the guard bounced them, else the role's home. */
+  const destinationFor = (signedInRole: Role) =>
+    (location.state as { from?: string } | null)?.from ?? HOME_PATH[signedInRole]
+
+  const handleFailure = (err: unknown, fallback: string) => {
+    if (err instanceof ApiOfflineError) {
+      setOffline(true)
+      setError('Cannot reach the MediQueue server. Start the backend, or continue in demo mode.')
+    } else {
+      setError(err instanceof ApiError ? err.message : fallback)
     }
   }
 
-  const config = roleConfigs[role || 'patient']
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    login(email || config.defaultEmail, role)
-    navigate(config.targetPath)
+    setError('')
+    setSubmitting(true)
+    try {
+      const user = mode === 'signup'
+        ? await register({
+            email: email.trim(),
+            password,
+            fullName: fullName.trim(),
+            phone: phone.trim() || undefined,
+            role, // the portal you signed up on decides the account's role
+          })
+        : await login(email.trim(), password)
+      navigate(destinationFor(user.role as Role), { replace: true })
+    } catch (err) {
+      handleFailure(err, mode === 'signup' ? 'Could not create your account.' : 'Sign-in failed. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
+  /** Signs in as this portal's seeded account through the ordinary login call. */
+  const handleDemoAccount = async () => {
+    setError('')
+    setSubmitting(true)
+    try {
+      const user = await login(DEMO_ACCOUNTS[role].email, DEMO_PASSWORD)
+      navigate(destinationFor(user.role as Role), { replace: true })
+    } catch (err) {
+      handleFailure(err, 'Demo sign-in failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  /** Offline escape hatch — a local session, only when the API is unreachable. */
+  const handleOfflineDemo = () => {
+    const user = loginAsDemo(role)
+    navigate(destinationFor(user.role as Role), { replace: true })
+  }
+
+  const inputStyle = { height: 42, fontSize: 14 } as const
+
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #071312 0%, #0d2623 50%, #061816 100%)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 24, position: 'relative'
-    }}>
-      {/* Background glow */}
-      <div style={{
-        position: 'absolute', width: 400, height: 400, borderRadius: '50%',
-        background: `radial-gradient(circle, ${config.accent}20 0%, transparent 70%)`,
-        pointerEvents: 'none'
-      }} />
+    <div className="auth-screen">
+      <div className="auth-card">
 
-      <div className="card glass-form-card" style={{
-        maxWidth: 440, width: '100%', padding: 32,
-        background: 'rgba(255, 255, 255, 0.94)', borderRadius: 20,
-        boxShadow: '0 20px 50px rgba(0,0,0,0.3)', position: 'relative', zIndex: 2
-      }}>
-        {/* Brand Header */}
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: 12, margin: '0 auto 12px',
-            background: `linear-gradient(135deg, ${config.accent}, #0d968d)`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: `0 6px 20px ${config.accent}40`
+        {/* ── Context ── */}
+        <aside className="auth-aside">
+          <div className="auth-aside-glow" style={{ background: `radial-gradient(circle, ${portal.accent}55, transparent 70%)` }} />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+              background: 'linear-gradient(135deg, var(--teal), var(--blue))',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Activity size={16} color="#fff" />
+            </div>
+            <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em' }}>MediQueue</span>
+          </div>
+
+          <div className="auth-aside-spacer" style={{ flex: 1, minHeight: 28 }} />
+
+          <h1 style={{
+            fontSize: 26, fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1.15,
+            marginLeft: 'auto', marginRight: 'auto', width: '100%',
           }}>
-            <Activity size={24} color="#fff" />
-          </div>
-          <div style={{
-            fontSize: 10.5, fontWeight: 800, color: config.accent,
-            letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4
-          }}>{config.badge}</div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
-            {config.title}
-          </h2>
-          <p style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 6, lineHeight: 1.5 }}>
-            {config.subtitle}
+            {portal.name}
+          </h1>
+          <p className="auth-aside-desc" style={{
+            fontSize: 13.5, lineHeight: 1.6, color: 'rgba(255,255,255,0.62)',
+            marginTop: 10, maxWidth: '34ch',
+          }}>
+            {portal.blurb}
           </p>
-        </div>
 
-        {/* Login Form */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-              User Email / ID
-            </label>
-            <div style={{ position: 'relative' }}>
-              <User size={16} color="var(--text-4)" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
-              <input
-                className="input"
-                type="email"
-                required
-                placeholder={config.defaultEmail}
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                style={{ paddingLeft: 40, height: 44, fontSize: 14 }}
-              />
-            </div>
-          </div>
+          <div className="auth-aside-spacer" style={{ flex: 1, minHeight: 28 }} />
 
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-              Password
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Lock size={16} color="var(--text-4)" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
-              <input
-                className="input"
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                style={{ paddingLeft: 40, height: 44, fontSize: 14 }}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--text-3)' }}>
-              <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} /> Remember me
-            </label>
-            <span style={{ color: config.accent, fontWeight: 600, cursor: 'pointer' }}>Forgot Password?</span>
-          </div>
-
-          <button
-            type="submit"
-            className="btn btn-primary"
+          <Link
+            to="/"
+            className="auth-aside-back"
             style={{
-              width: '100%', height: 46, fontSize: 14.5, fontWeight: 800,
-              background: `linear-gradient(135deg, ${config.accent}, #0d968d)`,
-              borderColor: 'transparent', borderRadius: 10, marginTop: 8, gap: 8
+              display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none',
+              fontSize: 12.5, color: 'rgba(255,255,255,0.55)', width: 'fit-content',
             }}
           >
-            Sign In to {config.badge} <ArrowRight size={16} />
-          </button>
-        </form>
+            <ArrowLeft size={13} /> Back to MediQueue
+          </Link>
+        </aside>
 
-        {/* Portal Switcher Footer Links */}
-        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)', fontSize: 12, textAlign: 'center', color: 'var(--text-4)' }}>
-          <div style={{ marginBottom: 8, fontWeight: 600 }}>Switch Login Portal:</div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <Link to="/login" style={{ color: role === 'patient' ? config.accent : 'var(--text-3)', fontWeight: role === 'patient' ? 700 : 400, textDecoration: 'none' }}>Patient</Link>
-            <span>•</span>
-            <Link to="/login/doctor" style={{ color: role === 'doctor' ? config.accent : 'var(--text-3)', fontWeight: role === 'doctor' ? 700 : 400, textDecoration: 'none' }}>Doctor</Link>
-            <span>•</span>
-            <Link to="/login/receptionist" style={{ color: role === 'receptionist' ? config.accent : 'var(--text-3)', fontWeight: role === 'receptionist' ? 700 : 400, textDecoration: 'none' }}>Receptionist</Link>
-            <span>•</span>
-            <Link to="/login/admin" style={{ color: role === 'admin' ? config.accent : 'var(--text-3)', fontWeight: role === 'admin' ? 700 : 400, textDecoration: 'none' }}>Admin</Link>
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <Link to="/" style={{ color: 'var(--text-4)', textDecoration: 'none' }}>← Back to Public Landing</Link>
+        {/* ── Task ── */}
+        <div className="auth-form-pane">
+          {/* Switching portal is navigation, so it sits above the form rather
+              than in a link cluster underneath it. */}
+          <nav className="auth-tabs" aria-label="Choose portal">
+            {PORTALS.map(p => (
+              <Link
+                key={p.role}
+                to={PORTAL_PATH[p.role]}
+                className={`auth-tab ${p.role === role ? 'active' : ''}`}
+                aria-current={p.role === role ? 'page' : undefined}
+                style={p.role === role ? { color: p.accent } : undefined}
+              >
+                {p.tab}
+              </Link>
+            ))}
+          </nav>
+
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
+            {mode === 'signup' ? 'Create your account' : 'Sign in'}
+          </h2>
+
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 13, marginTop: 18 }}>
+            {mode === 'signup' && (
+              <>
+                <div>
+                  <label className="auth-field-label" htmlFor="auth-name">Full name</label>
+                  <input
+                    id="auth-name" className="input" required autoComplete="name"
+                    placeholder="Sunil Perera"
+                    value={fullName}
+                    onChange={e => { setFullName(e.target.value); setError('') }}
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="auth-field-label" htmlFor="auth-phone">
+                    Mobile <span style={{ fontWeight: 400, color: 'var(--text-4)' }}>· for queue SMS</span>
+                  </label>
+                  <input
+                    id="auth-phone" className="input" autoComplete="tel"
+                    placeholder="0771234567"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    style={inputStyle}
+                  />
+                </div>
+              </>
+            )}
+
+            <div>
+              <label className="auth-field-label" htmlFor="auth-email">Email</label>
+              <input
+                id="auth-email" className="input" type="email" required autoComplete="username"
+                placeholder={DEMO_ACCOUNTS[role].email}
+                value={email}
+                onChange={e => { setEmail(e.target.value); setError('') }}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <label className="auth-field-label" htmlFor="auth-password">Password</label>
+                {mode === 'signin' && (
+                  <button type="button" style={{
+                    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                    fontSize: 11.5, color: 'var(--text-4)', marginBottom: 6,
+                  }}>
+                    Forgot?
+                  </button>
+                )}
+              </div>
+              <input
+                id="auth-password" className="input" type="password" required
+                minLength={mode === 'signup' ? 8 : undefined}
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'}
+                value={password}
+                onChange={e => { setPassword(e.target.value); setError('') }}
+                style={inputStyle}
+              />
+            </div>
+
+            {error && (
+              <div role="alert" style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, fontWeight: 600,
+                color: 'var(--crimson)', background: 'var(--crimson-dim)',
+                border: '1px solid var(--crimson-border)', borderRadius: 9, padding: '9px 11px',
+                lineHeight: 1.45,
+              }}>
+                <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} /> {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="btn"
+              style={{
+                width: '100%', height: 44, fontSize: 14.5, fontWeight: 700, borderRadius: 9,
+                background: portal.accent, color: '#fff', gap: 7, marginTop: 3,
+                opacity: submitting ? 0.6 : 1, cursor: submitting ? 'wait' : 'pointer',
+              }}
+            >
+              {submitting
+                ? (mode === 'signup' ? 'Creating account…' : 'Signing in…')
+                : <>{mode === 'signup' ? 'Create account' : 'Sign in'} <ArrowRight size={15} /></>}
+            </button>
+
+            <p style={{ fontSize: 12.5, color: 'var(--text-4)', textAlign: 'center', margin: '2px 0 0' }}>
+              {mode === 'signin' ? "Don't have an account? " : 'Already registered? '}
+              <button
+                type="button"
+                onClick={() => { setMode(m => (m === 'signin' ? 'signup' : 'signin')); setError('') }}
+                style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  color: portal.accent, fontWeight: 700, fontSize: 12.5,
+                }}
+              >
+                {mode === 'signin' ? 'Create one' : 'Sign in'}
+              </button>
+            </p>
+
+            {offline && (
+              <div style={{
+                border: '1px dashed var(--amber-border)', background: 'var(--amber-dim)',
+                borderRadius: 9, padding: '11px 12px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 700, color: 'var(--amber)', marginBottom: 5 }}>
+                  <CloudOff size={13} /> Backend offline
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 9 }}>
+                  Explore with bundled sample data. Nothing will be saved.
+                </div>
+                <button type="button" onClick={handleOfflineDemo} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center' }}>
+                  Continue in demo mode
+                </button>
+              </div>
+            )}
+          </form>
+
+          {/* Testing shortcut — deliberately quieter than the primary action. */}
+          <div className="auth-demo">
+            <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Demo · {DEMO_ACCOUNTS[role].email}
+            </span>
+            <button
+              type="button"
+              onClick={handleDemoAccount}
+              disabled={submitting}
+              className="btn btn-ghost btn-sm"
+              style={{ gap: 5, flexShrink: 0 }}
+            >
+              <FlaskConical size={12} /> Use
+            </button>
           </div>
         </div>
       </div>
