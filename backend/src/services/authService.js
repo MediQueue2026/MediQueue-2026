@@ -26,7 +26,7 @@ import { supabase } from '../config/supabase.js';
 
 const ACCESS_TTL_SECONDS = 15 * 60;            // 15 minutes
 const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;  // 7 days
-const BCRYPT_ROUNDS = 12;
+export const BCRYPT_ROUNDS = 12;
 
 export const ALL_ROLES = ['patient', 'doctor', 'receptionist', 'admin'];
 
@@ -136,8 +136,8 @@ async function recordLoginAttempt({ userId, email, role, status, failureReason, 
       failure_reason: failureReason ?? null,
     })
     .then(
-      () => {},
-      () => {},
+      () => { },
+      () => { },
     );
 }
 

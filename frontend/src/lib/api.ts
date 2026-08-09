@@ -129,14 +129,33 @@ export interface AuthSessionResponse {
   expiresIn: number
 }
 
+export interface DaySchedule {
+  available: boolean
+  start: string
+  end: string
+}
+
+export interface WeeklyHours {
+  [k: string]: DaySchedule
+  mon: DaySchedule
+  tue: DaySchedule
+  wed: DaySchedule
+  thu: DaySchedule
+  fri: DaySchedule
+  sat: DaySchedule
+  sun: DaySchedule
+}
+
 export interface ApiDoctor {
   id: string
+  centerId?: string
   name: string
   dept: string
   room: string
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
   avgConsultMinutes: number
+  availableHours?: WeeklyHours
 }
 
 export interface ApiQueueEntry {
@@ -201,7 +220,27 @@ export const api = {
   }) => request<{ user: ApiUser }>('/auth/staff', { method: 'POST', body: JSON.stringify(input) }),
 
   // ── Clinic data ──
+  getCenters: () => request<{ centers: { id: string; name: string }[] }>('/centers'),
   getDoctors: () => request<{ doctors: ApiDoctor[] }>('/doctors'),
+
+  createDoctor: (input: {
+    fullName: string
+    centerId: string
+    specialization: string
+    roomNumber: string
+    phone?: string
+    email?: string
+    password?: string
+    availableHours: WeeklyHours
+  }) => request<{ message: string; doctor: any }>('/doctors', { method: 'POST', body: JSON.stringify(input) }),
+
+  updateDoctor: (doctorId: string, input: {
+    fullName?: string
+    specialization?: string
+    roomNumber?: string
+    phone?: string
+    availableHours?: WeeklyHours
+  }) => request<{ message: string }>('/doctors/' + doctorId, { method: 'PUT', body: JSON.stringify(input) }),
 
   /** Public lobby board — token numbers and counts only, never patient identity. */
   getPublicBoard: () =>
@@ -230,3 +269,5 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 }
+
+export default api
