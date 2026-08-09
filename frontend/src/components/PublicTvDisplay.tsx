@@ -1,29 +1,62 @@
 import { useState } from 'react'
 import { X, Volume2, Bell, Clock, ShieldCheck, Stethoscope, Users, Wifi } from 'lucide-react'
+import { entryToken } from '../lib/receptionQueue'
+import type { QueueEntry, ReceptionDoctor } from '../lib/receptionQueue'
 
-export default function PublicTvDisplay({ isOpen, onClose }: {
+/** Fallback board content for when the display is opened standalone (/tv-display). */
+const DEMO_QUEUE = [
+  { token: '#A-12', name: 'Kasun Perera', est: '5 min', status: 'Next In Line' },
+  { token: '#A-13', name: 'Dilini Fernando', est: '12 min', status: 'Waiting' },
+  { token: '#A-14', name: 'Rajan Mehta', est: '18 min', status: 'Waiting' },
+  { token: '#A-15', name: 'Sunil W.', est: '25 min', status: 'Waiting' },
+  { token: '#A-16', name: 'Anura Kumara', est: '32 min', status: 'Waiting' },
+]
+
+export default function PublicTvDisplay({
+  isOpen, onClose, doctor, current, waiting, estimateWait, onCallNext,
+}: {
   isOpen: boolean
   onClose: () => void
+  /** Live props — supplied by the Reception Desk. Omitted on the standalone route. */
+  doctor?: ReceptionDoctor
+  current?: QueueEntry
+  waiting?: QueueEntry[]
+  estimateWait?: (entry: QueueEntry) => number
+  onCallNext?: () => void
 }) {
-  const [currentServing, setCurrentServing] = useState('#A-11')
-  const [patientName, setPatientName] = useState('Nimal Silva')
   const [flash, setFlash] = useState(false)
+  // Standalone demo state, only used when no live queue is passed in.
+  const [demoIndex, setDemoIndex] = useState(0)
 
-  const waitingQueue = [
-    { token: '#A-12', name: 'Kasun Perera',       est: '5 min',  status: 'Next In Line' },
-    { token: '#A-13', name: 'Dilini Fernando',     est: '12 min', status: 'Waiting' },
-    { token: '#A-14', name: 'Rajan Mehta',         est: '18 min', status: 'Waiting' },
-    { token: '#A-15', name: 'Sunil W.',            est: '25 min', status: 'Waiting' },
-    { token: '#A-16', name: 'Anura Kumara',        est: '32 min', status: 'Waiting' },
-  ]
+  const isLive = waiting !== undefined
+
+  const currentServing = isLive
+    ? (current ? entryToken(current) : '—')
+    : (demoIndex === 0 ? '#A-11' : '#A-12')
+  const patientName = isLive
+    ? (current?.patientName ?? 'Waiting for next patient')
+    : (demoIndex === 0 ? 'Nimal Silva' : 'Kasun Perera')
+
+  const waitingQueue = isLive
+    ? waiting!.map((entry, i) => ({
+        token: entryToken(entry),
+        name: entry.patientName,
+        est: `${estimateWait ? estimateWait(entry) : (i + 1) * 10} min`,
+        status: i === 0 ? 'Next In Line' : 'Waiting',
+      }))
+    : DEMO_QUEUE
+
+  const doctorLine = doctor
+    ? { name: `${doctor.name} · ${doctor.dept}`, room: doctor.room }
+    : { name: 'Dr. Ethan Carr · General Medicine', room: 'Room 04' }
 
   if (!isOpen) return null
 
   const handleCallNext = () => {
     setFlash(true)
     setTimeout(() => setFlash(false), 2500)
-    setCurrentServing(prev => prev === '#A-11' ? '#A-12' : '#A-13')
-    setPatientName(prev => prev === 'Nimal Silva' ? 'Kasun Perera' : 'Dilini Fernando')
+    if (isLive) onCallNext?.()
+    else setDemoIndex(i => (i === 0 ? 1 : 0))
   }
 
   return (
@@ -63,9 +96,9 @@ export default function PublicTvDisplay({ isOpen, onClose }: {
               MediQueue — Live Consultation Board
             </h1>
             <div style={{ fontSize: 'clamp(11px, 1.5vw, 13px)', color: 'rgba(255,255,255,0.65)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span>Dr. Ethan Carr · General Medicine</span>
+              <span>{doctorLine.name}</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
-              <span style={{ color: '#10B981', fontWeight: 700 }}>Room 04 (Floor 1)</span>
+              <span style={{ color: '#10B981', fontWeight: 700 }}>{doctorLine.room} (Floor 1)</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
               <span style={{ color: '#10B981', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <Wifi size={11} /> Live
@@ -137,7 +170,7 @@ export default function PublicTvDisplay({ isOpen, onClose }: {
                 fontSize: 'clamp(11px, 1.5vw, 15px)',
                 fontWeight: 900, letterSpacing: '0.10em', textTransform: 'uppercase', color: '#10B981',
               }}>
-                Now Serving · Room 04
+                Now Serving · {doctorLine.room}
               </span>
             </div>
 
@@ -175,7 +208,7 @@ export default function PublicTvDisplay({ isOpen, onClose }: {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Volume2 size={18} color="#10B981" />
               <span style={{ fontSize: 'clamp(10px, 1.3vw, 13px)', color: 'rgba(255,255,255,0.75)' }}>
-                Please proceed to Room 04 when your token flashes
+                Please proceed to {doctorLine.room} when your token flashes
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'clamp(10px, 1.2vw, 13px)', fontWeight: 700, color: '#10b3a8', flexShrink: 0 }}>
@@ -214,6 +247,14 @@ export default function PublicTvDisplay({ isOpen, onClose }: {
 
           {/* Queue list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
+            {waitingQueue.length === 0 && (
+              <div style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: 'rgba(255,255,255,0.4)', fontSize: 'clamp(12px, 1.6vw, 15px)',
+              }}>
+                No patients waiting
+              </div>
+            )}
             {waitingQueue.map((item, i) => (
               <div
                 key={i}

@@ -1,27 +1,185 @@
-import { evaluatePatientNoShowStatus } from '../services/noShowService.js';
+import { supabase } from '../config/supabase.js';
 
-export async function issueWalkinToken(req, res, next) {
+const TABLE_MISSING = 'PGRST205'; // PostgREST: table not found in schema cache
+const UNIQUE_VIOLATION = '23505';
+
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Maps a `walk_in_queue` row (joined to its doctor's series letter) onto the shape the Reception Desk expects. */
+function mapEntry(row) {
+  return {
+    id: row.id,
+    doctorId: row.doctor_id,
+    series: row.doctors?.series ?? '?',
+    tokenNumber: row.queue_number,
+    patientName: row.patient_name,
+    nic: row.nic ?? undefined,
+    phone: row.sms_phone ?? '',
+    source: row.source,
+    status: row.status,
+    issuedAt: row.checked_in_at,
+    calledAt: row.called_at ?? undefined,
+  };
+}
+
+/** GET /api/queue?date=YYYY-MM-DD — every token for the clinic on that day (defaults to today). */
+export async function getQueue(req, res, next) {
   try {
-    const { patientName, nic, phone, doctorId } = req.body;
-    const noShowEval = await evaluatePatientNoShowStatus(nic);
+    const date = req.query.date || todayDate();
+    const { data, error } = await supabase
+      .from('walk_in_queue')
+      .select('*, doctors(series)')
+      .eq('queue_date', date)
+      .order('queue_number', { ascending: true });
 
-    const tokenNumber = `#A-${Math.floor(Math.random() * 30 + 10)}`;
-    res.status(201).json({
-      message: 'Walk-in token issued',
-      token: tokenNumber,
-      patientName,
-      isLateNumber: noShowEval.shouldAssignLateNumber,
-      status: noShowEval.shouldAssignLateNumber ? 'Late Queue' : 'Waiting in Lobby'
-    });
+    if (error) {
+      if (error.code === TABLE_MISSING) {
+        // Migration 002 hasn't been run against this project yet.
+        return res.json({ entries: [], migrationPending: true });
+      }
+      throw error;
+    }
+
+    res.json({ entries: (data || []).map(mapEntry) });
   } catch (err) {
     next(err);
   }
 }
 
+/**
+ * POST /api/queue/walkin
+ * `online` takes the next sequential number for that doctor today; `physical`
+ * records the number already printed on the paper token and rejects a repeat.
+ */
+export async function issueWalkinToken(req, res, next) {
+  try {
+    const { doctorId, patientName, nic, phone, source, tokenNumber } = req.body;
+    const name = (patientName || '').trim();
+
+    if (!name) { res.status(400); throw new Error('Patient name is required.'); }
+    if (!doctorId) { res.status(400); throw new Error('Select a doctor before issuing a token.'); }
+
+    const today = todayDate();
+    const isPhysical = source === 'physical';
+    let queueNumber;
+
+    if (isPhysical) {
+      queueNumber = Number(tokenNumber);
+      if (!Number.isInteger(queueNumber) || queueNumber < 1) {
+        res.status(400); throw new Error('Enter the number printed on the paper token.');
+      }
+      const { data: existing } = await supabase
+        .from('walk_in_queue')
+        .select('id')
+        .eq('doctor_id', doctorId).eq('queue_date', today).eq('queue_number', queueNumber)
+        .maybeSingle();
+      if (existing) {
+        res.status(409); throw new Error(`Token number ${queueNumber} has already been issued today.`);
+      }
+    } else {
+      const { data: maxRow } = await supabase
+        .from('walk_in_queue')
+        .select('queue_number')
+        .eq('doctor_id', doctorId).eq('queue_date', today)
+        .order('queue_number', { ascending: false })
+        .limit(1).maybeSingle();
+      queueNumber = (maxRow?.queue_number ?? 0) + 1;
+    }
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from('walk_in_queue')
+      .insert([{
+        doctor_id: doctorId,
+        patient_name: name,
+        nic: nic?.trim() || null,
+        sms_phone: phone?.trim() || null,
+        queue_date: today,
+        queue_number: queueNumber,
+        source: isPhysical ? 'physical' : 'online',
+        status: 'waiting',
+      }])
+      .select('*, doctors(series)')
+      .single();
+
+    if (insertErr) {
+      if (insertErr.code === UNIQUE_VIOLATION) {
+        res.status(409); throw new Error(`Token number ${queueNumber} has already been issued today.`);
+      }
+      throw insertErr;
+    }
+
+    res.status(201).json({ entry: mapEntry(inserted) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/queue/call-next
+ * A doctor has one room, so exactly one token is live at a time: announcing
+ * the next one closes out whoever was live, then calls the lowest-numbered
+ * waiting token. Returns the doctor's full updated queue for that day.
+ */
 export async function callNextPatient(req, res, next) {
   try {
     const { doctorId } = req.body;
-    res.json({ message: 'Next patient called', currentServing: '#A-12', doctorId });
+    if (!doctorId) { res.status(400); throw new Error('doctorId is required.'); }
+    const today = todayDate();
+
+    const { data: live } = await supabase
+      .from('walk_in_queue').select('id')
+      .eq('doctor_id', doctorId).eq('queue_date', today)
+      .in('status', ['called', 'in_progress']);
+
+    if (live && live.length > 0) {
+      await supabase.from('walk_in_queue').update({ status: 'completed' }).in('id', live.map(r => r.id));
+    }
+
+    const { data: nextWaiting } = await supabase
+      .from('walk_in_queue').select('id')
+      .eq('doctor_id', doctorId).eq('queue_date', today).eq('status', 'waiting')
+      .order('queue_number', { ascending: true })
+      .limit(1).maybeSingle();
+
+    if (nextWaiting) {
+      await supabase.from('walk_in_queue')
+        .update({ status: 'called', called_at: new Date().toISOString() })
+        .eq('id', nextWaiting.id);
+    }
+
+    const { data: updated, error } = await supabase
+      .from('walk_in_queue').select('*, doctors(series)')
+      .eq('doctor_id', doctorId).eq('queue_date', today)
+      .order('queue_number', { ascending: true });
+    if (error) throw error;
+
+    res.json({ entries: (updated || []).map(mapEntry) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** PATCH /api/queue/:id/status — used for "Done" / "No-Show" / "Mark Complete". */
+export async function updateQueueEntryStatus(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const allowed = ['waiting', 'called', 'in_progress', 'completed', 'left'];
+    if (!allowed.includes(status)) {
+      res.status(400); throw new Error('Invalid status.');
+    }
+
+    const { data, error } = await supabase
+      .from('walk_in_queue')
+      .update({ status })
+      .eq('id', id)
+      .select('*, doctors(series)')
+      .single();
+    if (error) throw error;
+
+    res.json({ entry: mapEntry(data) });
   } catch (err) {
     next(err);
   }
