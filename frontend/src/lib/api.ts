@@ -121,6 +121,7 @@ export interface ApiUser {
   role: ApiUserRole
   avatarUrl: string | null
   isActive: boolean
+  createdAt?: string | null
 }
 
 export interface AuthSessionResponse {
@@ -129,33 +130,16 @@ export interface AuthSessionResponse {
   expiresIn: number
 }
 
-export interface DaySchedule {
-  available: boolean
-  start: string
-  end: string
-}
-
-export interface WeeklyHours {
-  [k: string]: DaySchedule
-  mon: DaySchedule
-  tue: DaySchedule
-  wed: DaySchedule
-  thu: DaySchedule
-  fri: DaySchedule
-  sat: DaySchedule
-  sun: DaySchedule
-}
-
 export interface ApiDoctor {
   id: string
-  centerId?: string
   name: string
   dept: string
   room: string
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
   avgConsultMinutes: number
-  availableHours?: WeeklyHours
+  centerId?: string | null
+  centerName?: string | null
 }
 
 export interface ApiQueueEntry {
@@ -191,6 +175,29 @@ export interface IssueWalkinInput {
   tokenNumber?: number
 }
 
+export interface ApiCenter {
+  id: string
+  name: string
+  address: string
+  city: string
+  opening_hours: string
+  services: string[]
+  phone?: string
+  status?: 'operational' | 'maintenance' | 'closed'
+  created_at?: string
+}
+
+export interface AuditLog {
+  id: string
+  time: string
+  actor: string
+  actor_role: 'receptionist' | 'patient' | 'doctor' | 'admin' | 'system'
+  event_type: 'approval' | 'request' | 'token_issued' | 'no_show' | 'prescription' | 'system'
+  action: string
+  center: string
+  status: 'approved' | 'pending' | 'completed' | 'rejected'
+}
+
 export const api = {
   // ── Auth ──
   login: (email: string, password: string) =>
@@ -219,32 +226,78 @@ export const api = {
     email: string; password: string; fullName: string; phone?: string; role: ApiUserRole
   }) => request<{ user: ApiUser }>('/auth/staff', { method: 'POST', body: JSON.stringify(input) }),
 
+  getUsers: () => request<{ users: ApiUser[] }>('/users'),
+
+  updateUser: (id: string, updates: Partial<ApiUser> & { isActive?: boolean; fullName?: string; email?: string; phone?: string | null; role?: ApiUserRole }) => request<{ user: ApiUser }>(`/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      full_name: updates.fullName,
+      email: updates.email,
+      phone: updates.phone,
+      role: updates.role,
+      is_active: updates.isActive,
+    }),
+  }),
+
+  deleteUser: (id: string) => request<{ message: string }>(`/users/${id}`, {
+    method: 'DELETE',
+  }),
+
   // ── Clinic data ──
-  getCenters: () => request<{ centers: { id: string; name: string }[] }>('/centers'),
   getDoctors: () => request<{ doctors: ApiDoctor[] }>('/doctors'),
 
-  createDoctor: (input: {
-    fullName: string
-    centerId: string
-    specialization: string
-    roomNumber: string
-    phone?: string
-    email?: string
-    password?: string
-    availableHours: WeeklyHours
-  }) => request<{ message: string; doctor: any }>('/doctors', { method: 'POST', body: JSON.stringify(input) }),
+  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; roomNumber?: string; specialization?: string; currentStatus?: string }>) =>
+    request<{ doctor: ApiDoctor }>(`/doctors/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        centerId: updates.centerId,
+        roomNumber: updates.roomNumber,
+        specialization: updates.specialization,
+        currentStatus: updates.currentStatus,
+      }),
+    }),
 
-  updateDoctor: (doctorId: string, input: {
-    fullName?: string
-    specialization?: string
-    roomNumber?: string
-    phone?: string
-    availableHours?: WeeklyHours
-  }) => request<{ message: string }>('/doctors/' + doctorId, { method: 'PUT', body: JSON.stringify(input) }),
-
-  /** Public lobby board — token numbers and counts only, never patient identity. */
+  getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
+
+  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; status?: 'operational' | 'maintenance' | 'closed' }) =>
+    request<{ message: string; center: ApiCenter }>('/centers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  updateCenter: (id: string, updates: Partial<{ name: string; city: string; address: string; openingHours: string; services: string[]; phone: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
+    request<{ message: string; center: ApiCenter }>(`/centers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    }),
+
+  deleteCenter: (id: string) => request<{ message: string }>(`/centers/${id}`, {
+    method: 'DELETE',
+  }),
+
+  getAuditLogs: () => request<{ logs: AuditLog[]; source: 'database' | 'dummy' }>('/admin/audit-logs'),
+
+  updateAuditLogStatus: (id: string, status: AuditLog['status']) =>
+    request<{ message: string; entry: AuditLog | null }>(`/admin/audit-logs/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  createAuditLog: (entry: Omit<AuditLog, 'id' | 'time'>) =>
+    request<{ message: string; entry: AuditLog | null }>('/admin/audit-logs', {
+      method: 'POST',
+      body: JSON.stringify({
+        actor_name: entry.actor,
+        actor_role: entry.actor_role,
+        event_type: entry.event_type,
+        action: entry.action,
+        center_name: entry.center,
+        status: entry.status,
+      }),
+    }),
+
 
   getQueue: (date?: string) =>
     request<{ entries: ApiQueueEntry[]; migrationPending?: boolean }>(
@@ -269,5 +322,3 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 }
-
-export default api

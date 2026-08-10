@@ -47,8 +47,6 @@ export interface QueueEntry {
   calledAt?: Date
 }
 
-import type { WeeklyHours } from './api'
-
 export interface ReceptionDoctor {
   /** DB: doctors.id */
   id: string
@@ -62,7 +60,6 @@ export interface ReceptionDoctor {
   status: 'active' | 'break' | 'delayed' | 'offline'
   /** Drives the estimated-wait projection. */
   avgConsultMinutes: number
-  availableHours?: WeeklyHours
 }
 
 export interface IssueTokenInput {

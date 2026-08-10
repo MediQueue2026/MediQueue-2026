@@ -26,7 +26,7 @@ import { supabase } from '../config/supabase.js';
 
 const ACCESS_TTL_SECONDS = 15 * 60;            // 15 minutes
 const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;  // 7 days
-export const BCRYPT_ROUNDS = 12;
+const BCRYPT_ROUNDS = 12;
 
 export const ALL_ROLES = ['patient', 'doctor', 'receptionist', 'admin'];
 
@@ -136,8 +136,8 @@ async function recordLoginAttempt({ userId, email, role, status, failureReason, 
       failure_reason: failureReason ?? null,
     })
     .then(
-      () => { },
-      () => { },
+      () => {},
+      () => {},
     );
 }
 
@@ -285,7 +285,7 @@ export async function register({ email, password, fullName, phone, role }, req) 
  * Series letters are handed out in creation order; past Z we fall back to a
  * digit so an insert can never fail on a 26th doctor.
  */
-async function ensureDoctorProfile(user) {
+export async function ensureDoctorProfile(user) {
   if (user.role !== 'doctor') return;
 
   const { data: existing } = await supabase

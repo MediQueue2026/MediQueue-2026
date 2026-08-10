@@ -1,15 +1,27 @@
 import { useState } from 'react'
 import { X, Building2, Plus, CheckCircle2 } from 'lucide-react'
+import type { ApiCenter } from '../lib/api'
 
 export default function AddCenterModal({ isOpen, onClose, onAdd }: {
   isOpen: boolean
   onClose: () => void
-  onAdd?: (centerData: { name: string; city: string; docs: number; rooms: number }) => void
+  onAdd?: (centerData: {
+    name: string
+    city: string
+    address?: string
+    openingHours?: string
+    services?: string[]
+    phone?: string
+    status?: ApiCenter['status']
+  }) => void
 }) {
   const [name, setName] = useState('')
   const [city, setCity] = useState('')
-  const [docs, setDocs] = useState(5)
-  const [rooms, setRooms] = useState(8)
+  const [address, setAddress] = useState('')
+  const [openingHours, setOpeningHours] = useState('08:00 - 18:00')
+  const [services, setServices] = useState('General Medicine, Cardiology')
+  const [phone, setPhone] = useState('')
+  const [status, setStatus] = useState<ApiCenter['status']>('operational')
   const [submitted, setSubmitted] = useState(false)
 
   if (!isOpen) return null
@@ -18,12 +30,25 @@ export default function AddCenterModal({ isOpen, onClose, onAdd }: {
     e.preventDefault()
     setSubmitted(true)
     setTimeout(() => {
-      onAdd?.({ name, city, docs, rooms })
+      onAdd?.({
+        name,
+        city,
+        address: address || city,
+        openingHours,
+        services: services.split(',').map(service => service.trim()).filter(Boolean),
+        phone: phone || undefined,
+        status,
+      })
       setSubmitted(false)
       setName('')
       setCity('')
+      setAddress('')
+      setOpeningHours('08:00 - 18:00')
+      setServices('General Medicine, Cardiology')
+      setPhone('')
+      setStatus('operational')
       onClose()
-    }, 1000)
+    }, 300)
   }
 
   return (
@@ -36,8 +61,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd }: {
       padding: 16
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 540, maxHeight: '90vh',
-        background: 'rgba(255, 255, 255, 0.88)',
+        width: '100%', maxWidth: 600, maxHeight: '90vh',
+        background: 'rgba(255, 255, 255, 0.92)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(18, 198, 186, 0.28)',
@@ -94,45 +119,88 @@ export default function AddCenterModal({ isOpen, onClose, onAdd }: {
               />
             </div>
 
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  City / Location
+                </label>
+                <input
+                  required
+                  className="input"
+                  placeholder="e.g. Colombo 07"
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Address
+                </label>
+                <input
+                  required
+                  className="input"
+                  placeholder="e.g. 123 Medical Plaza"
+                  value={address}
+                  onChange={e => setAddress(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Opening Hours
+                </label>
+                <input
+                  className="input"
+                  placeholder="e.g. 08:00 - 18:00"
+                  value={openingHours}
+                  onChange={e => setOpeningHours(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Phone
+                </label>
+                <input
+                  className="input"
+                  placeholder="e.g. 0112345678"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
+            </div>
+
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                City / Location
+                Services (comma separated)
               </label>
               <input
-                required
                 className="input"
-                placeholder="e.g. Negombo or Kurunegala"
-                value={city}
-                onChange={e => setCity(e.target.value)}
+                value={services}
+                onChange={e => setServices(e.target.value)}
                 style={{ height: 44, fontSize: 14 }}
               />
             </div>
 
-            <div className="form-responsive-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Doctors Capacity
-                </label>
-                <input
-                  type="number"
-                  className="input"
-                  value={docs}
-                  onChange={e => setDocs(Number(e.target.value))}
-                  style={{ height: 44, fontSize: 14 }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Consultation Rooms
-                </label>
-                <input
-                  type="number"
-                  className="input"
-                  value={rooms}
-                  onChange={e => setRooms(Number(e.target.value))}
-                  style={{ height: 44, fontSize: 14 }}
-                />
-              </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                Initial Status
+              </label>
+              <select
+                className="input"
+                value={status}
+                onChange={e => setStatus(e.target.value as ApiCenter['status'])}
+                style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
+              >
+                <option value="operational">Operational</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="closed">Closed</option>
+              </select>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
