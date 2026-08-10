@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { ensureDoctorProfile } from '../services/authService.js';
 
 // ── Dummy seed logs used when the audit_logs table is empty or missing ──────
 const DUMMY_AUDIT_LOGS = [
@@ -103,6 +104,91 @@ const DUMMY_AUDIT_LOGS = [
     status: 'approved'
   }
 ];
+
+function mapDbUserToPublic(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    fullName: row.full_name ?? row.fullName ?? '',
+    phone: row.phone ?? null,
+    role: row.role,
+    avatarUrl: row.avatar_url ?? row.avatarUrl ?? null,
+    createdAt: row.created_at ?? row.createdAt ?? null,
+    isActive: row.is_active !== false,
+  };
+}
+
+export async function getUsers(req, res, next) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, email, full_name, phone, role, avatar_url, created_at, is_active')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ users: (data || []).map(mapDbUserToPublic) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateUser(req, res, next) {
+  try {
+    const { id } = req.params;
+    const updates = {};
+
+    if (typeof req.body.full_name === 'string') updates.full_name = req.body.full_name;
+    if (typeof req.body.email === 'string') updates.email = req.body.email;
+    if (req.body.phone !== undefined) updates.phone = req.body.phone;
+    if (typeof req.body.role === 'string') updates.role = req.body.role;
+    if (typeof req.body.is_active === 'boolean') updates.is_active = req.body.is_active;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided for update' });
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .update(updates)
+      .eq('id', id)
+      .select('id, email, full_name, phone, role, avatar_url, created_at, is_active')
+      .single();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    const publicUser = mapDbUserToPublic(data);
+    if (updates.role === 'doctor') {
+      await ensureDoctorProfile(publicUser);
+    }
+
+    res.json({ user: publicUser });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteUser(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ message: 'User deleted successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
 
 export async function updateSlotConfig(req, res, next) {
   try {

@@ -121,6 +121,7 @@ export interface ApiUser {
   role: ApiUserRole
   avatarUrl: string | null
   isActive: boolean
+  createdAt?: string | null
 }
 
 export interface AuthSessionResponse {
@@ -137,6 +138,8 @@ export interface ApiDoctor {
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
   avgConsultMinutes: number
+  centerId?: string | null
+  centerName?: string | null
 }
 
 export interface ApiQueueEntry {
@@ -180,6 +183,7 @@ export interface ApiCenter {
   opening_hours: string
   services: string[]
   phone?: string
+  status?: 'operational' | 'maintenance' | 'closed'
   created_at?: string
 }
 
@@ -222,24 +226,56 @@ export const api = {
     email: string; password: string; fullName: string; phone?: string; role: ApiUserRole
   }) => request<{ user: ApiUser }>('/auth/staff', { method: 'POST', body: JSON.stringify(input) }),
 
+  getUsers: () => request<{ users: ApiUser[] }>('/users'),
+
+  updateUser: (id: string, updates: Partial<ApiUser> & { isActive?: boolean; fullName?: string; email?: string; phone?: string | null; role?: ApiUserRole }) => request<{ user: ApiUser }>(`/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      full_name: updates.fullName,
+      email: updates.email,
+      phone: updates.phone,
+      role: updates.role,
+      is_active: updates.isActive,
+    }),
+  }),
+
+  deleteUser: (id: string) => request<{ message: string }>(`/users/${id}`, {
+    method: 'DELETE',
+  }),
+
   // ── Clinic data ──
   getDoctors: () => request<{ doctors: ApiDoctor[] }>('/doctors'),
 
+  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; roomNumber?: string; specialization?: string; currentStatus?: string }>) =>
+    request<{ doctor: ApiDoctor }>(`/doctors/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        centerId: updates.centerId,
+        roomNumber: updates.roomNumber,
+        specialization: updates.specialization,
+        currentStatus: updates.currentStatus,
+      }),
+    }),
 
-
-
-  /** Public lobby board — token numbers and counts only, never patient identity. */
+  getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
 
-
-  getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
-  
-  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[] }) =>
+  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; status?: 'operational' | 'maintenance' | 'closed' }) =>
     request<{ message: string; center: ApiCenter }>('/centers', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
+
+  updateCenter: (id: string, updates: Partial<{ name: string; city: string; address: string; openingHours: string; services: string[]; phone: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
+    request<{ message: string; center: ApiCenter }>(`/centers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    }),
+
+  deleteCenter: (id: string) => request<{ message: string }>(`/centers/${id}`, {
+    method: 'DELETE',
+  }),
 
   getAuditLogs: () => request<{ logs: AuditLog[]; source: 'database' | 'dummy' }>('/admin/audit-logs'),
 

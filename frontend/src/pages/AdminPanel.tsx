@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   Activity, Building2, FileText, GitBranch, LogOut, Menu, Plus,
   Search, Settings, Ticket, Users, X, RefreshCw, CheckCircle2,
-  AlertCircle, UserCheck, Stethoscope, ShieldCheck, MessageSquare, Send
+  AlertCircle, UserCheck, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
+  Pencil, Pause, Play, Trash2
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -15,7 +16,7 @@ import AssignDoctorModal from '../components/AssignDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
 import { api } from '../lib/api'
-import type { ApiCenter, AuditLog } from '../lib/api'
+import type { ApiCenter, ApiDoctor, AuditLog } from '../lib/api'
 
 const NAV_ADMIN = [
   { id: 'health', icon: <Activity size={15} />, label: 'System Health' },
@@ -23,14 +24,6 @@ const NAV_ADMIN = [
   { id: 'clinics', icon: <Building2 size={15} />, label: 'Medical Centers' },
   { id: 'api', icon: <MessageSquare size={15} />, label: 'Message Center' },
   { id: 'logs', icon: <FileText size={15} />, label: 'Audit Logs' },
-]
-
-const STAFF_MEMBERS = [
-  { id: '#ST-01', name: 'Dr. Ethan Carr', role: 'Medical Specialist', dept: 'General Medicine', email: 'ethan@mediqueue.io', status: 'active' },
-  { id: '#ST-02', name: 'Dr. Aisha Patel', role: 'Senior Specialist', dept: 'Cardiology', email: 'aisha@mediqueue.io', status: 'active' },
-  { id: '#ST-03', name: 'Chamari Silva', role: 'Receptionist Staff', dept: 'Front Counter A', email: 'chamari@mediqueue.io', status: 'active' },
-  { id: '#ST-04', name: 'Dr. Sofia Montoya', role: 'Specialist', dept: 'Pediatrics', email: 'sofia@mediqueue.io', status: 'active' },
-  { id: '#ST-05', name: 'Ruwan Fernando', role: 'Lab Technician', dept: 'Central Lab', email: 'ruwan@mediqueue.io', status: 'active' },
 ]
 
 const SERVICES = [
@@ -42,33 +35,114 @@ const SERVICES = [
   { name: 'Backup DB Replica', latency: '5.1ms', uptime: '99.95%', conns: 18, status: 'healthy' as const },
 ]
 
+type StaffMember = {
+  id: string
+  name: string
+  role: string
+  dept: string
+  email: string
+  status: 'active' | 'suspended'
+  phone: string
+  createdAt?: string | null
+}
+
+const normalizeRole = (role: string) => {
+  const normalized = role.toLowerCase()
+  if (normalized.includes('admin')) return 'admin'
+  if (normalized.includes('doctor')) return 'doctor'
+  if (normalized.includes('reception')) return 'receptionist'
+  return 'patient'
+}
+
+const formatRoleLabel = (role: string) => {
+  switch (role) {
+    case 'admin': return 'Admin'
+    case 'doctor': return 'Doctor'
+    case 'receptionist': return 'Receptionist'
+    default: return 'Patient'
+  }
+}
+
+const formatDept = (role: string) => {
+  switch (role) {
+    case 'doctor': return 'General Medicine'
+    case 'receptionist': return 'Front Desk'
+    case 'admin': return 'Administration'
+    default: return 'Patient Services'
+  }
+}
+
+const mapApiUserToStaffMember = (user: { id: string; email: string; fullName: string; phone: string | null; role: string; isActive: boolean; createdAt?: string | null }): StaffMember => ({
+  id: user.id,
+  name: user.fullName || user.email || 'Unnamed User',
+  role: formatRoleLabel(user.role),
+  dept: formatDept(user.role),
+  email: user.email,
+  status: user.isActive ? 'active' : 'suspended',
+  phone: user.phone || '',
+  createdAt: user.createdAt,
+})
+
 export default function AdminPanel() {
   const [nav, setNav] = useState('health')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [staffSearch, setStaffSearch] = useState('')
+  const [staffRoleFilter, setStaffRoleFilter] = useState('all')
   const [chartRange, setChartRange] = useState('Today')
   const [showAddCenterModal, setShowAddCenterModal] = useState(false)
+  const [showAssignDoctorModal, setShowAssignDoctorModal] = useState(false)
   const [showBroadcastModal, setShowBroadcastModal] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([])
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null)
+  const [deletingStaff, setDeletingStaff] = useState<StaffMember | null>(null)
+  const [suspendingStaff, setSuspendingStaff] = useState<StaffMember | null>(null)
+  const [loadingUsers, setLoadingUsers] = useState(false)
+
+  const [centers, setCenters] = useState<ApiCenter[]>([])
+  const [centersLoading, setCentersLoading] = useState(false)
+  const [editingCenter, setEditingCenter] = useState<ApiCenter | null>(null)
+  const [deletingCenter, setDeletingCenter] = useState<ApiCenter | null>(null)
+  const [activeCenter, setActiveCenter] = useState<ApiCenter | null>(null)
+  const [doctors, setDoctors] = useState<ApiDoctor[]>([])
+  const [doctorsLoading, setDoctorsLoading] = useState(false)
 
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
   // Live data from Supabase via backend
-  const [centers, setCenters] = useState<ApiCenter[]>([])
-  const [centersLoading, setCentersLoading] = useState(false)
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [logsSource, setLogsSource] = useState<'database' | 'dummy' | null>(null)
 
   useEffect(() => {
     if (nav === 'clinics') {
+      let active = true
       setCentersLoading(true)
-      api.getCenters()
-        .then(r => setCenters(r.centers))
-        .catch(() => setCenters([]))
-        .finally(() => setCentersLoading(false))
+      setDoctorsLoading(true)
+
+      Promise.all([api.getCenters(), api.getDoctors()])
+        .then(([centersRes, doctorsRes]) => {
+          if (!active) return
+          setCenters(centersRes.centers)
+          setDoctors(doctorsRes.doctors)
+        })
+        .catch(err => {
+          if (!active) return
+          console.error('Failed to load centers or doctors', err)
+          setCenters([])
+          setDoctors([])
+        })
+        .finally(() => {
+          if (!active) return
+          setCentersLoading(false)
+          setDoctorsLoading(false)
+        })
+
+      return () => { active = false }
     }
+
     if (nav === 'logs') {
       setLogsLoading(true)
       api.getAuditLogs()
@@ -76,13 +150,183 @@ export default function AdminPanel() {
         .catch(() => setAuditLogs([]))
         .finally(() => setLogsLoading(false))
     }
+    if (nav === 'roles') {
+      let active = true
+      setLoadingUsers(true)
+      api.getUsers()
+        .then(r => {
+          if (!active) return
+          setStaffMembers(r.users.map(mapApiUserToStaffMember))
+        })
+        .catch(err => {
+          if (!active) return
+          console.error('Failed to load users', err)
+          setStaffMembers([])
+        })
+        .finally(() => {
+          if (!active) return
+          setLoadingUsers(false)
+        })
+      return () => { active = false }
+    }
+
+    return undefined
   }, [nav])
 
-  const filteredStaff = STAFF_MEMBERS.filter(s =>
-    s.name.toLowerCase().includes(staffSearch.toLowerCase()) ||
-    s.role.toLowerCase().includes(staffSearch.toLowerCase()) ||
-    s.dept.toLowerCase().includes(staffSearch.toLowerCase())
-  )
+  const filteredStaff = staffMembers.filter(s => {
+    const searchText = staffSearch.toLowerCase()
+    const matchesSearch =
+      s.name.toLowerCase().includes(searchText) ||
+      s.role.toLowerCase().includes(searchText) ||
+      s.dept.toLowerCase().includes(searchText) ||
+      s.email.toLowerCase().includes(searchText)
+
+    const matchesRole = staffRoleFilter === 'all' || s.role.toLowerCase() === staffRoleFilter.toLowerCase()
+
+    return matchesSearch && matchesRole
+  })
+
+  const staffSummaryCards = [
+    { icon: <Users size={18} />, label: 'Total Users', value: staffMembers.length.toLocaleString(), sub: 'All registered accounts', accent: 'var(--text-1)' },
+    { icon: <UserCheck size={18} />, label: 'Active Users', value: staffMembers.filter(member => member.status === 'active').length.toLocaleString(), sub: 'Currently enabled', accent: '#0d968d' },
+    { icon: <UserX size={18} />, label: 'Suspended Users', value: staffMembers.filter(member => member.status === 'suspended').length.toLocaleString(), sub: 'Needs review', accent: '#f50b0b' },
+  ]
+
+  const handleSaveStaff = async () => {
+    if (!editingStaff) return
+
+    try {
+      const { user } = await api.updateUser(editingStaff.id, {
+        fullName: editingStaff.name,
+        email: editingStaff.email,
+        phone: editingStaff.phone || null,
+        role: normalizeRole(editingStaff.role),
+        isActive: editingStaff.status === 'active',
+      })
+
+      const updatedStaff = mapApiUserToStaffMember(user)
+      setStaffMembers(prev => prev.map(member => member.id === editingStaff.id ? {
+        ...updatedStaff,
+        dept: editingStaff.dept,
+      } : member))
+      setEditingStaff(null)
+    } catch (error) {
+      console.error('Failed to update user', error)
+      alert('Could not update the user. Please try again.')
+    }
+  }
+
+  const handleDeleteStaff = async () => {
+    if (!deletingStaff) return
+
+    try {
+      await api.deleteUser(deletingStaff.id)
+      setStaffMembers(prev => prev.filter(member => member.id !== deletingStaff.id))
+      setDeletingStaff(null)
+    } catch (error) {
+      console.error('Failed to delete user', error)
+      alert('Could not delete the user. Please try again.')
+    }
+  }
+
+  const handleSuspendStaff = async () => {
+    if (!suspendingStaff) return
+
+    try {
+      const nextStatus = suspendingStaff.status === 'active' ? 'suspended' : 'active'
+      const { user } = await api.updateUser(suspendingStaff.id, {
+        fullName: suspendingStaff.name,
+        email: suspendingStaff.email,
+        phone: suspendingStaff.phone || null,
+        role: normalizeRole(suspendingStaff.role),
+        isActive: nextStatus === 'active',
+      })
+
+      const updatedStaff = mapApiUserToStaffMember(user)
+      setStaffMembers(prev => prev.map(member => member.id === suspendingStaff.id ? {
+        ...updatedStaff,
+        dept: suspendingStaff.dept,
+      } : member))
+      setSuspendingStaff(null)
+    } catch (error) {
+      console.error('Failed to update user status', error)
+      alert('Could not change the user status. Please try again.')
+    }
+  }
+
+  const handleSaveCenter = async () => {
+    if (!editingCenter) return
+
+    try {
+      const { center } = await api.updateCenter(editingCenter.id, {
+        name: editingCenter.name,
+        city: editingCenter.city,
+        address: editingCenter.address,
+        openingHours: editingCenter.opening_hours,
+        services: editingCenter.services,
+        phone: editingCenter.phone || undefined,
+        status: editingCenter.status,
+      })
+      setCenters(prev => prev.map(item => item.id === center.id ? center : item))
+      setEditingCenter(null)
+    } catch (error) {
+      console.error('Failed to update center', error)
+      alert('Could not update the medical center. Please try again.')
+    }
+  }
+
+  const handleDeleteCenter = async () => {
+    if (!deletingCenter) return
+
+    try {
+      await api.deleteCenter(deletingCenter.id)
+      setCenters(prev => prev.filter(item => item.id !== deletingCenter.id))
+      setDeletingCenter(null)
+    } catch (error) {
+      console.error('Failed to delete center', error)
+      alert('Could not delete the medical center. Please try again.')
+    }
+  }
+
+  const handleAssignDoctor = async (assignment: { doctorId: string; centerId: string; room: string; specialty: string }) => {
+    try {
+      await api.updateDoctor(assignment.doctorId, {
+        centerId: assignment.centerId,
+        roomNumber: assignment.room,
+        specialization: assignment.specialty,
+      })
+      const r = await api.getDoctors()
+      setDoctors(r.doctors)
+      setShowAssignDoctorModal(false)
+      setActiveCenter(null)
+    } catch (error) {
+      console.error('Failed to assign doctor', error)
+      alert('Could not assign the doctor. Please try again.')
+    }
+  }
+
+  const handleRemoveDoctor = async (doctorId: string) => {
+    try {
+      await api.updateDoctor(doctorId, { centerId: null })
+      const r = await api.getDoctors()
+      setDoctors(r.doctors)
+    } catch (error) {
+      console.error('Failed to remove doctor from center', error)
+      alert('Could not remove the doctor assignment. Please try again.')
+    }
+  }
+
+  const handleToggleCenterStatus = async (center: ApiCenter) => {
+    const nextStatus = center.status === 'operational' ? 'maintenance' : 'operational'
+
+    try {
+      const { center: updatedCenter } = await api.updateCenter(center.id, { status: nextStatus })
+      setCenters(prev => prev.map(item => item.id === center.id ? updatedCenter : item))
+    } catch (error) {
+      console.error('Failed to change center status', error)
+      alert('Could not change facility status. Please try again.')
+    }
+  }
 
   const handleSignOut = async () => {
     setSigningOut(true)
@@ -108,6 +352,18 @@ export default function AdminPanel() {
             setCentersLoading(false)
           }
         }}
+      />
+
+      <AssignDoctorModal
+        isOpen={showAssignDoctorModal}
+        onClose={() => {
+          setShowAssignDoctorModal(false)
+          setActiveCenter(null)
+        }}
+        doctors={doctors}
+        centers={centers}
+        selectedCenter={activeCenter ?? undefined}
+        onAssign={handleAssignDoctor}
       />
 
       {/* ── BROADCAST SUCCESS MODAL ── */}
@@ -316,53 +572,107 @@ export default function AdminPanel() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
                 <div>
                   <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Staff & Role Management</h3>
-                  <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Create staff accounts, assign system roles & permission levels</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Review users, update roles, and manage access across the system.</div>
                 </div>
                 <button className="btn btn-primary" style={{ gap: 6, height: 40 }}>
                   <Plus size={15} /> Add Staff Member
                 </button>
               </div>
 
-              <div style={{ position: 'relative', marginBottom: 18, maxWidth: 480 }}>
-                <Search size={15} color="var(--text-4)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
-                <input
-                  className="input"
-                  placeholder="Search staff by Name, Role (e.g. Doctor, Receptionist), or Dept..."
-                  value={staffSearch}
-                  onChange={e => setStaffSearch(e.target.value)}
-                  style={{ paddingLeft: 36, height: 42, fontSize: 13.5 }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 18 }}>
+                {staffSummaryCards.map(card => (
+                  <StatCard key={card.label} icon={card.icon} label={card.label} value={card.value} sub={card.sub} accent={card.accent} />
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18, alignItems: 'center' }}>
+                <div style={{ position: 'relative', maxWidth: 520, flex: 1, minWidth: 280 }}>
+                  <Search size={15} color="var(--text-4)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    className="input"
+                    placeholder="Search staff by name, role, department, or email"
+                    value={staffSearch}
+                    onChange={e => setStaffSearch(e.target.value)}
+                    style={{ paddingLeft: 36, height: 44, fontSize: 13.5, borderRadius: 12, border: '1px solid var(--border-md)' }}
+                  />
+                </div>
+                <div style={{ position: 'relative', minWidth: 180 }}>
+                  <select
+                    className="input"
+                    value={staffRoleFilter}
+                    onChange={e => setStaffRoleFilter(e.target.value)}
+                    style={{ height: 44, width: '100%', fontSize: 13.5, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff', padding: '0 38px 0 14px', appearance: 'none', cursor: 'pointer' }}
+                  >
+                    <option value="all">All Roles</option>
+                    <option value="admin">Admin</option>
+                    <option value="doctor">Doctor</option>
+                    <option value="receptionist">Receptionist</option>
+                    <option value="patient">Patient</option>
+                  </select>
+                  <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-4)' }}>▾</div>
+                </div>
               </div>
 
               <div className="table-responsive-wrapper">
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
-                  <thead>
-                    <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
-                      <th style={{ padding: '10px 14px' }}>Staff ID</th>
-                      <th style={{ padding: '10px 14px' }}>Name</th>
-                      <th style={{ padding: '10px 14px' }}>Assigned Role</th>
-                      <th style={{ padding: '10px 14px' }}>Department</th>
-                      <th style={{ padding: '10px 14px' }}>Email</th>
-                      <th style={{ padding: '10px 14px' }}>Status</th>
-                      <th style={{ padding: '10px 14px' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredStaff.map(s => (
-                      <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '12px 14px', fontWeight: 700, fontFamily: 'monospace' }}>{s.id}</td>
-                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-1)' }}>{s.name}</td>
-                        <td style={{ padding: '12px 14px', color: 'var(--blue-dark)', fontWeight: 600 }}>{s.role}</td>
-                        <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.dept}</td>
-                        <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.email}</td>
-                        <td style={{ padding: '12px 14px' }}><StatusBadge status="active" /></td>
-                        <td style={{ padding: '12px 14px' }}>
-                          <button className="btn btn-ghost btn-sm">Edit Role</button>
-                        </td>
+                {loadingUsers ? (
+                  <div style={{ padding: 18, color: 'var(--text-4)', fontSize: 13 }}>Loading users from the database…</div>
+                ) : filteredStaff.length === 0 ? (
+                  <div style={{ padding: 18, color: 'var(--text-4)', fontSize: 13 }}>No users found for this search.</div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
+                        <th style={{ padding: '10px 14px' }}>Staff ID</th>
+                        <th style={{ padding: '10px 14px' }}>Name</th>
+                        <th style={{ padding: '10px 14px' }}>Assigned Role</th>
+                        <th style={{ padding: '10px 14px' }}>Department</th>
+                        <th style={{ padding: '10px 14px' }}>Email</th>
+                        <th style={{ padding: '10px 14px' }}>Status</th>
+                        <th style={{ padding: '10px 14px' }}>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {filteredStaff.map(s => (
+                        <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '12px 14px', fontWeight: 700, fontFamily: 'monospace' }}>{s.id}</td>
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-1)' }}>{s.name}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--blue-dark)', fontWeight: 600 }}>{s.role}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.dept}</td>
+                          <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.email}</td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '4px 8px',
+                              borderRadius: 999,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              background: s.status === 'active' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.14)',
+                              color: s.status === 'active' ? '#10B981' : '#B45309'
+                            }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.status === 'active' ? '#10B981' : '#F59E0B' }} />
+                              {s.status === 'active' ? 'Active' : 'Suspended'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              <button onClick={() => setEditingStaff({ ...s })} style={{ width: 36, height: 36, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit user">
+                                <Pencil size={16} color="#111827" />
+                              </button>
+                              <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 36, height: 36, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend user' : 'Activate user'}>
+                                {s.status === 'active' ? <Pause size={16} color="#D97706" /> : <Play size={16} color="#16A34A" />}
+                              </button>
+                              <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 36, height: 36, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete user">
+                                <Trash2 size={16} color="#DC2626" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           )}
@@ -396,35 +706,93 @@ export default function AdminPanel() {
               )}
 
               <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-                {centers.map(c => (
-                  <div key={c.id} style={{ background: '#ffffff', borderRadius: 14, padding: 20, border: '1px solid var(--border-md)' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--blue-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <Building2 size={20} color="var(--blue)" />
+                {centers.map(c => {
+                  const assignedDoctors = doctors.filter(d => d.centerId === c.id)
+                  return (
+                    <div key={c.id} style={{ background: '#ffffff', borderRadius: 14, padding: 20, border: '1px solid var(--border-md)' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--blue-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <Building2 size={20} color="var(--blue)" />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{c.name}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{c.city} · {c.address}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{c.name}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{c.city} · {c.address}</div>
-                        </div>
+                        <StatusBadge status={c.status === 'maintenance' ? 'maintenance' : c.status === 'closed' ? 'down' : 'operational'} />
                       </div>
-                      <StatusBadge status="operational" />
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, background: 'var(--blue-dim)', padding: 12, borderRadius: 10, fontSize: 12, marginBottom: 14 }}>
-                      <div><span style={{ color: 'var(--text-4)' }}>Hours:</span> <strong>{c.opening_hours}</strong></div>
-                      <div><span style={{ color: 'var(--text-4)' }}>Phone:</span> <strong>{c.phone || '—'}</strong></div>
-                      {c.services && c.services.length > 0 && (
-                        <div style={{ gridColumn: '1/-1' }}>
-                          <span style={{ color: 'var(--text-4)' }}>Services: </span>
-                          {c.services.map(s => (
-                            <span key={s} style={{ fontSize: 10.5, background: 'rgba(18,198,186,0.15)', color: 'var(--blue-dark)', borderRadius: 5, padding: '2px 7px', marginRight: 4, fontWeight: 600 }}>{s}</span>
-                          ))}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, background: 'var(--blue-dim)', padding: 12, borderRadius: 10, fontSize: 12, marginBottom: 14 }}>
+                        <div><span style={{ color: 'var(--text-4)' }}>Hours:</span> <strong>{c.opening_hours}</strong></div>
+                        <div><span style={{ color: 'var(--text-4)' }}>Phone:</span> <strong>{c.phone || '—'}</strong></div>
+                        {c.services && c.services.length > 0 && (
+                          <div style={{ gridColumn: '1/-1' }}>
+                            <span style={{ color: 'var(--text-4)' }}>Services: </span>
+                            {c.services.map(s => (
+                              <span key={s} style={{ fontSize: 10.5, background: 'rgba(18,198,186,0.15)', color: 'var(--blue-dark)', borderRadius: 5, padding: '2px 7px', marginRight: 4, fontWeight: 600 }}>{s}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'grid', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ flex: 1, minWidth: 120 }}
+                            onClick={() => { setActiveCenter(c); setShowAssignDoctorModal(true) }}
+                          >
+                            <UserCheck size={14} /> Assign Doctor
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ flex: 1, minWidth: 120 }}
+                            onClick={() => setEditingCenter(c)}
+                          >
+                            <Pencil size={14} /> Edit Center
+                          </button>
                         </div>
-                      )}
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-sm"
+                            style={{ flex: '1 1 auto', minWidth: 120, background: c.status === 'operational' ? '#F59E0B' : '#10B981', color: '#fff' }}
+                            onClick={() => handleToggleCenterStatus(c)}
+                          >
+                            {c.status === 'operational' ? 'Mark for Maintenance' : 'Restore Operation'}
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            style={{ flex: '1 1 auto', minWidth: 120, background: '#DC2626', color: '#fff' }}
+                            onClick={() => setDeletingCenter(c)}
+                          >
+                            <Trash2 size={14} /> Delete Center
+                          </button>
+                        </div>
+                        {assignedDoctors.length > 0 && (
+                          <div style={{ borderTop: '1px solid var(--border-md)', paddingTop: 12 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>Assigned Doctors ({assignedDoctors.length})</div>
+                            <div style={{ display: 'grid', gap: 8 }}>
+                              {assignedDoctors.map(doc => (
+                                <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 10, borderRadius: 12, background: 'rgba(15, 118, 110, 0.05)' }}>
+                                  <div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{doc.name}</div>
+                                    <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{doc.dept}{doc.room ? ` · ${doc.room}` : ''}</div>
+                                  </div>
+                                  <button
+                                    onClick={() => handleRemoveDoctor(doc.id)}
+                                    className="btn btn-ghost btn-sm"
+                                    style={{ minWidth: 110 }}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <button className="btn btn-ghost btn-sm" style={{ width: '100%' }}>Facility Config</button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -554,6 +922,216 @@ export default function AdminPanel() {
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {deletingStaff && (
+            <div onClick={() => setDeletingStaff(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8, 48, 45, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 110 }}>
+              <div onClick={e => e.stopPropagation()} className="card glass-form-card" style={{ width: '100%', maxWidth: 420, padding: 24, borderRadius: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Delete User</h3>
+                  <button onClick={() => setDeletingStaff(null)} className="btn btn-ghost btn-sm">Close</button>
+                </div>
+                <div style={{ fontSize: 13.5, color: 'var(--text-3)', marginBottom: 18 }}>
+                  Are you sure you want to delete <strong>{deletingStaff.name}</strong>? This action cannot be undone.
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button onClick={() => setDeletingStaff(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                  <button onClick={handleDeleteStaff} className="btn btn-sm" style={{ background: '#DC2626', color: '#fff', border: '1px solid #DC2626' }}>Delete User</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {suspendingStaff && (
+            <div onClick={() => setSuspendingStaff(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8, 48, 45, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 105 }}>
+              <div onClick={e => e.stopPropagation()} className="card glass-form-card" style={{ width: '100%', maxWidth: 420, padding: 24, borderRadius: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>{suspendingStaff.status === 'active' ? 'Suspend User' : 'Activate User'}</h3>
+                  <button onClick={() => setSuspendingStaff(null)} className="btn btn-ghost btn-sm">Close</button>
+                </div>
+                <div style={{ fontSize: 13.5, color: 'var(--text-3)', marginBottom: 18 }}>
+                  {suspendingStaff.status === 'active'
+                    ? `Are you sure you want to suspend ${suspendingStaff.name}?`
+                    : `Are you sure you want to activate ${suspendingStaff.name}?`}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button onClick={() => setSuspendingStaff(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                  <button onClick={handleSuspendStaff} className="btn btn-sm" style={{ background: '#D97706', color: '#fff', border: '1px solid #D97706' }}>
+                    {suspendingStaff.status === 'active' ? 'Suspend User' : 'Activate User'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {editingStaff && (
+            <div onClick={() => setEditingStaff(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8, 48, 45, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 100 }}>
+              <div onClick={e => e.stopPropagation()} className="card glass-form-card" style={{ width: '100%', maxWidth: 560, padding: 24, borderRadius: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                  <div>
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Edit User Details</h3>
+                    <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Update profile information and manage account access.</div>
+                  </div>
+                  <button onClick={() => setEditingStaff(null)} className="btn btn-ghost btn-sm">Close</button>
+                </div>
+
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Full Name</label>
+                    <input
+                      className="input"
+                      value={editingStaff.name}
+                      onChange={e => setEditingStaff({ ...editingStaff, name: e.target.value })}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Role</label>
+                    <select
+                      className="input"
+                      value={editingStaff.role.toLowerCase()}
+                      onChange={e => setEditingStaff({ ...editingStaff, role: e.target.value === 'admin' ? 'Admin' : e.target.value === 'doctor' ? 'Doctor' : e.target.value === 'receptionist' ? 'Receptionist' : 'Patient' })}
+                      style={{ height: 44, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="doctor">Doctor</option>
+                      <option value="receptionist">Receptionist</option>
+                      <option value="patient">Patient</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Department</label>
+                    <input
+                      className="input"
+                      value={editingStaff.dept}
+                      onChange={e => setEditingStaff({ ...editingStaff, dept: e.target.value })}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Email</label>
+                    <input
+                      className="input"
+                      value={editingStaff.email}
+                      onChange={e => setEditingStaff({ ...editingStaff, email: e.target.value })}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Phone</label>
+                    <input
+                      className="input"
+                      value={editingStaff.phone || ''}
+                      onChange={e => setEditingStaff({ ...editingStaff, phone: e.target.value })}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 14px', borderRadius: 12, background: 'rgba(18,198,186,0.07)', border: '1px solid var(--border)' }}>
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Account Status</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{editingStaff.status === 'active' ? 'User can access the platform normally.' : 'User account is suspended.'}</div>
+                    </div>
+                    <div>
+                      <button
+                        onClick={() => setEditingStaff({ ...editingStaff, status: editingStaff.status === 'active' ? 'suspended' : 'active' })}
+                        className="btn btn-sm"
+                        style={{ background: editingStaff.status === 'active' ? '#D97706' : '#10B981', color: '#fff', border: '1px solid transparent' }}
+                      >
+                        {editingStaff.status === 'active' ? 'Suspend' : 'Activate'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+                  <button onClick={() => setEditingStaff(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                  <button
+                    onClick={handleSaveStaff}
+                    className="btn btn-primary btn-sm"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {editingCenter && (
+            <div onClick={() => setEditingCenter(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8, 48, 45, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 100 }}>
+              <div onClick={e => e.stopPropagation()} className="card glass-form-card" style={{ width: '100%', maxWidth: 560, padding: 24, borderRadius: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                  <div>
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Edit Medical Center</h3>
+                    <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Update facility details and operational status.</div>
+                  </div>
+                  <button onClick={() => setEditingCenter(null)} className="btn btn-ghost btn-sm">Close</button>
+                </div>
+
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Facility Name</label>
+                    <input className="input" value={editingCenter.name} onChange={e => setEditingCenter({ ...editingCenter, name: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>City</label>
+                    <input className="input" value={editingCenter.city} onChange={e => setEditingCenter({ ...editingCenter, city: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Address</label>
+                    <input className="input" value={editingCenter.address} onChange={e => setEditingCenter({ ...editingCenter, address: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Opening Hours</label>
+                    <input className="input" value={editingCenter.opening_hours} onChange={e => setEditingCenter({ ...editingCenter, opening_hours: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Phone</label>
+                    <input className="input" value={editingCenter.phone || ''} onChange={e => setEditingCenter({ ...editingCenter, phone: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Services (comma separated)</label>
+                    <input
+                      className="input"
+                      value={editingCenter.services.join(', ')}
+                      onChange={e => setEditingCenter({ ...editingCenter, services: e.target.value.split(',').map(item => item.trim()).filter(Boolean) })}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Status</label>
+                    <select
+                      className="input"
+                      value={editingCenter.status || 'operational'}
+                      onChange={e => setEditingCenter({ ...editingCenter, status: e.target.value as ApiCenter['status'] })}
+                      style={{ height: 44, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
+                    >
+                      <option value="operational">Operational</option>
+                      <option value="maintenance">Maintenance</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+                  <button onClick={() => setEditingCenter(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                  <button onClick={handleSaveCenter} className="btn btn-primary btn-sm">Save Changes</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {deletingCenter && (
+            <div onClick={() => setDeletingCenter(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8, 48, 45, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 105 }}>
+              <div onClick={e => e.stopPropagation()} className="card glass-form-card" style={{ width: '100%', maxWidth: 420, padding: 24, borderRadius: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Delete Medical Center</h3>
+                  <button onClick={() => setDeletingCenter(null)} className="btn btn-ghost btn-sm">Close</button>
+                </div>
+                <div style={{ fontSize: 13.5, color: 'var(--text-3)', marginBottom: 18 }}>
+                  Are you sure you want to delete <strong>{deletingCenter.name}</strong>? This will remove the facility from the system.
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button onClick={() => setDeletingCenter(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                  <button onClick={handleDeleteCenter} className="btn btn-sm" style={{ background: '#DC2626', color: '#fff', border: '1px solid #DC2626' }}>Delete Center</button>
+                </div>
+              </div>
             </div>
           )}
 

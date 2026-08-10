@@ -285,7 +285,7 @@ export async function register({ email, password, fullName, phone, role }, req) 
  * Series letters are handed out in creation order; past Z we fall back to a
  * digit so an insert can never fail on a 26th doctor.
  */
-async function ensureDoctorProfile(user) {
+export async function ensureDoctorProfile(user) {
   if (user.role !== 'doctor') return;
 
   const { data: existing } = await supabase
