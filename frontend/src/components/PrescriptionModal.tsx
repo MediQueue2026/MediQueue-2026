@@ -47,7 +47,7 @@ export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva'
         position: 'relative'
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, pb: 16, borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
               width: 40, height: 40, borderRadius: 12,
@@ -82,7 +82,7 @@ export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva'
               background: '#ffffff', marginBottom: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.04)'
             }}>
               {/* Header Letterhead */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid var(--blue)', pb: 16, marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid var(--blue)', paddingBottom: 16, marginBottom: 20 }}>
                 <div>
                   <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--blue-dark)' }}>MediQueue Healthcare Clinic</h2>
                   <div style={{ fontSize: 13, color: 'var(--text-3)' }}>General Medicine & Specialist Consultation</div>
