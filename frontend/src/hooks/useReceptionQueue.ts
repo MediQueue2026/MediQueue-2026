@@ -214,6 +214,19 @@ export function useReceptionQueue() {
     [waiting, selectedDoctor],
   )
 
+  /** Re-fetches doctors (and today's queue) from the server. Used after add/edit. */
+  const refresh = useCallback(async () => {
+    if (offline) return
+    try {
+      const [doctorsRes, queueRes] = await Promise.all([api.getDoctors(), api.getQueue()])
+      setDoctors(doctorsRes.doctors)
+      setEntries(queueRes.entries.map(fromApiEntry))
+      setSelectedDoctorId(prev =>
+        doctorsRes.doctors.some(d => d.id === prev) ? prev : (doctorsRes.doctors[0]?.id ?? ''),
+      )
+    } catch { /* silently ignore */ }
+  }, [offline])
+
   return {
     // data
     entries,
@@ -244,5 +257,6 @@ export function useReceptionQueue() {
     setStatus,
     clearError: () => setError(''),
     waitFor,
+    refresh,
   }
 }

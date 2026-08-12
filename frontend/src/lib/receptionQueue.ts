@@ -60,6 +60,11 @@ export interface ReceptionDoctor {
   status: 'active' | 'break' | 'delayed' | 'offline'
   /** Drives the estimated-wait projection. */
   avgConsultMinutes: number
+  /** DB: doctors.max_appointments_per_hour */
+  maxAppointmentsPerHour?: number
+  /** DB: doctors.center_id */
+  centerId?: string | null
+  centerName?: string | null
 }
 
 export interface IssueTokenInput {

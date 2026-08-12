@@ -138,8 +138,19 @@ export interface ApiDoctor {
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
   avgConsultMinutes: number
+  maxAppointmentsPerHour?: number
   centerId?: string | null
   centerName?: string | null
+}
+
+export interface ApiDoctorHour {
+  id: string | null
+  doctorId: string
+  dayOfWeek: number      // 0=Sun … 6=Sat
+  startTime: string      // "HH:MM"
+  endTime: string        // "HH:MM"
+  isAvailable: boolean
+  dailyCapacity: number  // derived: hours × maxAppointmentsPerHour
 }
 
 export interface ApiQueueEntry {
@@ -246,7 +257,7 @@ export const api = {
   // ── Clinic data ──
   getDoctors: () => request<{ doctors: ApiDoctor[] }>('/doctors'),
 
-  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; roomNumber?: string; specialization?: string; currentStatus?: string }>) =>
+  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; roomNumber?: string; specialization?: string; currentStatus?: string; maxAppointmentsPerHour?: number; series?: string }>) =>
     request<{ doctor: ApiDoctor }>(`/doctors/${id}`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -254,7 +265,31 @@ export const api = {
         roomNumber: updates.roomNumber,
         specialization: updates.specialization,
         currentStatus: updates.currentStatus,
+        maxAppointmentsPerHour: updates.maxAppointmentsPerHour,
+        series: updates.series,
       }),
+    }),
+
+  createDoctor: (input: {
+    fullName: string
+    specialization: string
+    roomNumber?: string
+    series?: string
+    maxAppointmentsPerHour?: number
+    centerId?: string | null
+  }) =>
+    request<{ message: string; doctor: ApiDoctor }>('/doctors', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  getDoctorHours: (doctorId: string) =>
+    request<{ hours: ApiDoctorHour[]; maxAppointmentsPerHour: number }>(`/doctors/${doctorId}/hours`),
+
+  upsertDoctorHours: (doctorId: string, hours: Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'>[], maxAppointmentsPerHour?: number) =>
+    request<{ message: string; hours: ApiDoctorHour[] }>(`/doctors/${doctorId}/hours`, {
+      method: 'PUT',
+      body: JSON.stringify({ hours, maxAppointmentsPerHour }),
     }),
 
   getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
