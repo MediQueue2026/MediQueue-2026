@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Printer, Plus, Trash2, FileText, Stethoscope, ShieldCheck } from 'lucide-react'
 
-export default function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva', patientToken = '#A-11' }: {
+export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva', patientToken = '#A-11' }: {
   isOpen: boolean
   onClose: () => void
   patientName?: string
@@ -263,3 +263,7 @@ export default function PrescriptionModal({ isOpen, onClose, patientName = 'Nima
     </div>
   )
 }
+
+export default PrescriptionModal
+
+

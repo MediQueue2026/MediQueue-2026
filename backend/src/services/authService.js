@@ -222,6 +222,7 @@ export async function login({ email, password }, req) {
   }
 
   const user = toPublicUser(row);
+  await ensurePatientProfile(user);
   const tokens = await issueTokens(user, req);
 
   await supabase.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id);
@@ -270,10 +271,36 @@ export async function register({ email, password, fullName, phone, role }, req) 
 
   const user = toPublicUser(data);
   await ensureDoctorProfile(user);
+  await ensurePatientProfile(user);
 
   const tokens = await issueTokens(user, req);
   await recordLoginAttempt({ userId: user.id, email: user.email, role: user.role, status: 'success', req });
   return { user, ...tokens };
+}
+
+async function ensurePatientProfile(user) {
+  if (user.role !== 'patient') return;
+
+  const { data: existing } = await supabase
+    .from('patient_profiles')
+    .select('id')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (!existing) {
+    const { error } = await supabase.from('patient_profiles').insert([{
+      user_id: user.id,
+      nic: '',
+      emergency_contact_name: '',
+      emergency_contact_phone: '',
+      blood_group: 'O+',
+      allergies: '',
+      chronic_conditions: '',
+      sms_alerts_enabled: true,
+      delay_alerts_enabled: true,
+    }]);
+    if (error) console.warn(`[auth] patient profile auto-creation notice for ${user.email}: ${error.message}`);
+  }
 }
 
 /**

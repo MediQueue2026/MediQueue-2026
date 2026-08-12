@@ -237,7 +237,6 @@ export async function upsertDoctorHours(req, res, next) {
   }
 }
 
-
 /** Parses "HH:MM" or "HH:MM:SS" into total minutes from midnight. */
 function parseTimeToMinutes(timeStr) {
   if (!timeStr) return 0;
@@ -254,31 +253,67 @@ const FALLBACK_DOCTORS = [
 
 export async function getDoctors(req, res, next) {
   try {
-    const { data, error } = await supabase
+    // 1. Query doctors table with medical_centers and users join
+    const { data: doctorsData, error: dErr } = await supabase
       .from('doctors')
-      .select('id, specialization, room_number, current_status, max_appointments_per_hour, available_hours, series, center_id, medical_centers(name), users(full_name)')
-      .order('created_at', { ascending: true });
- 
-    if (error || !data || data.length === 0) {
-      return res.json({ doctors: FALLBACK_DOCTORS });
+      .select('*, medical_centers(id, name), users(full_name)');
+
+    if (dErr) {
+      console.warn('Doctors fetch warning:', dErr.message);
     }
- 
-    res.json({
-      doctors: data.map(d => ({
-        id: d.id,
-        name: d.users?.full_name ?? 'Unknown Doctor',
-        dept: d.specialization,
-        room: d.room_number ?? '—',
-        series: d.series ?? '?',
-        status: d.current_status ?? 'active',
-        avgConsultMinutes: Math.max(1, Math.round(60 / (d.max_appointments_per_hour || 4))),
-        maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
-        centerId: d.center_id ?? null,
-        centerName: d.medical_centers?.name ?? null,
-      })),
-    });
+
+    // 2. Query users table for all registered doctor accounts
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('id, full_name, email')
+      .eq('role', 'doctor');
+
+    const userMap = new Map((usersData || []).map(u => [u.id, u]));
+
+    if (doctorsData && doctorsData.length > 0) {
+      const mapped = doctorsData.map(d => {
+        const u = userMap.get(d.user_id) || d.users;
+        return {
+          id: d.id,
+          userId: d.user_id,
+          name: u?.full_name ?? d.users?.full_name ?? 'Unknown Doctor',
+          dept: d.specialization || 'General Medicine',
+          specialization: d.specialization || 'General Medicine',
+          room: d.room_number ?? '—',
+          series: d.series ?? '?',
+          status: d.current_status ?? 'active',
+          avgConsultMinutes: Math.max(1, Math.round(60 / (d.max_appointments_per_hour || 4))),
+          maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
+          centerId: d.center_id ?? d.medical_centers?.id ?? 'a1000000-0000-0000-0000-000000000001',
+          centerName: d.medical_centers?.name ?? 'MediQueue Central Clinic'
+        };
+      });
+
+      return res.json({ doctors: mapped });
+    }
+
+    // Fallback: If doctors table has no rows, build from users table where role = 'doctor'
+    if (usersData && usersData.length > 0) {
+      const mappedFromUsers = usersData.map((u, i) => ({
+        id: u.id,
+        userId: u.id,
+        name: u.full_name,
+        dept: 'General Medicine',
+        specialization: 'General Medicine',
+        room: `Room 0${i + 1}`,
+        series: String.fromCharCode(65 + i),
+        status: 'active',
+        avgConsultMinutes: 15,
+        maxAppointmentsPerHour: 4,
+        centerId: 'a1000000-0000-0000-0000-000000000001',
+        centerName: 'MediQueue Central Clinic'
+      }));
+
+      return res.json({ doctors: mappedFromUsers });
+    }
+
+    res.json({ doctors: FALLBACK_DOCTORS });
   } catch (err) {
     next(err);
   }
 }
-
