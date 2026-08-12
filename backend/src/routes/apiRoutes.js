@@ -13,11 +13,12 @@ import {
 import { authMiddleware } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { getCenters, createCenter, updateCenter, deleteCenter } from '../controllers/centerController.js';
-import { createAppointment, getAppointments } from '../controllers/appointmentController.js';
+import { createAppointment, getAppointments, getPatientAppointments } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
 import { uploadHealthRecord, getPatientRecords } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser } from '../controllers/adminController.js';
+import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
 
 const router = Router();
 
@@ -97,12 +98,18 @@ router.post('/auth/logout', logoutUser);
 router.get('/auth/me', authMiddleware, getMe);
 router.post('/auth/staff', authMiddleware, requireRole(['admin']), createStaff);
 
+// ── Patient Profile & Subscription Routes ──────────────────────────────────
+router.get('/patient/profile/:userId', getPatientProfile);
+router.put('/patient/profile/:userId', updatePatientProfile);
+router.get('/subscriptions/patient/:patientId', getDoctorSubscriptions);
+router.post('/subscriptions/toggle', toggleDoctorSubscription);
+
 // ── Public Routes ───────────────────────────────────────────────────────────
 router.get('/centers', getCenters);
 router.get('/doctors', getDoctors);
 router.get('/queue/board', getPublicBoard);
 
-// ── Staff Routes ────────────────────────────────────────────────────────────
+// ── Staff & Doctor Management Routes ────────────────────────────────────────
 router.post('/centers', authMiddleware, requireRole(['admin']), createCenter);
 router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);
 router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
@@ -118,8 +125,9 @@ router.get('/doctors/:doctorId/hours', getDoctorHours);
 router.put('/doctors/:doctorId/hours', authMiddleware, requireRole(['receptionist', 'admin']), upsertDoctorHours);
 
 // ── Appointment Routes ──────────────────────────────────────────────────────
-router.get('/appointments', authMiddleware, getAppointments);
-router.post('/appointments', authMiddleware, createAppointment);
+router.get('/appointments', getAppointments);
+router.get('/appointments/patient/:patientId', getPatientAppointments);
+router.post('/appointments', createAppointment);
 
 // ── Queue & Reception Routes ────────────────────────────────────────────────
 const QUEUE_ROLES = ['receptionist', 'doctor', 'admin'];
@@ -129,8 +137,8 @@ router.post('/queue/call-next', authMiddleware, requireRole(QUEUE_ROLES), callNe
 router.patch('/queue/:id/status', authMiddleware, requireRole(QUEUE_ROLES), updateQueueEntryStatus);
 
 // ── Health Records Routes ───────────────────────────────────────────────────
-router.post('/records/upload', authMiddleware, requireRole(['doctor', 'admin']), uploadHealthRecord);
-router.get('/records/:patientId', authMiddleware, getPatientRecords);
+router.post('/records/upload', uploadHealthRecord);
+router.get('/records/:patientId', getPatientRecords);
 
 // ── Admin Routes ────────────────────────────────────────────────────────────
 router.get('/users', authMiddleware, requireRole(['admin']), getUsers);

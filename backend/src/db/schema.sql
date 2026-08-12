@@ -21,13 +21,21 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA public;
 -- STEP 2: CREATE FRESH TABLE SCHEMAS
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- 1. Users Table (Extends Supabase Auth & Stores System Roles)
+-- 1. Users Table (Extends Supabase Auth & Stores System Roles & Patient Settings)
 CREATE TABLE public.users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   full_name TEXT NOT NULL,
   phone TEXT,
   role TEXT CHECK (role IN ('patient', 'doctor', 'receptionist', 'admin')) NOT NULL DEFAULT 'patient',
+  nic TEXT,
+  emergency_contact_name TEXT,
+  emergency_contact_phone TEXT,
+  blood_group TEXT,
+  allergies TEXT,
+  chronic_conditions TEXT,
+  sms_alerts_enabled BOOLEAN DEFAULT TRUE,
+  delay_alerts_enabled BOOLEAN DEFAULT TRUE,
   no_show_count INT DEFAULT 0,
   is_flagged_late BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -85,13 +93,16 @@ CREATE TABLE public.doctor_subscriptions (
   UNIQUE(patient_id, doctor_id)
 );
 
--- 6. Health Records Table (FR-09: Patient Profiles & EHR Timeline)
+-- 6. Health Records Table (FR-09: Patient Profiles, EHR Timeline & Prescriptions)
 CREATE TABLE public.health_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   doctor_id UUID REFERENCES public.doctors(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
+  record_type TEXT CHECK (record_type IN ('prescription', 'lab_report', 'ecg', 'xray', 'general')) DEFAULT 'lab_report',
+  issuing_authority TEXT,
   notes TEXT,
+  rx_medications JSONB DEFAULT '[]'::jsonb,
   file_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -129,14 +140,20 @@ INSERT INTO public.medical_centers (id, name, address, city, opening_hours, serv
 ('a1000000-0000-0000-0000-000000000002', 'MediQueue North Branch', '45 Station Road', 'Kandy', '09:00 - 18:00', ARRAY['Orthopedics', 'General Medicine'], '0812345678', 'operational');
 
 -- Insert Initial Users
-INSERT INTO public.users (id, email, full_name, phone, role) VALUES
-('b1000000-0000-0000-0000-000000000001', 'patient@mediqueue.io', 'Rajan Mehta', '0771234567', 'patient'),
-('b1000000-0000-0000-0000-000000000002', 'dr.carr@mediqueue.io', 'Dr. Ethan Carr', '0779876543', 'doctor'),
-('b1000000-0000-0000-0000-000000000003', 'dr.patel@mediqueue.io', 'Dr. Aisha Patel', '0714567890', 'doctor'),
-('b1000000-0000-0000-0000-000000000004', 'reception@mediqueue.io', 'Chamari Silva', '0751122334', 'receptionist'),
-('b1000000-0000-0000-0000-000000000005', 'admin@mediqueue.io', 'System Administrator', '0709988776', 'admin');
+INSERT INTO public.users (id, email, full_name, phone, role, nic, emergency_contact_name, emergency_contact_phone, blood_group, allergies, chronic_conditions) VALUES
+('b1000000-0000-0000-0000-000000000001', 'patient@mediqueue.io', 'Rajan Mehta', '0771234567', 'patient', '199214500823', 'Sunil Mehta', '0779988776', 'O+', 'Penicillin', 'None'),
+('b1000000-0000-0000-0000-000000000002', 'dr.carr@mediqueue.io', 'Dr. Ethan Carr', '0779876543', 'doctor', '198522300112', 'Sarah Carr', '0771122334', 'A+', 'None', 'None'),
+('b1000000-0000-0000-0000-000000000003', 'dr.patel@mediqueue.io', 'Dr. Aisha Patel', '0714567890', 'doctor', '198855400998', 'Dev Patel', '0712233445', 'B+', 'None', 'None'),
+('b1000000-0000-0000-0000-000000000004', 'reception@mediqueue.io', 'Chamari Silva', '0751122334', 'receptionist', '199077800456', 'Kusal Silva', '0759988112', 'O+', 'None', 'None'),
+('b1000000-0000-0000-0000-000000000005', 'admin@mediqueue.io', 'System Administrator', '0709988776', 'admin', '198011200334', 'Admin Office', '0701122334', 'AB+', 'None', 'None');
 
 -- Insert Doctor Profiles
 INSERT INTO public.doctors (id, user_id, center_id, specialization, max_appointments_per_hour, current_status, delay_minutes, room_number) VALUES
 ('c1000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000001', 'General Medicine', 4, 'active', 0, 'Room 04'),
 ('c1000000-0000-0000-0000-000000000002', 'b1000000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'Cardiology', 4, 'active', 8, 'Room 03');
+
+-- Insert Sample Prescriptions & Lab Reports for Patient
+INSERT INTO public.health_records (id, patient_id, doctor_id, title, record_type, issuing_authority, notes, rx_medications) VALUES
+('r1000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000001', 'Upper Respiratory Infection Rx', 'prescription', 'Dr. Ethan Carr', 'Take medications after meals. Drink plenty of warm fluids.', '[{"name":"Amoxicillin 500mg","dosage":"1 capsule","frequency":"3x daily","duration":"5 days"},{"name":"Paracetamol 500mg","dosage":"2 tablets","frequency":"As needed for fever","duration":"3 days"}]'::jsonb),
+('r1000000-0000-0000-0000-000000000002', 'b1000000-0000-0000-0000-000000000001', NULL, 'Complete Blood Count (CBC) Report', 'lab_report', 'Central Diagnostics Laboratory', 'Hemoglobin 14.2 g/dL (Normal). WBC count 6.5 x10^3/uL (Normal). Platelets 250 x10^3/uL.', '[]'::jsonb),
+('r1000000-0000-0000-0000-000000000003', 'b1000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000002', 'Resting Electrocardiogram (ECG)', 'ecg', 'Dr. Aisha Patel', 'Normal sinus rhythm. HR 72 bpm. PR interval 150 ms. No acute ischemic changes.', '[]'::jsonb);
