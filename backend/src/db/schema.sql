@@ -58,6 +58,7 @@ CREATE TABLE public.doctors (
   current_status TEXT CHECK (current_status IN ('active', 'delayed', 'break', 'offline')) DEFAULT 'active',
   delay_minutes INT DEFAULT 0,
   room_number TEXT,
+  available_hours JSONB DEFAULT '{}', -- Weekly schedule: {"1":{"startTime":"08:00","endTime":"17:00","isAvailable":true}, ...}
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
