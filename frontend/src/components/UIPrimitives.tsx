@@ -22,7 +22,7 @@ export function Badge({ children, cls }: { children: React.ReactNode; cls: strin
   return <span className={`badge ${cls}`}>{children}</span>
 }
 
-export function StatusBadge({ status }: { status: 'active' | 'break' | 'delayed' | 'offline' | 'online' | 'healthy' | 'degraded' | 'down' | 'operational' | 'maintenance' | 'completed' | 'waiting' | 'next' | 'urgent' }) {
+export function StatusBadge({ status }: { status: 'active' | 'break' | 'delayed' | 'offline' | 'online' | 'healthy' | 'degraded' | 'down' | 'operational' | 'maintenance' | 'completed' | 'waiting' | 'next' | 'urgent' | 'skipped' | 'called' }) {
   const map: Record<string, [string, string]> = {
     active:      ['badge-emerald', 'Active'],
     online:      ['badge-emerald', 'Online'],
@@ -30,12 +30,14 @@ export function StatusBadge({ status }: { status: 'active' | 'break' | 'delayed'
     healthy:     ['badge-emerald', 'Healthy'],
     completed:   ['badge-emerald', 'Completed'],
     next:        ['badge-blue',    'Next In Line'],
+    called:      ['badge-blue',    'Called'],
     waiting:     ['badge-ghost',   'Waiting'],
     break:       ['badge-amber',   'On Break'],
     delayed:     ['badge-amber',   'Delayed'],
     degraded:    ['badge-amber',   'Degraded'],
     maintenance: ['badge-amber',   'Maintenance'],
     offline:     ['badge-crimson', 'Offline'],
+    skipped:     ['badge-crimson', 'Skipped'],
     down:        ['badge-crimson', 'Down'],
     urgent:      ['badge-crimson', 'Urgent'],
   }

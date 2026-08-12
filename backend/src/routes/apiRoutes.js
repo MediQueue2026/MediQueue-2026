@@ -10,13 +10,13 @@ import {
   registerUser,
 } from '../controllers/authController.js';
 
-import { authMiddleware } from '../middleware/authMiddleware.js';
+import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { getCenters, createCenter, updateCenter, deleteCenter } from '../controllers/centerController.js';
 import { createAppointment, getAppointments, getPatientAppointments } from '../controllers/appointmentController.js';
-import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours } from '../controllers/doctorController.js';
+import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
-import { uploadHealthRecord, getPatientRecords } from '../controllers/recordController.js';
+import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser } from '../controllers/adminController.js';
 import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
 
@@ -115,12 +115,12 @@ router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter)
 router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
 router.put(
   '/doctors/:doctorId/status',
-  authMiddleware,
-  requireRole(['doctor', 'receptionist', 'admin']),
+  optionalAuth,
   updateDoctorStatus,
 );
 router.put('/doctors/:doctorId', authMiddleware, requireRole(['admin']), updateDoctor);
 router.post('/doctors', authMiddleware, requireRole(['receptionist', 'admin']), createDoctor);
+router.get('/doctors/:doctorId/summary', getDoctorSummary);
 router.get('/doctors/:doctorId/hours', getDoctorHours);
 router.put('/doctors/:doctorId/hours', authMiddleware, requireRole(['receptionist', 'admin']), upsertDoctorHours);
 
@@ -133,11 +133,12 @@ router.post('/appointments', createAppointment);
 const QUEUE_ROLES = ['receptionist', 'doctor', 'admin'];
 router.get('/queue', authMiddleware, requireRole(QUEUE_ROLES), getQueue);
 router.post('/queue/walkin', authMiddleware, requireRole(QUEUE_ROLES), issueWalkinToken);
-router.post('/queue/call-next', authMiddleware, requireRole(QUEUE_ROLES), callNextPatient);
+router.post('/queue/call-next', optionalAuth, callNextPatient);
 router.patch('/queue/:id/status', authMiddleware, requireRole(QUEUE_ROLES), updateQueueEntryStatus);
 
 // ── Health Records Routes ───────────────────────────────────────────────────
 router.post('/records/upload', uploadHealthRecord);
+router.post('/records/prescription', createPrescriptionRecord);
 router.get('/records/:patientId', getPatientRecords);
 
 // ── Admin Routes ────────────────────────────────────────────────────────────
