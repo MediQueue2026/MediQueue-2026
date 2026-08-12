@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { X, Printer, Plus, Trash2, FileText, Stethoscope, ShieldCheck } from 'lucide-react'
+import { X, Printer, Plus, Trash2, FileText, Stethoscope, ShieldCheck, CalendarDays, Clock, CheckCircle2 } from 'lucide-react'
 
-export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva', patientToken = '#A-11' }: {
+export function PrescriptionModal({ isOpen, onClose, patientId, doctorId, patientName = 'Nimal Silva', patientToken = '#A-11' }: {
   isOpen: boolean
   onClose: () => void
+  patientId?: string
+  doctorId?: string
   patientName?: string
   patientToken?: string
 }) {
@@ -15,6 +17,30 @@ export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva'
   ])
   const [advice, setAdvice] = useState('Increase fluid intake. Steam inhalation twice daily. Rest.')
   const [showPreview, setShowPreview] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Follow-up State with Radios (No, 3 Days, 1 Week, 1 Month) & Calendar
+  const [followUpOption, setFollowUpOption] = useState<'none' | '3days' | '1week' | '1month' | 'custom'>('none')
+  const [followUpDate, setFollowUpDate] = useState('')
+
+  const FOLLOWUP_RADIO_OPTIONS = [
+    { value: 'none', label: 'No Follow-up', days: 0 },
+    { value: '3days', label: '3 Days', days: 3 },
+    { value: '1week', label: '1 Week', days: 7 },
+    { value: '1month', label: '1 Month', days: 30 },
+  ]
+
+  const handleRadioChange = (val: string, days: number) => {
+    setFollowUpOption(val as any)
+    if (days > 0) {
+      const d = new Date()
+      d.setDate(d.getDate() + days)
+      setFollowUpDate(d.toISOString().split('T')[0])
+    } else {
+      setFollowUpDate('')
+    }
+  }
 
   if (!isOpen) return null
 
@@ -25,6 +51,37 @@ export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva'
   const removeDrug = (index: number) => {
     setDrugs(drugs.filter((_, i) => i !== index))
   }
+
+  const savePrescriptionToBackend = async () => {
+    try {
+      setSaving(true)
+      const res = await fetch('/api/records/prescription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientId: patientId || null,
+          doctorId: doctorId || null,
+          complaint,
+          diagnosis,
+          rxMedications: drugs,
+          advice,
+          followUpDate: followUpDate || null
+        })
+      })
+      if (res.ok) {
+        setSaveSuccess(true)
+      }
+    } catch (e) {
+      console.warn('Prescription API save notice:', e)
+    } finally {
+      setSaving(false)
+      setShowPreview(true)
+    }
+  }
+
+  const formattedFollowUpDate = followUpDate
+    ? new Date(followUpDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    : ''
 
   return (
     <div style={{
@@ -77,6 +134,15 @@ export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva'
         {showPreview ? (
           /* Printable Prescription Preview */
           <div>
+            {saveSuccess && (
+              <div style={{
+                background: 'rgba(16,185,129,0.1)', border: '1px solid #10B981', color: '#10B981',
+                padding: '10px 16px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16
+              }}>
+                <CheckCircle2 size={16} /> Prescription saved to patient health records in database!
+              </div>
+            )}
             <div style={{
               border: '2px solid var(--blue-border)', borderRadius: 16, padding: 32,
               background: '#ffffff', marginBottom: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.04)'
@@ -137,10 +203,21 @@ export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva'
               </div>
 
               {/* Advice */}
-              <div style={{ marginBottom: 24 }}>
+              <div style={{ marginBottom: formattedFollowUpDate ? 16 : 24 }}>
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.05em' }}>Doctor Advice</div>
                 <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.5 }}>{advice}</div>
               </div>
+
+              {/* Follow-up Note in Printable Letterhead */}
+              {formattedFollowUpDate && (
+                <div style={{ marginBottom: 24, padding: '12px 16px', borderRadius: 10, background: 'rgba(99,102,241,0.08)', border: '1.5px solid rgba(99,102,241,0.22)' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <CalendarDays size={14} /> Recommended Follow-up Date
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 700 }}>{formattedFollowUpDate}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 2 }}>* Please book your follow-up appointment via MediQueue Patient App.</div>
+                </div>
+              )}
 
               {/* Sign Badge */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: 16, borderTop: '1px dashed #ccc' }}>
@@ -251,10 +328,102 @@ export function PrescriptionModal({ isOpen, onClose, patientName = 'Nimal Silva'
               <textarea className="input" rows={3} value={advice} onChange={e => setAdvice(e.target.value)} style={{ fontSize: 14 }} />
             </div>
 
+            {/* ── Follow-up / Reappointment Radio + Calendar ── */}
+            <div style={{
+              border: '1.5px solid rgba(99, 102, 241, 0.28)',
+              borderRadius: 14,
+              padding: '18px 20px',
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.05) 100%)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: 8,
+                  background: 'rgba(99,102,241,0.14)',
+                  border: '1px solid rgba(99,102,241,0.25)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#6366f1'
+                }}>
+                  <CalendarDays size={16} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: '#4f46e5', letterSpacing: '0.03em', textTransform: 'uppercase' }}>
+                    Follow-up / Reappointment
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-4)' }}>Recommend follow-up timeframe or pick an exact calendar date</div>
+                </div>
+              </div>
+
+              {/* Radio Buttons: No, 3 Days, 1 Week, 1 Month */}
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                  Follow-up Required?
+                </div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {FOLLOWUP_RADIO_OPTIONS.map(opt => (
+                    <label key={opt.value} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      fontSize: 13, fontWeight: followUpOption === opt.value ? 700 : 500,
+                      color: followUpOption === opt.value ? '#4f46e5' : 'var(--text-2)',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="followUpRadio"
+                        value={opt.value}
+                        checked={followUpOption === opt.value}
+                        onChange={() => handleRadioChange(opt.value, opt.days)}
+                        style={{ accentColor: '#6366f1', width: 16, height: 16 }}
+                      />
+                      {opt.value !== 'none' && <Clock size={12} style={{ opacity: 0.7 }} />}
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Calendar Date Picker */}
+              {followUpOption !== 'none' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                  <label style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Calendar Date Picker (Select Exact Date)
+                  </label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={followUpDate}
+                    min={new Date(Date.now() + 86400000).toISOString().split('T')[0]}
+                    onChange={e => {
+                      setFollowUpDate(e.target.value)
+                      setFollowUpOption('custom')
+                    }}
+                    style={{
+                      height: 42, fontSize: 13, width: '100%', maxWidth: 260,
+                      borderColor: 'rgba(99,102,241,0.35)',
+                      background: 'rgba(255,255,255,0.9)',
+                      colorScheme: 'light'
+                    }}
+                  />
+                  {formattedFollowUpDate && (
+                    <div style={{ fontSize: 11.5, color: '#4f46e5', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <CheckCircle2 size={13} /> Selected Follow-up: {formattedFollowUpDate}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
               <button onClick={onClose} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
-              <button onClick={() => setShowPreview(true)} className="btn btn-primary" style={{ height: 42, padding: '0 20px', fontSize: 14 }}>
-                Preview & Print PDF
+              <button
+                onClick={savePrescriptionToBackend}
+                disabled={saving}
+                className="btn btn-primary"
+                style={{ height: 42, padding: '0 20px', fontSize: 14 }}
+              >
+                {saving ? 'Saving...' : 'Save & Preview PDF'}
               </button>
             </div>
           </div>
