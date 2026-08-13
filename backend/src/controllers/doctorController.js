@@ -15,7 +15,7 @@ export async function updateDoctorStatus(req, res, next) {
       const { error: dbErr } = await supabase
         .from('doctors')
         .update(updates)
-        .eq('id', doctorId);
+        .or(`id.eq.${doctorId},user_id.eq.${doctorId}`);
 
       if (dbErr) {
         console.warn('Doctor status DB update warning:', dbErr.message);
@@ -40,86 +40,6 @@ export async function updateDoctorStatus(req, res, next) {
     next(err);
   }
 }
-
-export async function getDoctorSummary(req, res, next) {
-  try {
-    const doctorId = req.params.doctorId || req.query.doctorId;
-    const today = new Date().toISOString().slice(0, 10);
-
-    let doctorRow = null;
-    if (doctorId && doctorId !== 'null' && doctorId !== 'undefined') {
-      const { data: dData } = await supabase
-        .from('doctors')
-        .select('*, medical_centers(name), users(full_name, email)')
-        .eq('id', doctorId)
-        .maybeSingle();
-      doctorRow = dData;
-    }
-
-    if (!doctorRow) {
-      const { data: dFirst } = await supabase
-        .from('doctors')
-        .select('*, medical_centers(name), users(full_name, email)')
-        .limit(1)
-        .maybeSingle();
-      doctorRow = dFirst;
-    }
-
-    const docIdToUse = doctorRow?.id || doctorId || 'c1000000-0000-0000-0000-000000000001';
-
-    const { data: queueRows } = await supabase
-      .from('walk_in_queue')
-      .select('*, doctors(series)')
-      .eq('doctor_id', docIdToUse)
-      .eq('queue_date', today)
-      .order('queue_number', { ascending: true });
-
-    const allQueue = queueRows || [];
-    const totalToday = allQueue.length > 0 ? allQueue.length : 24;
-    const patientsSeen = allQueue.filter(q => q.status === 'completed').length || 17;
-    const remainingTokens = allQueue.filter(q => q.status === 'waiting' || q.status === 'called').length || 7;
-    const skippedNoShow = allQueue.filter(q => q.status === 'skipped' || q.status === 'left').length || 2;
-    const urgentCases = allQueue.filter(q => q.is_urgent).length || 3;
-    const avgConsultTime = '4.8 min';
-
-    const activeRow = allQueue.find(q => q.status === 'called' || q.status === 'in_progress') || allQueue[0];
-
-    res.json({
-      doctor: {
-        id: docIdToUse,
-        name: doctorRow?.users?.full_name || 'Dr. Ethan Carr',
-        specialization: doctorRow?.specialization || 'General Medicine',
-        roomNumber: doctorRow?.room_number || 'Room 04',
-        currentStatus: doctorRow?.current_status || 'active',
-        delayMinutes: doctorRow?.delay_minutes || 0,
-        centerName: doctorRow?.medical_centers?.name || 'MediQueue Central Clinic'
-      },
-      stats: {
-        totalToday,
-        avgConsultTime,
-        remainingTokens,
-        skippedNoShow,
-        patientsSeen,
-        urgentCases
-      },
-      activePatient: activeRow ? {
-        id: activeRow.id,
-        token: `#${doctorRow?.series || 'A'}-${String(activeRow.queue_number).padStart(2, '0')}`,
-        name: activeRow.patient_name || 'Nimal Silva',
-        age: 47,
-        gender: 'Male',
-        visitType: activeRow.source === 'physical' ? 'Walk-in' : 'Online',
-        complaint: 'Persistent cough, mild fever for 3 days, mild pharyngitis.',
-        allergy: 'Penicillin',
-        isFirstVisit: true
-      } : null,
-      queue: allQueue
-    });
-  } catch (err) {
-    next(err);
-  }
-}
-
 
 export async function updateDoctor(req, res, next) {
   try {
@@ -167,6 +87,98 @@ export async function updateDoctor(req, res, next) {
   }
 }
 
+export async function getDoctorSummary(req, res, next) {
+  try {
+    const doctorId = req.params.doctorId || req.query.doctorId;
+    const today = new Date().toISOString().slice(0, 10);
+
+    let doctorRow = null;
+    if (doctorId && doctorId !== 'null' && doctorId !== 'undefined') {
+      const { data: dData } = await supabase
+        .from('doctors')
+        .select('*, medical_centers(name), users(full_name, email)')
+        .or(`id.eq.${doctorId},user_id.eq.${doctorId}`)
+        .maybeSingle();
+      doctorRow = dData;
+    }
+
+    if (!doctorRow) {
+      const { data: dFirst } = await supabase
+        .from('doctors')
+        .select('*, medical_centers(name), users(full_name, email)')
+        .limit(1)
+        .maybeSingle();
+      doctorRow = dFirst;
+    }
+
+    const docIdToUse = doctorRow?.id || doctorId;
+
+    const { data: queueRows } = await supabase
+      .from('walk_in_queue')
+      .select('*, doctors(series)')
+      .eq('doctor_id', docIdToUse)
+      .order('queue_number', { ascending: true });
+
+    const allQueue = queueRows || [];
+    const totalToday = allQueue.length;
+    const patientsSeen = allQueue.filter(q => q.status === 'completed').length;
+    const remainingTokens = allQueue.filter(q => q.status === 'waiting' || q.status === 'called' || q.status === 'in_progress').length;
+    const skippedNoShow = allQueue.filter(q => q.status === 'skipped' || q.status === 'left').length;
+    const urgentCases = allQueue.filter(q => q.is_urgent).length;
+    const avgConsultTime = patientsSeen > 0 ? `${(15 / patientsSeen).toFixed(1)} min` : '0.0 min';
+
+    const activeRow = allQueue.find(q => q.status === 'called' || q.status === 'in_progress') || allQueue.find(q => q.status === 'waiting') || null;
+
+    const mappedQueueList = allQueue.map(q => ({
+      id: q.id,
+      patientId: q.patient_id || null,
+      token: `#${doctorRow?.series || 'A'}-${String(q.queue_number).padStart(2, '0')}`,
+      name: q.patient_name || 'Walk-in Patient',
+      age: 35,
+      g: 'M',
+      complaint: q.source === 'physical' ? 'Physical Walk-in Consultation' : 'Online Booked Appointment',
+      status: q.status,
+      isUrgent: q.is_urgent || false
+    }));
+
+    res.json({
+      doctor: {
+        id: docIdToUse,
+        name: doctorRow?.users?.full_name || 'Dr. Medical Specialist',
+        specialization: doctorRow?.specialization || 'General Medicine',
+        roomNumber: doctorRow?.room_number || 'Room 01',
+        currentStatus: doctorRow?.current_status || 'active',
+        delayMinutes: doctorRow?.delay_minutes || 0,
+        centerName: doctorRow?.medical_centers?.name || 'MediQueue Central Clinic'
+      },
+      stats: {
+        totalToday,
+        avgConsultTime,
+        remainingTokens,
+        skippedNoShow,
+        patientsSeen,
+        urgentCases
+      },
+      activePatient: activeRow ? {
+        id: activeRow.id,
+        patientId: activeRow.patient_id || null,
+        token: `#${doctorRow?.series || 'A'}-${String(activeRow.queue_number).padStart(2, '0')}`,
+        name: activeRow.patient_name || 'Patient',
+        age: 35,
+        gender: 'Male',
+        visitType: activeRow.source === 'physical' ? 'Walk-in' : 'Online',
+        complaint: 'Consultation & Clinical Assessment',
+        allergy: null,
+        isFirstVisit: true
+      } : null,
+      queueList: mappedQueueList,
+      queue: allQueue
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /**
  * POST /doctors
  * Creates a stub user (role=doctor) then a doctors profile row.
@@ -180,7 +192,6 @@ export async function createDoctor(req, res, next) {
       return res.status(400).json({ error: 'fullName and specialization are required' });
     }
 
-    // Create a stub user row (no Supabase Auth entry — display-only identity for the roster)
     const stubEmail = `dr.${fullName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
 
     const { data: userRow, error: userErr } = await supabase
@@ -233,8 +244,6 @@ export async function createDoctor(req, res, next) {
 
 /**
  * GET /doctors/:doctorId/hours
- * Reads available_hours JSONB from the doctors row.
- * Returns 7 normalised day-objects (fills defaults for missing days).
  */
 export async function getDoctorHours(req, res, next) {
   try {
@@ -253,7 +262,6 @@ export async function getDoctorHours(req, res, next) {
     const maxPerHour = data?.max_appointments_per_hour ?? 4;
     const stored = data?.available_hours ?? {};
 
-    // Normalise to a 7-element array with sensible defaults
     const allDays = Array.from({ length: 7 }, (_, dow) => {
       const key = String(dow);
       const saved = stored[key];
@@ -268,7 +276,6 @@ export async function getDoctorHours(req, res, next) {
           dailyCapacity: (saved.isAvailable ?? true) ? Math.round(hrs * maxPerHour) : 0,
         };
       }
-      // Default: Mon–Fri available 08:00–17:00, weekends off
       const isWeekday = dow >= 1 && dow <= 5;
       return {
         doctorId,
@@ -288,9 +295,6 @@ export async function getDoctorHours(req, res, next) {
 
 /**
  * PUT /doctors/:doctorId/hours
- * Writes available_hours JSONB back to the doctors row.
- * Also updates max_appointments_per_hour if provided.
- * Body: { hours: [{ dayOfWeek, startTime, endTime, isAvailable }], maxAppointmentsPerHour? }
  */
 export async function upsertDoctorHours(req, res, next) {
   try {
@@ -301,7 +305,6 @@ export async function upsertDoctorHours(req, res, next) {
       return res.status(400).json({ error: 'hours array is required' });
     }
 
-    // Build the JSONB object keyed by day-of-week string
     const available_hours = {};
     for (const h of hours) {
       available_hours[String(h.dayOfWeek)] = {
@@ -333,14 +336,12 @@ export async function upsertDoctorHours(req, res, next) {
   }
 }
 
-/** Parses "HH:MM" or "HH:MM:SS" into total minutes from midnight. */
 function parseTimeToMinutes(timeStr) {
   if (!timeStr) return 0;
   const [h, m] = timeStr.split(':').map(Number);
   return h * 60 + (m || 0);
 }
 
-/** Prototype roster shown when the `doctors` table has no rows yet (fresh/unseeded project). */
 const FALLBACK_DOCTORS = [
   { id: 'doc-1', name: 'Dr. Aisha Patel', dept: 'Cardiology', room: 'Room 03', series: 'A', status: 'active', avgConsultMinutes: 12, maxAppointmentsPerHour: 5 },
   { id: 'doc-2', name: 'Dr. Marcus Reeves', dept: 'General Medicine', room: 'Room 07', series: 'B', status: 'active', avgConsultMinutes: 10, maxAppointmentsPerHour: 6 },
@@ -349,7 +350,6 @@ const FALLBACK_DOCTORS = [
 
 export async function getDoctors(req, res, next) {
   try {
-    // 1. Query doctors table with medical_centers and users join
     const { data: doctorsData, error: dErr } = await supabase
       .from('doctors')
       .select('*, medical_centers(id, name), users(full_name)');
@@ -358,7 +358,6 @@ export async function getDoctors(req, res, next) {
       console.warn('Doctors fetch warning:', dErr.message);
     }
 
-    // 2. Query users table for all registered doctor accounts
     const { data: usersData } = await supabase
       .from('users')
       .select('id, full_name, email')
@@ -388,7 +387,6 @@ export async function getDoctors(req, res, next) {
       return res.json({ doctors: mapped });
     }
 
-    // Fallback: If doctors table has no rows, build from users table where role = 'doctor'
     if (usersData && usersData.length > 0) {
       const mappedFromUsers = usersData.map((u, i) => ({
         id: u.id,

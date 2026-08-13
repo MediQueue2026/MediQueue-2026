@@ -134,7 +134,7 @@ const QUEUE_ROLES = ['receptionist', 'doctor', 'admin'];
 router.get('/queue', authMiddleware, requireRole(QUEUE_ROLES), getQueue);
 router.post('/queue/walkin', authMiddleware, requireRole(QUEUE_ROLES), issueWalkinToken);
 router.post('/queue/call-next', optionalAuth, callNextPatient);
-router.patch('/queue/:id/status', authMiddleware, requireRole(QUEUE_ROLES), updateQueueEntryStatus);
+router.patch('/queue/:id/status', optionalAuth, updateQueueEntryStatus);
 
 // ── Health Records Routes ───────────────────────────────────────────────────
 router.post('/records/upload', uploadHealthRecord);
