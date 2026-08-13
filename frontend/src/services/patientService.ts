@@ -164,7 +164,20 @@ export async function fetchHealthRecords(userId: string): Promise<HealthRecordIt
     const res = await fetch(`${API_BASE}/records/${userId}`);
     if (res.ok) {
       const data = await res.json();
-      if (data.records) return data.records;
+      if (data.records && Array.isArray(data.records)) {
+        return data.records.map((r: any) => ({
+          id: r.id,
+          title: r.title,
+          notes: r.notes,
+          fileUrl: r.file_url,
+          recordType: r.record_type || r.recordType || 'prescription',
+          record_type: r.record_type || r.recordType || 'prescription',
+          issuingAuthority: r.issuing_authority || r.issuingAuthority || 'MediQueue EHR',
+          issuing_authority: r.issuing_authority || r.issuingAuthority || 'MediQueue EHR',
+          date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recent',
+          rx_medications: r.rx_medications || []
+        }));
+      }
     }
   } catch (e) {
     console.warn('Health records API error:', e);

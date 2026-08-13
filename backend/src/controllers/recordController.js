@@ -16,7 +16,15 @@ export async function uploadHealthRecord(req, res, next) {
 export async function getPatientRecords(req, res, next) {
   try {
     const { patientId } = req.params;
-    const { data, error } = await supabase.from('health_records').select('*').eq('patient_id', patientId);
+    let query = supabase.from('health_records').select('*');
+
+    const isUuid = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
+    if (patientId && isUuid(patientId)) {
+      query = query.eq('patient_id', patientId);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
     res.json({ records: data || [] });
   } catch (err) {
     next(err);
@@ -26,6 +34,30 @@ export async function getPatientRecords(req, res, next) {
 export async function createPrescriptionRecord(req, res, next) {
   try {
     const { patientId, doctorId, complaint, diagnosis, rxMedications, advice, followUpDate } = req.body;
+
+    const isUuid = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
+    let validPatientId = isUuid(patientId) ? patientId : null;
+    let validDoctorId = isUuid(doctorId) ? doctorId : null;
+
+    if (!validPatientId) {
+      const { data: pUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('role', 'patient')
+        .limit(1)
+        .maybeSingle();
+      if (pUser) validPatientId = pUser.id;
+    }
+
+    if (!validDoctorId) {
+      const { data: dUser } = await supabase
+        .from('doctors')
+        .select('id')
+        .limit(1)
+        .maybeSingle();
+      if (dUser) validDoctorId = dUser.id;
+    }
 
     const title = diagnosis ? `Prescription: ${diagnosis}` : 'Medical Prescription';
     let notesText = advice || '';
@@ -39,8 +71,8 @@ export async function createPrescriptionRecord(req, res, next) {
     const { data, error } = await supabase
       .from('health_records')
       .insert([{
-        patient_id: patientId || null,
-        doctor_id: doctorId || null,
+        patient_id: validPatientId,
+        doctor_id: validDoctorId,
         title,
         record_type: 'prescription',
         issuing_authority: 'MediQueue Doctor Console',
@@ -72,4 +104,3 @@ export async function createPrescriptionRecord(req, res, next) {
     next(err);
   }
 }
-

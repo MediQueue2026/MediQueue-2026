@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bell, Building2, Calendar, ClipboardList, Download, Eye, FileText, FileUp, Heart, Home, LogOut,
-  Map, MapPin, Menu, Phone, Plus, Search, Settings, ShieldCheck, Ticket, User, X
+  Bell, Calendar, ClipboardList, Download, Eye, FileText, FileUp, Heart, Home, LogOut,
+  Map, MapPin, Menu, Plus, Search, Settings, ShieldCheck, Ticket, User, X
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { Avatar, StatusBadge } from '../components/UIPrimitives'
@@ -158,7 +158,8 @@ export default function PatientDashboard() {
 
   const filteredRecords = records.filter(r => {
     if (recordFilter === 'all') return true
-    return r.recordType === recordFilter
+    const type = r.recordType || (r as any).record_type || 'prescription'
+    return type === recordFilter
   })
 
   // Currently selected map center object & doctors assigned to it
@@ -171,10 +172,6 @@ export default function PatientDashboard() {
     phone: '0112345678',
     services: ['Cardiology', 'General Medicine', 'Pediatrics']
   }
-
-  const mapCenterDoctors = doctors.filter(d => 
-    !d.centerId || d.centerId === activeMapCenter.id || d.center_id === activeMapCenter.id || doctors.length <= 2
-  )
 
   return (
     <div className="mobile-layout-flex" style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
