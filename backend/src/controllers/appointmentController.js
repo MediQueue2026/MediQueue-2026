@@ -187,6 +187,8 @@ export async function getPatientAppointments(req, res, next) {
       const pmHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
       const ampm = h >= 12 ? 'PM' : 'AM';
       const formattedTime = `${pmHour < 10 ? '0' + pmHour : pmHour}:00 ${ampm}`;
+      const docSeries = a.doctor?.series || 'A';
+      const numPadded = String(a.queue_number).padStart(2, '0');
 
       return {
         id: a.id,
@@ -197,13 +199,61 @@ export async function getPatientAppointments(req, res, next) {
         appointmentDate: a.appointment_date,
         slotHour: a.slot_hour,
         timeLabel: formattedTime,
-        queueToken: `#A-${a.queue_number}`,
+        queueToken: `#${docSeries}-${numPadded}`,
         status: a.status,
         isLateNumber: a.is_late_number
       };
     });
 
     res.json({ appointments: mapped });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function cancelAppointment(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    // 1. Update status in appointments table to 'cancelled'
+    const { data: apptData, error: apptErr } = await supabase
+      .from('appointments')
+      .update({ status: 'cancelled' })
+      .eq('id', id)
+      .select()
+      .maybeSingle();
+
+    // 2. Also update walk_in_queue by ID to 'left' (passes Postgres check constraint)
+    const { data: queueData } = await supabase
+      .from('walk_in_queue')
+      .update({ status: 'left' })
+      .eq('id', id)
+      .select()
+      .maybeSingle();
+
+    // 3. If apptData was found, update mirrored walk_in_queue entry status to 'left'
+    if (apptData) {
+      await supabase
+        .from('walk_in_queue')
+        .update({ status: 'left' })
+        .eq('doctor_id', apptData.doctor_id)
+        .eq('queue_number', apptData.queue_number);
+    }
+
+    // 4. If queueData was found, update matching appointments table to 'cancelled'
+    if (queueData) {
+      await supabase
+        .from('appointments')
+        .update({ status: 'cancelled' })
+        .eq('doctor_id', queueData.doctor_id)
+        .eq('queue_number', queueData.queue_number);
+    }
+
+    if (apptErr) {
+      console.error('Cancel appointment notice:', apptErr.message);
+    }
+
+    res.json({ message: 'Appointment cancelled successfully', appointment: apptData || queueData });
   } catch (err) {
     next(err);
   }

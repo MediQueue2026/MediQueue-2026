@@ -134,11 +134,37 @@ export async function getDoctorSummary(req, res, next) {
       .eq('doctor_id', docIdToUse)
       .order('queue_number', { ascending: true });
 
-    const allQueue = queueRows || [];
+    const { data: aptRows } = await supabase
+      .from('appointments')
+      .select('*, doctors(series), users:patient_id(full_name)')
+      .eq('doctor_id', docIdToUse);
+
+    const existingKeys = new Set((queueRows || []).map(r => `${r.doctor_id}_${r.queue_number}`));
+    const combinedQueue = [...(queueRows || [])];
+
+    for (const a of aptRows || []) {
+      const key = `${a.doctor_id}_${a.queue_number}`;
+      if (!existingKeys.has(key)) {
+        combinedQueue.push({
+          id: a.id,
+          patient_id: a.patient_id,
+          doctor_id: a.doctor_id,
+          queue_number: a.queue_number,
+          patient_name: a.users?.full_name || 'Online Patient',
+          source: 'online',
+          status: a.status === 'booked' ? 'waiting' : a.status,
+          is_urgent: false
+        });
+      }
+    }
+
+    combinedQueue.sort((a, b) => a.queue_number - b.queue_number);
+
+    const allQueue = combinedQueue;
     const totalToday = allQueue.length;
     const patientsSeen = allQueue.filter(q => q.status === 'completed').length;
     const remainingTokens = allQueue.filter(q => q.status === 'waiting' || q.status === 'called' || q.status === 'in_progress').length;
-    const skippedNoShow = allQueue.filter(q => q.status === 'skipped' || q.status === 'left').length;
+    const skippedNoShow = allQueue.filter(q => q.status === 'skipped' || q.status === 'left' || q.status === 'cancelled').length;
     const urgentCases = allQueue.filter(q => q.is_urgent).length;
     const avgConsultTime = patientsSeen > 0 ? `${(15 / patientsSeen).toFixed(1)} min` : '0.0 min';
 

@@ -20,6 +20,7 @@ import {
   fetchCentersList,
   fetchPatientSubscriptions,
   toggleDoctorSubscriptionAPI,
+  cancelPatientAppointment,
   formatSlotTime
 } from '../services/patientService'
 import { PatientProfile, HealthRecordItem, AppointmentItem } from '../types/patient'
@@ -82,6 +83,30 @@ export default function PatientDashboard() {
   const [records, setRecords] = useState<HealthRecordItem[]>([])
   const [recordFilter, setRecordFilter] = useState<'all' | 'prescription' | 'lab_report'>('all')
   const [myAppointments, setMyAppointments] = useState<AppointmentItem[]>([])
+
+  // Cancellation Modal state
+  const [cancellingAppt, setCancellingAppt] = useState<{ id: string; docName: string; token: string } | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+
+  const handleConfirmCancel = async () => {
+    if (!cancellingAppt || !user) return
+    try {
+      setCancelling(true)
+      const ok = await cancelPatientAppointment(cancellingAppt.id)
+      if (ok) {
+        showToast(`Appointment ${cancellingAppt.token} has been cancelled successfully.`)
+        const aData = await fetchPatientAppointments(user.id)
+        setMyAppointments(aData)
+      } else {
+        showToast('Failed to cancel appointment. Please try again.')
+      }
+    } catch (e) {
+      console.warn('Cancel appointment error:', e)
+    } finally {
+      setCancelling(false)
+      setCancellingAppt(null)
+    }
+  }
 
   const displayName = profile.fullName || user?.name || 'Patient'
   const firstName = displayName.split(' ')[0]
@@ -172,16 +197,7 @@ export default function PatientDashboard() {
     return type === recordFilter
   })
 
-  // Currently selected map center object & doctors assigned to it
-  const activeMapCenter = centers.find(c => c.id === selectedMapCenterId) || centers[0] || {
-    id: 'a1000000-0000-0000-0000-000000000001',
-    name: 'MediQueue Central Clinic',
-    city: 'Colombo 07',
-    address: '124 Medical Plaza',
-    opening_hours: '08:00 - 20:00',
-    phone: '0112345678',
-    services: ['Cardiology', 'General Medicine', 'Pediatrics']
-  }
+
 
   return (
     <div className="mobile-layout-flex" style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
@@ -529,8 +545,24 @@ export default function PatientDashboard() {
                             </div>
                             <span className="badge badge-blue" style={{ fontSize: 11 }}>{u.queueToken}</span>
                           </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Calendar size={12} /> {u.appointmentDate} at {formatSlotTime(u.slotHour)}
+                          <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <Calendar size={12} /> {u.appointmentDate} at {formatSlotTime(u.slotHour)}
+                            </div>
+                            {u.status !== 'cancelled' && u.status !== 'completed' && (
+                              <button
+                                onClick={() => setCancellingAppt({ id: u.id, docName: u.doctorName, token: u.queueToken })}
+                                className="btn btn-sm"
+                                style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '2px 8px', fontSize: 10.5 }}
+                              >
+                                Cancel Booking
+                              </button>
+                            )}
+                            {u.status === 'cancelled' && (
+                              <span style={{ fontSize: 10.5, color: '#ef4444', fontWeight: 700, background: 'rgba(239, 68, 68, 0.15)', padding: '2px 6px', borderRadius: 6 }}>
+                                Cancelled
+                              </span>
+                            )}
                           </div>
                         </div>
                       ))
@@ -911,6 +943,35 @@ export default function PatientDashboard() {
               </form>
             </div>
           )}
+
+      {/* Cancellation Confirmation Modal */}
+      {cancellingAppt && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 99999,
+          background: 'rgba(7, 21, 20, 0.65)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+        }}>
+          <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, background: '#ffffff', borderRadius: 16, padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
+            <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)', marginBottom: 8 }}>Cancel Booking Confirmation</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 20 }}>
+              Are you sure you want to cancel your appointment <strong>{cancellingAppt.token}</strong> with <strong>{cancellingAppt.docName}</strong>? This slot will be released for other patients.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={() => setCancellingAppt(null)} className="btn btn-ghost" style={{ height: 38 }}>
+                Keep Booking
+              </button>
+              <button
+                onClick={handleConfirmCancel}
+                disabled={cancelling}
+                className="btn btn-danger"
+                style={{ height: 38, padding: '0 18px', background: '#ef4444', color: '#ffffff' }}
+              >
+                {cancelling ? 'Cancelling...' : 'Confirm Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
         </div>
       </div>

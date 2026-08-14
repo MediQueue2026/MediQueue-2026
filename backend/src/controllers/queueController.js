@@ -178,30 +178,43 @@ export async function getQueue(req, res, next) {
   try {
     const date = req.query.date || todayDate();
 
-    // Query walk-in tokens for today OR active waiting/called/in_progress tokens
+    // Query walk-in tokens for today OR active/cancelled/left tokens
     const { data: queueData, error } = await supabase
       .from('walk_in_queue')
       .select('*, doctors(series, user_id)')
-      .or(`queue_date.eq.${date},status.in.(waiting,called,in_progress)`)
+      .or(`queue_date.eq.${date},status.in.(waiting,called,in_progress,cancelled,left)`)
       .order('queue_number', { ascending: true });
 
     if (error && error.code === TABLE_MISSING) {
       return res.json({ entries: [], migrationPending: true });
     }
 
-    // Query online appointments for today OR active booked appointments
+    // Query online appointments for today OR active/cancelled appointments
     const { data: aptData } = await supabase
       .from('appointments')
       .select('*, doctors(series, user_id), users:patient_id(full_name, phone, nic)')
-      .or(`appointment_date.eq.${date},status.eq.booked`);
+      .or(`appointment_date.eq.${date},status.in.(booked,cancelled)`);
 
-    const existingKeys = new Set((queueData || []).map(r => `${r.doctor_id}_${r.queue_number}`));
-    const combined = (queueData || []).map(mapEntry);
+    const combinedMap = new Map();
+    (queueData || []).forEach(r => {
+      const entry = mapEntry(r);
+      if (entry.status === 'left') {
+        entry.status = 'cancelled';
+      }
+      combinedMap.set(`${r.doctor_id}_${r.queue_number}`, entry);
+    });
 
     for (const a of aptData || []) {
       const key = `${a.doctor_id}_${a.queue_number}`;
-      if (!existingKeys.has(key)) {
-        combined.push({
+      const existing = combinedMap.get(key);
+      const apptStatus = a.status === 'booked' ? 'waiting' : a.status;
+
+      if (existing) {
+        if (a.status === 'cancelled') {
+          existing.status = 'cancelled';
+        }
+      } else {
+        combinedMap.set(key, {
           id: a.id,
           doctorId: a.doctor_id,
           series: a.doctors?.series ?? '?',
@@ -210,13 +223,14 @@ export async function getQueue(req, res, next) {
           nic: a.users?.nic || undefined,
           phone: a.users?.phone || '',
           source: 'online',
-          status: a.status === 'booked' ? 'waiting' : a.status,
+          status: apptStatus,
           issuedAt: a.created_at,
           calledAt: undefined
         });
       }
     }
 
+    const combined = Array.from(combinedMap.values());
     combined.sort((a, b) => a.tokenNumber - b.tokenNumber);
 
     res.json({ entries: combined });

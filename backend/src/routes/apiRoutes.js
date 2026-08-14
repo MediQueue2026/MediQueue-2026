@@ -13,7 +13,7 @@ import {
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { getCenters, createCenter, updateCenter, deleteCenter } from '../controllers/centerController.js';
-import { createAppointment, getAppointments, getPatientAppointments } from '../controllers/appointmentController.js';
+import { createAppointment, getAppointments, getPatientAppointments, cancelAppointment } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
 import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from '../controllers/recordController.js';
@@ -133,6 +133,7 @@ router.put('/doctors/:doctorId/hours', authMiddleware, requireRole(['receptionis
 router.get('/appointments', getAppointments);
 router.get('/appointments/patient/:patientId', getPatientAppointments);
 router.post('/appointments', createAppointment);
+router.patch('/appointments/:id/cancel', cancelAppointment);
 
 // ── Queue & Reception Routes ────────────────────────────────────────────────
 const QUEUE_ROLES = ['receptionist', 'doctor', 'admin'];

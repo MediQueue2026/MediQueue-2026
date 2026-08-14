@@ -159,6 +159,19 @@ export async function fetchPatientAppointments(patientId: string): Promise<Appoi
   return [];
 }
 
+export async function cancelPatientAppointment(appointmentId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/appointments/${appointmentId}/cancel`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn('Cancel appointment API error:', e);
+    return false;
+  }
+}
+
 export async function fetchHealthRecords(userId: string): Promise<HealthRecordItem[]> {
   try {
     const res = await fetch(`${API_BASE}/records/${userId}`);
@@ -269,4 +282,30 @@ export async function bookAppointment(booking: {
     },
     message: 'Appointment booked successfully!',
   };
+}
+
+export async function fetchDoctorHours(doctorId: string): Promise<{ hours: any[]; maxAppointmentsPerHour: number }> {
+  try {
+    const res = await fetch(`${API_BASE}/doctors/${doctorId}/hours`);
+    if (res.ok) {
+      const data = await res.json();
+      return { hours: data.hours || [], maxAppointmentsPerHour: data.maxAppointmentsPerHour || 4 };
+    }
+  } catch (e) {
+    console.warn('Fetch doctor hours API error:', e);
+  }
+  return { hours: [], maxAppointmentsPerHour: 4 };
+}
+
+export async function fetchAllAppointments(): Promise<any[]> {
+  try {
+    const res = await fetch(`${API_BASE}/appointments`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.appointments || [];
+    }
+  } catch (e) {
+    console.warn('Fetch all appointments API error:', e);
+  }
+  return [];
 }
