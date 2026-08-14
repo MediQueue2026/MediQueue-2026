@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Printer, Plus, Trash2, FileText, Stethoscope, ShieldCheck, CalendarDays, Clock, CheckCircle2 } from 'lucide-react'
 
 export function PrescriptionModal({
@@ -22,13 +22,12 @@ export function PrescriptionModal({
   doctorDept?: string
   centerName?: string
 }) {
-  const [complaint, setComplaint] = useState('Persistent dry cough & low-grade fever for 3 days')
-  const [diagnosis, setDiagnosis] = useState('Acute Upper Respiratory Tract Infection')
+  const [complaint, setComplaint] = useState('')
+  const [diagnosis, setDiagnosis] = useState('')
   const [drugs, setDrugs] = useState([
-    { name: 'Amoxicillin 500mg', dosage: '1 Capsule', freq: 'TDS (8 Hourly)', duration: '5 Days' },
-    { name: 'Paracetamol 500mg', dosage: '1 Tablet', freq: 'PRN (As Needed)', duration: '3 Days' }
+    { name: '', dosage: '', freq: 'OD (Once Daily)', duration: '5 Days' }
   ])
-  const [advice, setAdvice] = useState('Increase fluid intake. Steam inhalation twice daily. Rest.')
+  const [advice, setAdvice] = useState('')
   const [showPreview, setShowPreview] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
@@ -36,6 +35,19 @@ export function PrescriptionModal({
   // Follow-up State with Radios (No, 3 Days, 1 Week, 1 Month) & Calendar
   const [followUpOption, setFollowUpOption] = useState<'none' | '3days' | '1week' | '1month' | 'custom'>('none')
   const [followUpDate, setFollowUpDate] = useState('')
+
+  useEffect(() => {
+    if (isOpen) {
+      setComplaint('')
+      setDiagnosis('')
+      setDrugs([{ name: '', dosage: '', freq: 'OD (Once Daily)', duration: '5 Days' }])
+      setAdvice('')
+      setFollowUpOption('none')
+      setFollowUpDate('')
+      setShowPreview(false)
+      setSaveSuccess(false)
+    }
+  }, [isOpen, patientId])
 
   const FOLLOWUP_RADIO_OPTIONS = [
     { value: 'none', label: 'No Follow-up', days: 0 },
@@ -68,28 +80,36 @@ export function PrescriptionModal({
   const savePrescriptionToBackend = async () => {
     try {
       setSaving(true)
+      const validDrugs = drugs.filter(d => d.name && d.name.trim() !== '')
       const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
       const res = await fetch(`${API_BASE}/records/prescription`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           patientId: patientId || null,
+          patientName: patientName || null,
           doctorId: doctorId || null,
+          doctorName: doctorName || 'Medical Specialist',
           complaint,
-          diagnosis,
-          rxMedications: drugs,
+          diagnosis: diagnosis || 'Clinical Evaluation',
+          rxMedications: validDrugs.length > 0 ? validDrugs : [{ name: 'Consultation & Clinical Evaluation', dosage: '1 Session', freq: 'Completed', duration: 'Today' }],
           advice,
           followUpDate: followUpDate || null
         })
       })
+
       if (res.ok) {
         setSaveSuccess(true)
+        setShowPreview(true)
+      } else {
+        const errData = await res.json().catch(() => ({}))
+        alert(`Prescription Save Warning: ${errData.error || 'Could not save to database'}`)
       }
-    } catch (e) {
-      console.warn('Prescription API save notice:', e)
+    } catch (e: any) {
+      console.error('Prescription API save error:', e)
+      alert(`Network error saving prescription: ${e.message || 'Cannot connect to backend'}`)
     } finally {
       setSaving(false)
-      setShowPreview(true)
     }
   }
 

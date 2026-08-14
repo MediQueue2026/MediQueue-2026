@@ -25,8 +25,9 @@ export default function PatientHistoryDrawer({
     async function loadRecords() {
       try {
         setLoading(true)
-        const targetId = patientId && patientId !== 'pat-1' ? patientId : 'all'
-        const res = await fetch(`${API_BASE}/records/${targetId}`)
+        const targetId = patientId || 'all'
+        const url = `${API_BASE}/records/${targetId}${patientName ? `?patientName=${encodeURIComponent(patientName)}` : ''}`
+        const res = await fetch(url)
         if (res.ok) {
           const data = await res.json()
           setDbRecords(data.records || [])
@@ -40,24 +41,25 @@ export default function PatientHistoryDrawer({
     if (isOpen) {
       loadRecords()
     }
-  }, [isOpen, patientId])
+  }, [isOpen, patientId, patientName])
 
   if (!isOpen) return null
 
-  const visits = dbRecords.length > 0
-    ? dbRecords.map(r => ({
-        date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recent',
-        doc: r.issuing_authority || 'Doctor Console',
-        spec: r.record_type || 'Prescription',
-        dx: r.title || 'Clinical Evaluation',
-        rx: Array.isArray(r.rx_medications) ? r.rx_medications.map((m: any) => `${m.name} (${m.dosage})`).join(', ') : 'Medication prescribed',
-        status: 'Saved to DB'
-      }))
-    : [
-        { date: 'Jul 12, 2026', doc: 'Dr. Ethan Carr', spec: 'General Medicine', dx: 'Acute Bronchitis & Pharyngitis', rx: 'Amoxicillin 500mg, Paracetamol 500mg', status: 'Resolved' },
-        { date: 'May 30, 2026', doc: 'Dr. Aisha Patel', spec: 'Cardiology', dx: 'Routine ECG & Blood Pressure Check', rx: 'Amlodipine 5mg OD', status: 'Ongoing Monitoring' },
-        { date: 'Feb 14, 2026', doc: 'Dr. S. Montoya', spec: 'General Practice', dx: 'Seasonal Influenza', rx: 'Rest, Hydration & Multivitamins', status: 'Resolved' }
-      ]
+  const visits = dbRecords.map(r => {
+    const meds = r.rx_medications || r.rxMedications
+    const rxStr = Array.isArray(meds) && meds.length > 0
+      ? meds.map((m: any) => `${m.name || m.medication || 'Medication'} (${m.dosage || '1 dose'}${m.freq ? `, ${m.freq}` : ''})`).join(' · ')
+      : (r.notes || 'Clinical consultation & prescription')
+
+    return {
+      date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recent',
+      doc: r.issuing_authority || 'Doctor Console',
+      spec: r.record_type || 'Prescription',
+      dx: r.title || 'Clinical Evaluation',
+      rx: rxStr,
+      status: 'Saved to DB'
+    }
+  })
 
   return (
     <div style={{
@@ -117,23 +119,29 @@ export default function PatientHistoryDrawer({
                 </span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {visits.map((v, i) => (
-                  <div key={i} style={{
-                    padding: 16, background: '#ffffff', borderRadius: 14,
-                    border: '1px solid var(--border-md)', boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>{v.dx}</div>
-                      <span className="badge badge-emerald" style={{ fontSize: 10 }}>{v.status}</span>
-                    </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--blue-dark)', fontWeight: 600, marginBottom: 8 }}>
-                      {v.doc} · {v.spec} · <span style={{ color: 'var(--text-4)' }}>{v.date}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--bg)', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
-                      <strong>Rx Prescribed:</strong> {v.rx}
-                    </div>
+                {visits.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: 'center', background: '#ffffff', borderRadius: 14, color: 'var(--text-4)', fontSize: 13, border: '1px solid var(--border-md)' }}>
+                    No past health records or prescriptions found for this patient in the database.
                   </div>
-                ))}
+                ) : (
+                  visits.map((v, i) => (
+                    <div key={i} style={{
+                      padding: 16, background: '#ffffff', borderRadius: 14,
+                      border: '1px solid var(--border-md)', boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>{v.dx}</div>
+                        <span className="badge badge-emerald" style={{ fontSize: 10 }}>{v.status}</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--blue-dark)', fontWeight: 600, marginBottom: 8 }}>
+                        {v.doc} · {v.spec} · <span style={{ color: 'var(--text-4)' }}>{v.date}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--bg)', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        <strong>Rx Prescribed:</strong> {v.rx}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

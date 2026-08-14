@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Activity, AlertCircle, Bell, BellRing, CheckCircle2, Clock, Hash, Plus, Radio,
-  Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil
+  Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil, Menu, X
 } from 'lucide-react'
 import AccountMenu from '../components/AccountMenu'
 import PublicTvDisplay from '../components/PublicTvDisplay'
@@ -43,6 +43,7 @@ export default function ReceptionistDesk() {
   const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'my-doctors'>('doctors')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const [patientSearch, setPatientSearch] = useState('')
 
   // My Doctors tab
@@ -132,8 +133,17 @@ export default function ReceptionistDesk() {
         onCallNext={queue.callNext}
       />
 
+      {/* ── MOBILE BACKDROP OVERLAY ── */}
+      {showMobileSidebar && (
+        <div
+          className="mobile-only"
+          onClick={() => setShowMobileSidebar(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000 }}
+        />
+      )}
+
       {/* ── SIDEBAR ── */}
-      <div style={{
+      <div className={`reception-sidebar ${showMobileSidebar ? 'mobile-open' : ''}`} style={{
         width: 260, background: 'var(--surface)', borderRight: '1px solid var(--border-md)',
         display: 'flex', flexDirection: 'column', flexShrink: 0, height: '100vh'
       }}>
@@ -153,20 +163,20 @@ export default function ReceptionistDesk() {
         {/* Nav Tabs */}
         <div style={{ padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, paddingLeft: 8 }}>Navigation</div>
-          <button onClick={() => setActiveTab('doctors')} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+          <button onClick={() => { setActiveTab('doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <Stethoscope size={16} /> Doctor Roster
           </button>
-          <button onClick={() => setActiveTab('patients')} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+          <button onClick={() => { setActiveTab('patients'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <Users size={16} /> Patients
           </button>
-          <button onClick={() => setActiveTab('my-doctors')} className={`btn ${activeTab === 'my-doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+          <button onClick={() => { setActiveTab('my-doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'my-doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <CalendarClock size={16} /> Doctors
           </button>
         </div>
 
         {/* Actions */}
         <div style={{ padding: '20px 16px', borderTop: '1px solid var(--border-md)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <button onClick={() => setShowTvDisplay(true)} className="btn btn-ghost" style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+          <button onClick={() => { setShowTvDisplay(true); setShowMobileSidebar(false) }} className="btn btn-ghost" style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <Radio size={16} /> TV Display Board
           </button>
         </div>
@@ -175,8 +185,22 @@ export default function ReceptionistDesk() {
       {/* ── MAIN CONTENT ── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {/* TOPBAR */}
-        <div className="topbar" style={{ justifyContent: 'flex-end', borderBottom: '1px solid var(--border-md)', background: 'rgba(255,255,255,0.7)', position: 'sticky', top: 0, zIndex: 30 }}>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        <div className="topbar" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border-md)', background: 'rgba(255,255,255,0.7)', position: 'sticky', top: 0, zIndex: 30 }}>
+          <button
+            onClick={() => setShowMobileSidebar(o => !o)}
+            className="btn btn-ghost btn-sm mobile-only"
+            style={{ gap: 6, padding: '5px 9px', border: '1px solid var(--border-md)', background: '#ffffff' }}
+          >
+            {showMobileSidebar ? <X size={16} /> : <Menu size={16} />}
+          </button>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginLeft: 'auto' }}>
+            <button
+              onClick={() => setShowTvDisplay(true)}
+              className="btn btn-ghost btn-sm"
+              style={{ gap: 6, fontSize: 11.5, color: 'var(--text-3)', padding: '5px 11px', border: '1px solid var(--border-md)', background: '#ffffff' }}
+            >
+              <Radio size={13} color="var(--blue)" /> Public TV Board
+            </button>
             <div className="desktop-only" style={{ alignItems: 'center', gap: 6 }}>
               <span className="pulse-live" />
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>Live queue</span>

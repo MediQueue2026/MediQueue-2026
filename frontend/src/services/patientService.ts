@@ -175,7 +175,8 @@ export async function fetchHealthRecords(userId: string): Promise<HealthRecordIt
           issuingAuthority: r.issuing_authority || r.issuingAuthority || 'MediQueue EHR',
           issuing_authority: r.issuing_authority || r.issuingAuthority || 'MediQueue EHR',
           date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recent',
-          rx_medications: r.rx_medications || []
+          rxMedications: r.rx_medications || r.rxMedications || [],
+          rx_medications: r.rx_medications || r.rxMedications || []
         }));
       }
     }

@@ -109,6 +109,16 @@ export default function PatientDashboard() {
     loadDynamicData()
   }, [user?.id, user?.name, user?.email])
 
+  // Live 3-second polling stream for health records & appointments
+  useEffect(() => {
+    if (!user?.id) return
+    const interval = setInterval(() => {
+      fetchHealthRecords(user.id).then(rData => setRecords(rData)).catch(() => {})
+      fetchPatientAppointments(user.id).then(aData => setMyAppointments(aData)).catch(() => {})
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [user?.id])
+
   const showToast = (msg: string) => {
     setToastMessage(msg)
     setTimeout(() => setToastMessage(null), 3500)
@@ -357,6 +367,42 @@ export default function PatientDashboard() {
                 </div>
               </div>
 
+              {/* ── SUBSCRIBED DOCTORS ONLY DELAY ALERTS ── */}
+              {doctors
+                .filter(d => (d.status === 'delayed' || (d as any).delayMinutes > 0) && (subscribedIds.includes(d.name) || subscribedIds.includes(d.id)))
+                .map(d => (
+                  <div key={d.id} style={{
+                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(217, 119, 6, 0.1) 100%)',
+                    border: '1px solid rgba(245, 158, 11, 0.45)',
+                    borderRadius: 14, padding: '14px 20px', marginBottom: 18,
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 38, height: 38, borderRadius: 10, background: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>
+                        <Bell size={20} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>🚨 Subscribed Doctor Delay Notice: {d.name}</span>
+                          <span style={{ fontSize: 11, background: 'rgba(245, 158, 11, 0.25)', padding: '2px 8px', borderRadius: 10, color: '#fff' }}>
+                            +{(d as any).delayMinutes || 15} Mins Late
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                          {d.dept} ({d.centerName || 'Clinic'}) has published a delay notice. Please adjust your travel arrival time.
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => toggleSubscribe(d.name, d.id)}
+                      className="btn btn-amber btn-sm"
+                      style={{ fontWeight: 700 }}
+                    >
+                      Subscribed ✓
+                    </button>
+                  </div>
+                ))}
+
               {/* ── ACTIVE TOKEN HERO (HIGH VISIBILITY GLASSMORPHISM CARD) ── */}
               {activeAppointment ? (
                 <div style={{
@@ -593,18 +639,47 @@ export default function PatientDashboard() {
                 <div style={{ background: '#ffffff', borderRadius: 12, padding: 18, border: '1px solid var(--border-md)' }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 12 }}>Live Activity & Delay Updates</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {[
-                      { time: '10 min ago', doc: 'Dr. Aisha Patel', msg: 'Started morning consultations at Room 03. Queue running smoothly.' },
-                      { time: '1 hour ago', doc: 'Dr. Ethan Carr', msg: 'Emergency consultation added. Delay of +15 minutes expected.' },
-                    ].map((item, i) => (
-                      <div key={i} style={{ padding: 12, borderRadius: 10, background: 'var(--blue-dim)', border: '1px solid var(--blue-border)', fontSize: 12.5 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--blue-dark)', fontWeight: 700, marginBottom: 2 }}>
-                          <span>{item.doc}</span>
-                          <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>{item.time}</span>
-                        </div>
-                        <div style={{ color: 'var(--text-2)' }}>{item.msg}</div>
+                    {doctors.filter(d => subscribedIds.includes(d.name) || subscribedIds.includes(d.id)).length === 0 ? (
+                      <div style={{ padding: 16, background: '#f8fafc', borderRadius: 10, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
+                        No doctor subscriptions active. Subscribe to a doctor to receive live delay alerts.
                       </div>
-                    ))}
+                    ) : (
+                      (() => {
+                        const subDocs = doctors.filter(d => subscribedIds.includes(d.name) || subscribedIds.includes(d.id));
+                        const delayedSubDocs = subDocs.filter(d => d.status === 'delayed' || (d as any).delayMinutes > 0);
+                        const onTimeSubDocs = subDocs.filter(d => d.status !== 'delayed' && !(d as any).delayMinutes);
+
+                        return (
+                          <>
+                            {delayedSubDocs.map(d => (
+                              <div key={d.id} style={{ padding: 14, borderRadius: 10, background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.3)', fontSize: 12.5 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#F59E0B', fontWeight: 800, marginBottom: 4 }}>
+                                  <span>🚨 {d.name} ({d.dept})</span>
+                                  <span style={{ fontSize: 11, background: 'rgba(245,158,11,0.2)', padding: '2px 8px', borderRadius: 10 }}>
+                                    +{(d as any).delayMinutes || 15} Min Delay
+                                  </span>
+                                </div>
+                                <div style={{ color: 'var(--text-2)' }}>
+                                  Doctor has posted a live delay alert for {d.room || 'consultation room'}. Please adjust your travel arrival time.
+                                </div>
+                              </div>
+                            ))}
+
+                            {onTimeSubDocs.map(d => (
+                              <div key={d.id} style={{ padding: 12, borderRadius: 10, background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)', fontSize: 12.5 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#10B981', fontWeight: 700, marginBottom: 2 }}>
+                                  <span>● {d.name} ({d.dept})</span>
+                                  <span style={{ fontSize: 10.5, color: '#10B981' }}>On Schedule</span>
+                                </div>
+                                <div style={{ color: 'var(--text-3)', fontSize: 11.5 }}>
+                                  Consultations running on time at {d.room || 'Room 01'} ({d.centerName || 'Clinic'}).
+                                </div>
+                              </div>
+                            ))}
+                          </>
+                        )
+                      })()
+                    )}
                   </div>
                 </div>
               </div>
@@ -650,7 +725,7 @@ export default function PatientDashboard() {
 
                       <div style={{ display: 'flex', gap: 8 }}>
                         {r.recordType === 'prescription' ? (
-                          <button onClick={() => setShowRxModal(true)} className="btn btn-primary btn-sm" style={{ gap: 5 }}>
+                          <button onClick={() => { setSelectedReport(r); setShowViewReportModal(true) }} className="btn btn-primary btn-sm" style={{ gap: 5 }}>
                             <Eye size={14} /> View Digital Prescription
                           </button>
                         ) : (

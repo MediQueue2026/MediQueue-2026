@@ -7,16 +7,31 @@ export async function updateDoctorStatus(req, res, next) {
     const { currentStatus, delayMinutes, roomNumber, doctorName } = req.body;
 
     const updates = {};
-    if (currentStatus) updates.current_status = currentStatus;
+    if (currentStatus) {
+      // Map 'online' to 'active' for consistent DB status representation
+      const normStatus = currentStatus === 'online' ? 'active' : currentStatus;
+      updates.current_status = normStatus;
+      if (normStatus !== 'delayed' && (!delayMinutes || delayMinutes === 0)) {
+        updates.delay_minutes = 0;
+      }
+    }
     if (typeof delayMinutes === 'number') updates.delay_minutes = delayMinutes;
     if (roomNumber) updates.room_number = roomNumber;
 
-    if (Object.keys(updates).length > 0 && doctorId && doctorId !== 'undefined') {
-      const { error: dbErr } = await supabase
-        .from('doctors')
-        .update(updates)
-        .or(`id.eq.${doctorId},user_id.eq.${doctorId}`);
+    const isUuid = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
+    if (Object.keys(updates).length > 0 && doctorId && doctorId !== 'undefined') {
+      let query = supabase.from('doctors').update(updates);
+      if (isUuid(doctorId)) {
+        query = query.or(`id.eq.${doctorId},user_id.eq.${doctorId}`);
+      } else {
+        const { data: firstDoc } = await supabase.from('doctors').select('id').limit(1).maybeSingle();
+        if (firstDoc) {
+          query = query.eq('id', firstDoc.id);
+        }
+      }
+
+      const { error: dbErr } = await query;
       if (dbErr) {
         console.warn('Doctor status DB update warning:', dbErr.message);
       }
@@ -377,6 +392,8 @@ export async function getDoctors(req, res, next) {
           room: d.room_number ?? '—',
           series: d.series ?? '?',
           status: d.current_status ?? 'active',
+          currentStatus: d.current_status ?? 'active',
+          delayMinutes: d.delay_minutes ?? 0,
           avgConsultMinutes: Math.max(1, Math.round(60 / (d.max_appointments_per_hour || 4))),
           maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
           centerId: d.center_id ?? d.medical_centers?.id ?? 'a1000000-0000-0000-0000-000000000001',

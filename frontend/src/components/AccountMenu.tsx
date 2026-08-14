@@ -12,12 +12,6 @@ const ROLE_LABEL: Record<string, string> = {
   admin: 'System Administrator',
 }
 
-/**
- * Signed-in identity + sign-out, for the console headers.
- *
- * Shows who is actually signed in — the previous headers hardcoded "RE Staff",
- * which meant a receptionist and an admin looked identical on screen.
- */
 export default function AccountMenu({ compact = false }: { compact?: boolean }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -27,13 +21,10 @@ export default function AccountMenu({ compact = false }: { compact?: boolean }) 
 
   if (!user) return null
 
+  const displayName = (user as any)?.full_name || user.name || 'User Profile'
+
   const handleSignOut = async () => {
     setSigningOut(true)
-    // Leave the console *before* clearing the session. Clearing first lets the
-    // route guard fire on the page we're still standing on, which bounces the
-    // user to that console's login screen — indistinguishable from a failed
-    // sign-out. `logout()` lives on the context, so it still completes after
-    // this component unmounts.
     navigate('/', { replace: true })
     await logout()
   }
@@ -52,11 +43,11 @@ export default function AccountMenu({ compact = false }: { compact?: boolean }) 
           borderRadius: 9, padding: '3px 7px 3px 3px', flexShrink: 0,
         }}
       >
-        <Avatar name={user.name} size={28} />
+        <Avatar name={displayName} size={28} />
         {!compact && (
           <div style={{ textAlign: 'left' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1, whiteSpace: 'nowrap' }}>
-              {user.name}
+              {displayName}
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-4)', whiteSpace: 'nowrap' }}>
               {ROLE_LABEL[user.role ?? ''] ?? 'Signed in'}
@@ -74,9 +65,9 @@ export default function AccountMenu({ compact = false }: { compact?: boolean }) 
       >
         <div style={{ padding: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-            <Avatar name={user.name} size={38} />
+            <Avatar name={displayName} size={38} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-1)' }}>{user.name}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-1)' }}>{displayName}</div>
               <div style={{ fontSize: 11, color: 'var(--text-4)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user.email}
               </div>
@@ -98,7 +89,7 @@ export default function AccountMenu({ compact = false }: { compact?: boolean }) 
               borderRadius: 8, padding: '8px 10px',
             }}>
               <CloudOff size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-              Demo mode — the backend is offline and nothing here is saved.
+              Demo mode — backend data state active.
             </div>
           )}
 
