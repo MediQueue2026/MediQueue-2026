@@ -37,8 +37,10 @@ const ALLOWED_ORIGINS = (
 app.use(
   cors({
     origin(origin, callback) {
-      // No Origin header = same-origin, curl, or a server-side call.
-      if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+      // Allow server-to-server calls, explicit origins, or any local dev port (localhost / 127.0.0.1)
+      if (!origin || ALLOWED_ORIGINS.includes(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+        return callback(null, true);
+      }
       callback(new Error(`Origin ${origin} is not allowed by CORS`));
     },
     credentials: true,

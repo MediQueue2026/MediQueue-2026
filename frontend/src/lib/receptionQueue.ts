@@ -173,41 +173,43 @@ export const STATUS_BADGE: Record<QueueStatus, string> = {
 
 // ─── Selectors ───────────────────────────────────────────────────────────────
 
-export function forDoctor(entries: QueueEntry[], doctorId: string): QueueEntry[] {
-  return entries.filter((e) => e.doctorId === doctorId).sort((a, b) => a.tokenNumber - b.tokenNumber)
+export function forDoctor(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): QueueEntry[] {
+  if (!doctorId) return entries
+  const docIdLower = (doctorId || '').toLowerCase()
+  const docSeriesLower = (doctor?.series || '').toLowerCase()
+  const docUserIdLower = ((doctor as any)?.userId || '').toLowerCase()
+
+  return entries.filter((e) => {
+    const eDocId = (e.doctorId || '').toLowerCase()
+    const eSeries = (e.series || '').toLowerCase()
+
+    return (
+      eDocId === docIdLower ||
+      (docUserIdLower && eDocId === docUserIdLower) ||
+      (docSeriesLower && eSeries && eSeries === docSeriesLower)
+    )
+  }).sort((a, b) => a.tokenNumber - b.tokenNumber)
 }
 
-export function waitingFor(entries: QueueEntry[], doctorId: string): QueueEntry[] {
-  return forDoctor(entries, doctorId).filter((e) => e.status === 'waiting')
+export function waitingFor(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): QueueEntry[] {
+  return forDoctor(entries, doctorId, doctor).filter((e) => e.status === 'waiting')
 }
 
-/**
- * The token on the board right now.
- *
- * A `called` token wins over an `in_progress` one: the board announces whoever
- * was called most recently. Only one of each can exist per doctor (see
- * `callNext`), so this never has to choose between two of the same kind.
- */
-export function currentFor(entries: QueueEntry[], doctorId: string): QueueEntry | undefined {
-  const queue = forDoctor(entries, doctorId)
+export function currentFor(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): QueueEntry | undefined {
+  const queue = forDoctor(entries, doctorId, doctor)
   return queue.find((e) => e.status === 'called') ?? queue.find((e) => e.status === 'in_progress')
 }
 
-export function completedFor(entries: QueueEntry[], doctorId: string): QueueEntry[] {
-  return forDoctor(entries, doctorId).filter((e) => e.status === 'completed')
+export function completedFor(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): QueueEntry[] {
+  return forDoctor(entries, doctorId, doctor).filter((e) => e.status === 'completed')
 }
 
-/** Every number already handed out for this doctor today — drives duplicate detection. */
-export function issuedNumbers(entries: QueueEntry[], doctorId: string): number[] {
-  return forDoctor(entries, doctorId).map((e) => e.tokenNumber)
+export function issuedNumbers(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): number[] {
+  return forDoctor(entries, doctorId, doctor).map((e) => e.tokenNumber)
 }
 
-/**
- * Next number the counter should print.
- * DB: SELECT MAX(queue_number) + 1 FROM walk_in_queue WHERE doctor_id=$1 AND queue_date=CURRENT_DATE
- */
-export function nextTokenNumber(entries: QueueEntry[], doctorId: string): number {
-  const nums = issuedNumbers(entries, doctorId)
+export function nextTokenNumber(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): number {
+  const nums = issuedNumbers(entries, doctorId, doctor)
   return nums.length > 0 ? Math.max(...nums) + 1 : 1
 }
 

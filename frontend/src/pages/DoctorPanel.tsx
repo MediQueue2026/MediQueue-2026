@@ -24,6 +24,7 @@ interface QueueItem {
   allergy?: string | null
   apptOffset?: number
   isUrgent?: boolean
+  isLateNumber?: boolean
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
@@ -109,8 +110,10 @@ export default function DoctorPanel() {
   // Update doctor status in Database
   const handleShiftChange = async (newShift: Shift) => {
     setShift(newShift)
+    const docId = doctorInfo.id || user?.id
+    if (!docId) return
     try {
-      await fetch(`${API_BASE}/doctors/${doctorInfo.id}/status`, {
+      await fetch(`${API_BASE}/doctors/${docId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -119,6 +122,7 @@ export default function DoctorPanel() {
           roomNumber: doctorInfo.room
         })
       })
+      fetchDoctorSummary()
     } catch (e) {
       console.warn('Status update API call:', e)
     }
@@ -126,8 +130,10 @@ export default function DoctorPanel() {
 
   // Handle Delay Alert Modal submit
   const handleSendDelayAlert = async (delayMinutes: number, reason: string) => {
+    const docId = doctorInfo.id || user?.id
+    if (!docId) return
     try {
-      await fetch(`${API_BASE}/doctors/${doctorInfo.id}/status`, {
+      await fetch(`${API_BASE}/doctors/${docId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -137,6 +143,8 @@ export default function DoctorPanel() {
           reason
         })
       })
+      setShift('offline')
+      fetchDoctorSummary()
     } catch (e) {
       console.warn('Delay alert API call:', e)
     }
@@ -145,7 +153,7 @@ export default function DoctorPanel() {
   // Queue actions (Calls Real Backend API & Re-fetches DB State)
   const handleCallNext = async () => {
     try {
-      const res = await fetch(`${API_BASE}/queue/call-next`, {
+      await fetch(`${API_BASE}/queue/call-next`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ doctorId: doctorInfo.id })
@@ -211,14 +219,14 @@ export default function DoctorPanel() {
       <PatientHistoryDrawer
         isOpen={showHistoryDrawer}
         onClose={() => setShowHistoryDrawer(false)}
-        patientId={activePatient?.patientId || activePatient?.id}
+        patientId={activePatient?.patientId || activePatient?.userId || activePatient?.id}
         patientName={activePatient?.name || 'Patient'}
         patientToken={activePatient?.token || '#A-00'}
       />
       <PrescriptionModal
         isOpen={showPrescriptionModal}
         onClose={() => setShowPrescriptionModal(false)}
-        patientId={activePatient?.patientId || activePatient?.id}
+        patientId={activePatient?.patientId || activePatient?.userId || activePatient?.id}
         doctorId={doctorInfo.id}
         patientName={activePatient?.name || 'Patient'}
         patientToken={activePatient?.token || '#A-00'}
@@ -278,28 +286,39 @@ export default function DoctorPanel() {
         </div>
       </div>
 
-      {/* ── STATS STRIP (DYNAMIC DATABASE COUNTS) ── */}
-      <div className="doctor-stats-grid">
+      {/* ── STATS STRIP (COMPACT INLINE GLASSMORPHISM BAR) ── */}
+      <div style={{
+        margin: '14px 24px 0', padding: '10px 22px',
+        background: 'rgba(160, 236, 205, 0.65)', backdropFilter: 'blur(12px)',
+        border: '1px solid var(--border-md)', borderRadius: 14,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexWrap: 'nowrap', overflowX: 'auto', gap: 12
+      }}>
         {[
-          { label: 'Total Patients Today',    val: String(stats.totalToday),       icon: <Users size={16} />,        color: 'var(--text-1)' },
-          { label: 'Avg. Consultation Time',  val: stats.avgConsultTime,           icon: <Timer size={16} />,        color: 'var(--blue)'   },
-          { label: 'Remaining Tokens',        val: String(stats.remainingTokens),  icon: <Ticket size={16} />,       color: '#F59E0B'       },
-          { label: 'Skipped / No-Show',       val: String(stats.skippedNoShow),    icon: <SkipForward size={16} />,  color: '#EF4444'       },
-          { label: 'Patients Seen',           val: String(stats.patientsSeen),     icon: <CheckCheck size={16} />,   color: '#10B981'       },
-          { label: 'Urgent Cases Today',      val: String(stats.urgentCases),      icon: <ShieldAlert size={16} />,  color: '#e11d48'       },
-        ].map((s, i) => (
-          <div key={i} className="doctor-stat-card">
-            <div style={{ width: 34, height: 34, borderRadius: 8, background: `${s.color}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: s.color, flexShrink: 0 }}>{s.icon}</div>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: s.color, letterSpacing: '-0.03em', lineHeight: 1 }}>{s.val}</div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginTop: 2, whiteSpace: 'nowrap' }}>{s.label}</div>
+          { label: 'Total Today',         val: String(stats.totalToday),       icon: <Users size={14} />,        color: 'var(--text-1)' },
+          { label: 'Avg. Consult Time',   val: stats.avgConsultTime,           icon: <Timer size={14} />,        color: 'var(--blue)'   },
+          { label: 'Remaining Tokens',     val: String(stats.remainingTokens),  icon: <Ticket size={14} />,       color: '#F59E0B'       },
+          { label: 'Skipped / No-Show',    val: String(stats.skippedNoShow),    icon: <SkipForward size={14} />,  color: '#EF4444'       },
+          { label: 'Patients Seen',        val: String(stats.patientsSeen),     icon: <CheckCheck size={14} />,   color: '#10B981'       },
+          { label: 'Urgent Cases',         val: String(stats.urgentCases),      icon: <ShieldAlert size={14} />,  color: '#e11d48'       },
+        ].map((s, i, arr) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: `${s.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: s.color }}>
+                {s.icon}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: s.color, lineHeight: 1, letterSpacing: '-0.02em' }}>{s.val}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: 2, fontWeight: 600, whiteSpace: 'nowrap' }}>{s.label}</div>
+              </div>
             </div>
+            {i < arr.length - 1 && <div style={{ width: 1, height: 22, background: 'var(--border-md)', marginLeft: 4 }} />}
           </div>
         ))}
       </div>
 
       {/* ── MAIN GRID ── */}
-      <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, padding: '22px 24px' }}>
+      <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, padding: '16px 24px' }}>
 
         {/* LEFT — Active patient panel */}
         <div>
@@ -342,6 +361,7 @@ export default function DoctorPanel() {
                     <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                       {activePatient.allergy && <Badge cls="badge-amber">Allergy: {activePatient.allergy}</Badge>}
                       {activePatient.isFirstVisit && <Badge cls="badge-blue">First Consultation</Badge>}
+                      {activePatient.isLateNumber && <Badge cls="badge-crimson">🚨 Late Number (Prior No-Show)</Badge>}
                     </div>
                   </div>
                 </div>
@@ -443,7 +463,9 @@ export default function DoctorPanel() {
                     }}>{p.token}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)', marginBottom: 2 }}>
-                        {p.name} {p.isUrgent && <span style={{ color: '#e11d48', fontSize: 11, fontWeight: 800, marginLeft: 4 }}>🚨 URGENT</span>}
+                        {p.name}
+                        {p.isUrgent && <span style={{ color: '#e11d48', fontSize: 11, fontWeight: 800, marginLeft: 6 }}>🚨 URGENT</span>}
+                        {p.isLateNumber && <span style={{ color: '#ef4444', fontSize: 10.5, fontWeight: 800, marginLeft: 6 }}>🚨 LATE NUMBER</span>}
                       </div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginBottom: 3 }}>{p.age}y · {p.g} · {p.complaint}</div>
                       <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginBottom: p.allergy ? 5 : 0, display: 'flex', alignItems: 'center', gap: 4 }}>

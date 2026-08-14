@@ -118,6 +118,11 @@ router.put(
   optionalAuth,
   updateDoctorStatus,
 );
+router.patch(
+  '/doctors/:doctorId/status',
+  optionalAuth,
+  updateDoctorStatus,
+);
 router.put('/doctors/:doctorId', authMiddleware, requireRole(['admin']), updateDoctor);
 router.post('/doctors', authMiddleware, requireRole(['receptionist', 'admin']), createDoctor);
 router.get('/doctors/:doctorId/summary', getDoctorSummary);

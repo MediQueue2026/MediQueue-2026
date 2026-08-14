@@ -17,7 +17,8 @@ export function ViewReportModal({ isOpen, onClose, record }: ViewReportModalProp
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
     }}>
       <div className="card glass-form-card" style={{
-        width: '100%', maxWidth: 580, background: '#ffffff', borderRadius: 16,
+        width: '100%', maxWidth: 580, maxHeight: '90vh', overflowY: 'auto',
+        background: '#ffffff', borderRadius: 16,
         padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.25)', position: 'relative'
       }}>
         {/* Header */}
@@ -62,6 +63,38 @@ export function ViewReportModal({ isOpen, onClose, record }: ViewReportModalProp
                 {record.notes || 'No detailed clinical observations entered for this record.'}
               </p>
             </div>
+
+            {(() => {
+              const meds = record.rxMedications || (record as any).rx_medications
+              if (!meds || !Array.isArray(meds) || meds.length === 0) return null
+              return (
+                <div style={{ marginTop: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                    Rx Medications Prescribed
+                  </span>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: '#ffffff', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-md)' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(18, 198, 186, 0.1)', textAlign: 'left' }}>
+                        <th style={{ padding: 8 }}>Medication</th>
+                        <th style={{ padding: 8 }}>Dosage</th>
+                        <th style={{ padding: 8 }}>Frequency</th>
+                        <th style={{ padding: 8 }}>Duration</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {meds.map((d: any, i: number) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                          <td style={{ padding: 8, fontWeight: 700 }}>{d.name || d.medication || 'Medication'}</td>
+                          <td style={{ padding: 8 }}>{d.dosage || '—'}</td>
+                          <td style={{ padding: 8 }}>{d.freq || d.frequency || '—'}</td>
+                          <td style={{ padding: 8 }}>{d.duration || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
           </div>
         </div>
 

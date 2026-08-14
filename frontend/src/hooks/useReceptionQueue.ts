@@ -82,14 +82,26 @@ export function useReceptionQueue() {
     return () => { cancelled = true }
   }, [])
 
+  // Live 3-second doctor status & queue polling loop across doctor terminals
+  useEffect(() => {
+    if (offline) return
+    const interval = setInterval(() => {
+      Promise.all([api.getDoctors(), api.getQueue()]).then(([doctorsRes, queueRes]) => {
+        setDoctors(doctorsRes.doctors)
+        setEntries(queueRes.entries.map(fromApiEntry))
+      }).catch(() => {})
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [offline])
+
   const selectedDoctor = useMemo(() => doctors.find(d => d.id === selectedDoctorId), [doctors, selectedDoctorId])
 
-  const doctorQueue = useMemo(() => forDoctor(entries, selectedDoctorId), [entries, selectedDoctorId])
-  const waiting = useMemo(() => waitingFor(entries, selectedDoctorId), [entries, selectedDoctorId])
-  const current = useMemo(() => currentFor(entries, selectedDoctorId), [entries, selectedDoctorId])
-  const issuedNumbers = useMemo(() => issuedNumbersFor(entries, selectedDoctorId), [entries, selectedDoctorId])
+  const doctorQueue = useMemo(() => forDoctor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
+  const waiting = useMemo(() => waitingFor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
+  const current = useMemo(() => currentFor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
+  const issuedNumbers = useMemo(() => issuedNumbersFor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
 
-  const nextNumber = useMemo(() => nextTokenNumber(entries, selectedDoctorId), [entries, selectedDoctorId])
+  const nextNumber = useMemo(() => nextTokenNumber(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
   const nextToken = useMemo(
     () => formatToken(selectedDoctor?.series ?? '?', nextNumber),
     [selectedDoctor, nextNumber],
