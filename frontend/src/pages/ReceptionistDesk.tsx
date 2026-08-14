@@ -351,23 +351,29 @@ export default function ReceptionistDesk() {
                         {/* Numbers already handed out today — stops the same slip being recorded twice */}
                         {issuedNumbers.length > 0 && (
                           <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-                            <span style={{ fontSize: 10, color: 'var(--text-4)', width: '100%', marginBottom: 2 }}>Already issued for series {selectedDoctor?.series}:</span>
+                            <span style={{ fontSize: 10.5, color: 'var(--text-4)', fontWeight: 700, width: '100%', marginBottom: 3 }}>
+                              Issued & Used Token Numbers (Series {selectedDoctor?.series}):
+                            </span>
                             {issuedNumbers.map(n => {
-                              const entry = queue.doctorQueue.find(e => e.tokenNumber === n)!
-                              const live = entry.status === 'waiting' || entry.status === 'called' || entry.status === 'in_progress'
+                              const entry = queue.doctorQueue.find(e => e.tokenNumber === n)
+                              const isCancelled = entry?.status === 'cancelled' || entry?.status === 'left'
+                              const live = entry?.status === 'waiting' || entry?.status === 'called' || entry?.status === 'in_progress'
+
                               return (
                                 <span
                                   key={n}
-                                  title={live ? 'Still active in the queue' : STATUS_LABEL[entry.status]}
+                                  title={isCancelled ? 'Booking Cancelled / No-Show' : live ? 'Active in Queue' : 'Completed'}
                                   style={{
-                                    fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 5,
+                                    fontSize: 10.5, fontWeight: 800, padding: '2px 7px', borderRadius: 6,
                                     fontFamily: 'monospace',
-                                    background: live ? 'var(--crimson-dim)' : 'rgba(30, 41, 59, 0.04)',
-                                    border: `1px solid ${live ? 'var(--crimson-border)' : 'var(--border-md)'}`,
-                                    color: live ? 'var(--crimson)' : 'var(--text-4)',
+                                    background: isCancelled ? 'rgba(239, 68, 68, 0.15)' : live ? 'var(--blue-dim)' : 'rgba(30, 41, 59, 0.06)',
+                                    border: `1px solid ${isCancelled ? 'rgba(239, 68, 68, 0.4)' : live ? 'var(--blue-border)' : 'var(--border-md)'}`,
+                                    color: isCancelled ? '#ef4444' : live ? 'var(--blue)' : 'var(--text-4)',
+                                    textDecoration: isCancelled ? 'line-through' : 'none'
                                   }}
                                 >
-                                  {formatToken(entry.series, n)}
+                                  {formatToken(selectedDoctor?.series || 'A', n)}
+                                  {isCancelled ? ' (Cancelled)' : live ? ' (Active)' : ' (Done)'}
                                 </span>
                               )
                             })}
@@ -453,7 +459,7 @@ export default function ReceptionistDesk() {
                     <div>
                       <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)' }}>Active Queue — {selectedDoctor?.name}</h3>
                       <div style={{ fontSize: 12, color: 'var(--text-4)' }}>
-                        {waiting.length} waiting · {queue.doctorQueue.filter(e => e.status === 'completed').length} completed · {queue.doctorQueue.filter(e => e.status === 'left').length} no-show
+                        {waiting.length} waiting · {queue.doctorQueue.filter(e => e.status === 'completed').length} completed · {queue.doctorQueue.filter(e => e.status === 'left' || e.status === 'cancelled').length} cancelled / no-show
                       </div>
                     </div>
                   </div>
@@ -482,11 +488,11 @@ export default function ReceptionistDesk() {
                         )}
                         {queue.doctorQueue.map(entry => {
                           const isCurrent = current?.id === entry.id
-                          const isClosed = entry.status === 'completed' || entry.status === 'left'
+                          const isClosed = entry.status === 'completed' || entry.status === 'left' || entry.status === 'cancelled'
                           const stripeColor = isCurrent
                             ? 'var(--emerald)'
                             : entry.status === 'waiting' ? 'var(--amber)'
-                              : entry.status === 'left' ? 'var(--crimson-border)'
+                              : (entry.status === 'left' || entry.status === 'cancelled') ? 'var(--crimson-border)'
                                 : 'transparent'
                           return (
                             <tr
@@ -495,6 +501,7 @@ export default function ReceptionistDesk() {
                                 borderBottom: '1px solid var(--border)',
                                 borderLeft: `3px solid ${stripeColor}`,
                                 background: isCurrent ? 'var(--emerald-dim)' : undefined,
+                                opacity: isClosed ? 0.75 : 1,
                               }}
                             >
                               <td style={{ padding: '13px 16px', fontWeight: 800, fontFamily: 'monospace', color: isCurrent ? 'var(--emerald)' : 'var(--blue)' }}>
@@ -508,7 +515,7 @@ export default function ReceptionistDesk() {
                                   : <Badge cls="badge-amber"><Hash size={10} /> Physical</Badge>}
                               </td>
                               <td style={{ padding: '13px 16px' }}>
-                                <Badge cls={STATUS_BADGE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
+                                <Badge cls={STATUS_BADGE[entry.status] || 'badge-crimson'}>{STATUS_LABEL[entry.status] || 'Cancelled'}</Badge>
                               </td>
                               <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -520,7 +527,9 @@ export default function ReceptionistDesk() {
                               </td>
                               <td style={{ padding: '13px 16px' }}>
                                 {isClosed ? (
-                                  <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>Closed</span>
+                                  <span style={{ fontSize: 11.5, color: entry.status === 'cancelled' || entry.status === 'left' ? '#ef4444' : 'var(--text-4)', fontWeight: entry.status === 'cancelled' || entry.status === 'left' ? 700 : 400 }}>
+                                    {entry.status === 'cancelled' ? 'Booking Cancelled' : entry.status === 'left' ? 'No-Show / Left' : 'Completed'}
+                                  </span>
                                 ) : (
                                   <div style={{ display: 'flex', gap: 6 }}>
                                     <button

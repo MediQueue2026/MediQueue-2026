@@ -20,7 +20,7 @@ interface QueueItem {
   age: number
   g: string
   complaint: string
-  status: 'active' | 'next' | 'waiting' | 'completed' | 'skipped' | 'called' | 'in_progress' | 'left'
+  status: 'active' | 'next' | 'waiting' | 'completed' | 'skipped' | 'called' | 'in_progress' | 'left' | 'cancelled'
   allergy?: string | null
   apptOffset?: number
   isUrgent?: boolean
@@ -414,7 +414,7 @@ export default function DoctorPanel() {
         </div>
 
         {/* RIGHT — Dynamic Upcoming Queue list */}
-        <div className="card glass-form-card" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div className="card glass-form-card" style={{ maxHeight: 520, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', flex: 1 }}>Upcoming Queue (Database)</span>
             <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{filteredQueue.filter(q => q.status !== 'completed' && q.status !== 'left').length} waiting</span>
@@ -430,7 +430,7 @@ export default function DoctorPanel() {
             </div>
           </div>
 
-          <div style={{ overflowY: 'auto', flex: 1 }}>
+          <div style={{ overflowY: 'auto', flex: 1, maxHeight: 450 }}>
             {filteredQueue.length > 0 ? (
               filteredQueue.map((p, i) => {
                 const offsetMins = p.apptOffset ?? 0
@@ -452,7 +452,7 @@ export default function DoctorPanel() {
                   <div key={p.id || i} style={{
                     padding: '14px 18px', borderBottom: '1px solid var(--border)',
                     display: 'flex', alignItems: 'flex-start', gap: 12,
-                    opacity: p.status === 'completed' || p.status === 'left' ? 0.5 : 1,
+                    opacity: p.status === 'completed' || p.status === 'left' || p.status === 'cancelled' ? 0.5 : 1,
                     background: p.status === 'next' || p.status === 'called' ? 'rgba(59,130,246,0.06)' : 'transparent',
                     transition: 'background 0.1s'
                   }}>
@@ -476,7 +476,7 @@ export default function DoctorPanel() {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end', flexShrink: 0 }}>
                       <StatusBadge status={p.status} />
-                      {p.status !== 'completed' && p.status !== 'left' && (
+                      {p.status !== 'completed' && p.status !== 'left' && p.status !== 'cancelled' && (
                         <div style={{
                           fontSize: 10, fontWeight: 700, color: waitColor,
                           display: 'flex', alignItems: 'center', gap: 3,
@@ -487,7 +487,7 @@ export default function DoctorPanel() {
                           {waitLabel}
                         </div>
                       )}
-                      {p.status !== 'completed' && p.status !== 'left' && (
+                      {p.status !== 'completed' && p.status !== 'left' && p.status !== 'cancelled' && (
                         <button
                           onClick={() => handleToggleUrgent(p.token)}
                           className="btn btn-sm"

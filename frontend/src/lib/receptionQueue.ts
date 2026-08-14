@@ -23,7 +23,7 @@
 export type TokenSource = 'online' | 'physical'
 
 /** DB: walk_in_queue.status */
-export type QueueStatus = 'waiting' | 'called' | 'in_progress' | 'completed' | 'left'
+export type QueueStatus = 'waiting' | 'called' | 'in_progress' | 'completed' | 'left' | 'cancelled'
 
 export interface QueueEntry {
   id: string
@@ -158,17 +158,19 @@ export const STATUS_LABEL: Record<QueueStatus, string> = {
   waiting: 'Waiting in Lobby',
   called: 'Called',
   in_progress: 'In Consultation',
-  completed: 'Completed',
-  left: 'No Show',
+  completed: 'Done',
+  left: 'Left / No Show',
+  cancelled: 'Cancelled',
 }
 
 /** Maps a status onto MediQueue's existing badge classes — no new colours. */
 export const STATUS_BADGE: Record<QueueStatus, string> = {
   waiting: 'badge-amber',
-  called: 'badge-blue',
-  in_progress: 'badge-blue',
-  completed: 'badge-emerald',
-  left: 'badge-ghost',
+  called: 'badge-emerald',
+  in_progress: 'badge-emerald',
+  completed: 'badge-ghost',
+  left: 'badge-crimson',
+  cancelled: 'badge-crimson',
 }
 
 // ─── Selectors ───────────────────────────────────────────────────────────────

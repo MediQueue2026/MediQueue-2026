@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Calendar, Clock, X, Check, Stethoscope, AlertCircle, Building2 } from 'lucide-react'
-import { bookAppointment, fetchCentersList, fetchDoctorsList } from '../services/patientService'
+import { Calendar, Clock, X, Check, Stethoscope, AlertCircle, Building2, Loader2 } from 'lucide-react'
+import { bookAppointment, fetchCentersList, fetchDoctorsList, fetchDoctorHours, fetchAllAppointments } from '../services/patientService'
 import { AppointmentItem } from '../types/patient'
 
 interface BookAppointmentModalProps {
@@ -12,16 +12,12 @@ interface BookAppointmentModalProps {
   onBookingSuccess: (newApt: AppointmentItem) => void
 }
 
-const HOURLY_SLOTS = [
-  { hour: 8,  label: '08:00 AM - 09:00 AM', rem: 4 },
-  { hour: 9,  label: '09:00 AM - 10:00 AM', rem: 2 },
-  { hour: 10, label: '10:00 AM - 11:00 AM', rem: 1 },
-  { hour: 11, label: '11:00 AM - 12:00 PM', rem: 3 },
-  { hour: 12, label: '12:00 PM - 01:00 PM', rem: 4 },
-  { hour: 14, label: '02:00 PM - 03:00 PM', rem: 4 },
-  { hour: 15, label: '03:00 PM - 04:00 PM', rem: 0 },
-  { hour: 16, label: '04:00 PM - 05:00 PM', rem: 2 },
-]
+interface SlotItem {
+  hour: number
+  label: string
+  rem: number
+  maxLimit: number
+}
 
 export function BookAppointmentModal({
   isOpen,
@@ -36,8 +32,14 @@ export function BookAppointmentModal({
   
   const [selectedCenterId, setSelectedCenterId] = useState(preselectedCenter || '')
   const [selectedDoctorId, setSelectedDoctorId] = useState(preselectedDoctor || '')
-  const [appointmentDate, setAppointmentDate] = useState('2026-08-15')
+  const [appointmentDate, setAppointmentDate] = useState(() => new Date().toISOString().split('T')[0])
   const [slotHour, setSlotHour] = useState(10)
+
+  const [dynamicSlots, setDynamicSlots] = useState<SlotItem[]>([])
+  const [maxCapacity, setMaxCapacity] = useState(4)
+  const [doctorOffDuty, setDoctorOffDuty] = useState(false)
+  const [loadingSlots, setLoadingSlots] = useState(false)
+
   const [booking, setBooking] = useState(false)
   const [error, setError] = useState('')
 
@@ -63,6 +65,93 @@ export function BookAppointmentModal({
     }
   }, [isOpen, preselectedCenter, preselectedDoctor])
 
+  // Fetch real-time Doctor Hours & live slot availability whenever doctor or date changes
+  useEffect(() => {
+    async function loadDynamicSlots() {
+      if (!selectedDoctorId || !appointmentDate) return
+      setLoadingSlots(true)
+      try {
+        const [hoursRes, apptsRes] = await Promise.all([
+          fetchDoctorHours(selectedDoctorId),
+          fetchAllAppointments()
+        ])
+
+        const limitPerHour = hoursRes.maxAppointmentsPerHour || 4
+        setMaxCapacity(limitPerHour)
+
+        // Parse selected date to find Day of Week (0 = Sun, 1 = Mon, ..., 6 = Sat)
+        const parts = appointmentDate.split('-').map(Number)
+        const dateObj = new Date(parts[0], parts[1] - 1, parts[2])
+        const dow = dateObj.getDay()
+
+        // Find doctor's configured hours for this day of week
+        const dayHours = (hoursRes.hours || []).find((h: any) => h.dayOfWeek === dow)
+        const isAvailable = dayHours ? dayHours.isAvailable : (dow >= 1 && dow <= 5)
+
+        if (!isAvailable) {
+          setDoctorOffDuty(true)
+          setDynamicSlots([])
+          setLoadingSlots(false)
+          return
+        }
+
+        setDoctorOffDuty(false)
+
+        // Parse start and end hours
+        const startH = dayHours?.startTime ? parseInt(dayHours.startTime.split(':')[0], 10) : 8
+        const endH = dayHours?.endTime ? parseInt(dayHours.endTime.split(':')[0], 10) : 17
+
+        // Filter active booked appointments for this doctor & date
+        const bookedForDocAndDate = (apptsRes || []).filter((a: any) => {
+          const aDocId = a.doctorId || a.doctor_id
+          const aDate = (a.appointmentDate || a.appointment_date || '').slice(0, 10)
+          const aStatus = a.status
+          return (aDocId === selectedDoctorId) && (aDate === appointmentDate) && (aStatus !== 'cancelled')
+        })
+
+        // Generate hourly slots
+        const slots: SlotItem[] = []
+        for (let h = startH; h < endH; h++) {
+          const bookedCount = bookedForDocAndDate.filter((a: any) => (a.slotHour ?? a.slot_hour) === h).length
+          const rem = Math.max(0, limitPerHour - bookedCount)
+
+          const formatH = (hourNum: number) => {
+            const pm = hourNum >= 12
+            const h12 = hourNum % 12 === 0 ? 12 : hourNum % 12
+            const padded = h12 < 10 ? `0${h12}` : `${h12}`
+            return `${padded}:00 ${pm ? 'PM' : 'AM'}`
+          }
+
+          slots.push({
+            hour: h,
+            label: `${formatH(h)} - ${formatH(h + 1)}`,
+            rem,
+            maxLimit: limitPerHour
+          })
+        }
+
+        setDynamicSlots(slots)
+
+        // Auto select first available slot
+        if (slots.length > 0) {
+          const validSelected = slots.find(s => s.hour === slotHour && s.rem > 0)
+          if (!validSelected) {
+            const firstAvailable = slots.find(s => s.rem > 0) || slots[0]
+            setSlotHour(firstAvailable.hour)
+          }
+        }
+      } catch (e) {
+        console.warn('Error loading dynamic slots:', e)
+      } finally {
+        setLoadingSlots(false)
+      }
+    }
+
+    if (isOpen && selectedDoctorId) {
+      loadDynamicSlots()
+    }
+  }, [isOpen, selectedDoctorId, appointmentDate])
+
   if (!isOpen) return null
 
   // Filter doctors assigned to selected center
@@ -82,9 +171,14 @@ export function BookAppointmentModal({
   }
 
   const handleConfirm = async () => {
-    const slotInfo = HOURLY_SLOTS.find(s => s.hour === slotHour)
+    if (doctorOffDuty) {
+      setError('Doctor is off-duty on the selected date. Please select another date.')
+      return
+    }
+
+    const slotInfo = dynamicSlots.find(s => s.hour === slotHour)
     if (slotInfo && slotInfo.rem === 0) {
-      setError('This hourly slot has reached its maximum limit (4 patients/hr). Please pick another slot.')
+      setError(`This hourly slot has reached its maximum capacity (${maxCapacity} patients/hr). Please pick another slot.`)
       return
     }
 
@@ -200,46 +294,70 @@ export function BookAppointmentModal({
             />
           </div>
 
-          {/* Hourly Slot Selector (AM/PM Formatted, BR-02 Enforced) */}
+          {/* Dynamic Hourly Slot Selector */}
           <div>
-            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-              Hourly Slot Availability (Max 4 patients/hr)
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {HOURLY_SLOTS.map(s => {
-                const isSelected = slotHour === s.hour
-                const isFull = s.rem === 0
-                return (
-                  <button
-                    key={s.hour}
-                    type="button"
-                    disabled={isFull}
-                    onClick={() => setSlotHour(s.hour)}
-                    style={{
-                      padding: '10px 12px', borderRadius: 8, textAlign: 'left',
-                      background: isSelected ? 'var(--blue)' : isFull ? '#f5f5f5' : '#ffffff',
-                      color: isSelected ? '#ffffff' : isFull ? '#a0a0a0' : 'var(--text-1)',
-                      border: '1px solid', borderColor: isSelected ? 'var(--blue)' : 'var(--border-md)',
-                      cursor: isFull ? 'not-allowed' : 'pointer', opacity: isFull ? 0.6 : 1,
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    <div style={{ fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Clock size={12} /> {s.label}
-                    </div>
-                    <div style={{ fontSize: 10.5, marginTop: 2, color: isSelected ? '#e0f7f5' : isFull ? 'var(--crimson)' : 'var(--blue-dark)' }}>
-                      {isFull ? '❌ Slot Full (4/4 booked)' : `● ${s.rem} of 4 slots available`}
-                    </div>
-                  </button>
-                )
-              })}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase' }}>
+                Hourly Slot Availability (Max {maxCapacity} patients/hr)
+              </label>
+              {loadingSlots && (
+                <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Loader2 size={12} className="spin" /> Checking live capacity...
+                </span>
+              )}
             </div>
+
+            {doctorOffDuty ? (
+              <div style={{ padding: 16, borderRadius: 10, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#D97706', fontSize: 12.5, textAlign: 'center', fontWeight: 600 }}>
+                🚨 Doctor is Off-Duty / Not Available on this day of the week. Please select another date above.
+              </div>
+            ) : dynamicSlots.length === 0 && !loadingSlots ? (
+              <div style={{ padding: 16, borderRadius: 10, background: '#f8fafc', border: '1px solid var(--border-md)', color: 'var(--text-4)', fontSize: 12, textAlign: 'center' }}>
+                No hours configured for this doctor on this day.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {dynamicSlots.map(s => {
+                  const isSelected = slotHour === s.hour
+                  const isFull = s.rem === 0
+                  return (
+                    <button
+                      key={s.hour}
+                      type="button"
+                      disabled={isFull}
+                      onClick={() => setSlotHour(s.hour)}
+                      style={{
+                        padding: '10px 12px', borderRadius: 8, textAlign: 'left',
+                        background: isSelected ? 'var(--blue)' : isFull ? '#f5f5f5' : '#ffffff',
+                        color: isSelected ? '#ffffff' : isFull ? '#a0a0a0' : 'var(--text-1)',
+                        border: '1px solid', borderColor: isSelected ? 'var(--blue)' : 'var(--border-md)',
+                        cursor: isFull ? 'not-allowed' : 'pointer', opacity: isFull ? 0.6 : 1,
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <div style={{ fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Clock size={12} /> {s.label}
+                      </div>
+                      <div style={{ fontSize: 10.5, marginTop: 2, color: isSelected ? '#e0f7f5' : isFull ? 'var(--crimson)' : 'var(--blue-dark)' }}>
+                        {isFull ? `❌ Slot Full (${s.maxLimit}/${s.maxLimit} booked)` : `● ${s.rem} of ${s.maxLimit} slots available`}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
             <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
-            <button type="button" onClick={handleConfirm} disabled={booking || !selectedDoc.id} className="btn btn-primary" style={{ gap: 6 }}>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={booking || !selectedDoc.id || doctorOffDuty}
+              className="btn btn-primary"
+              style={{ gap: 6 }}
+            >
               <Check size={14} /> {booking ? 'Booking...' : 'Confirm Appointment'}
             </button>
           </div>
