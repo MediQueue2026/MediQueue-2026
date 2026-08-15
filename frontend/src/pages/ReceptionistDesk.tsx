@@ -40,7 +40,7 @@ function StatPill({ icon, label, value, accent = 'var(--text-2)' }: {
 export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
 
-  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'my-doctors'>('doctors')
+  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'my-doctors'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
@@ -51,7 +51,8 @@ export default function ReceptionistDesk() {
   const [editingDoctor, setEditingDoctor] = useState<ApiDoctor | null>(null)
   const [hoursDoctor, setHoursDoctor] = useState<ApiDoctor | null>(null)
 
-  // Counter form — mirrors the two ways a token reaches the queue.
+  // Counter form — patients book their own online tokens from the Patient app;
+  // this desk only records walk-ins against a pre-printed physical slip.
   const tokenSource: TokenSource = 'physical'
   const [formName, setFormName] = useState('')
   const [formNic, setFormNic] = useState('')
@@ -72,13 +73,24 @@ export default function ReceptionistDesk() {
 
   const { selectedDoctor, current, waiting, upNext, issuedNumbers } = queue
 
+  // Quick-pick candidates for a printed slip number — the lowest numbers not
+  // already recorded today, so the receptionist taps a number instead of typing it.
+  const nextAvailableTokens = useMemo(() => {
+    const taken = new Set(issuedNumbers)
+    const candidates: number[] = []
+    for (let n = 1; candidates.length < 8 && n < 1000; n++) {
+      if (!taken.has(n)) candidates.push(n)
+    }
+    return candidates
+  }, [issuedNumbers])
+
   // Clinic-wide numbers for the header strip.
   const issuedToday = queue.entries.length
   const waitingInLobby = useMemo(
     () => queue.entries.filter(e => e.status === 'waiting').length,
     [queue.entries],
   )
-  const avgWait = useMemo(() => averageWaitMinutes(queue.entries), [queue.entries])
+  const avgWait = useMemo(() => averageWaitMinutes(queue.entries, queue.doctors), [queue.entries, queue.doctors])
   const activeDoctors = useMemo(() => queue.doctors.filter(d => d.status === 'active').length, [queue.doctors])
 
   const resetForm = () => {
@@ -100,7 +112,6 @@ export default function ReceptionistDesk() {
       setTimeout(() => setIssued(null), 3000)
     }
   }
-
 
   // Search spans the whole clinic, not just the selected doctor's queue.
   const filteredPatients = useMemo(() => {
@@ -163,6 +174,9 @@ export default function ReceptionistDesk() {
         {/* Nav Tabs */}
         <div style={{ padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, paddingLeft: 8 }}>Navigation</div>
+          <button onClick={() => { setActiveTab('checkin'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'checkin' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+            <Ticket size={16} /> Issue Tokens & Queue
+          </button>
           <button onClick={() => { setActiveTab('doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <Stethoscope size={16} /> Doctor Roster
           </button>
@@ -170,7 +184,7 @@ export default function ReceptionistDesk() {
             <Users size={16} /> Patients
           </button>
           <button onClick={() => { setActiveTab('my-doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'my-doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
-            <CalendarClock size={16} /> Doctors
+            <CalendarClock size={16} /> Manage Doctors
           </button>
         </div>
 
@@ -239,15 +253,23 @@ export default function ReceptionistDesk() {
           {/* CHECK-IN & COUNTER QUEUE TAB */}
           {activeTab === 'checkin' && (
             <>
-              {/* QUEUE HEADER */}
-              <div style={{ padding: '24px 24px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+              {/* QUEUE HEADER — switch doctors here without leaving the tab */}
+              <div style={{ padding: '24px 24px 0', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <button onClick={() => setActiveTab('doctors')} className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 13, gap: 6 }}>
                   <span style={{ fontSize: 16, lineHeight: 1 }}>←</span> Back to Roster
                 </button>
                 <div style={{ width: 1, height: 20, background: 'var(--border-md)' }} />
-                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>
-                  {selectedDoctor ? `Queue for ${selectedDoctor.name}` : 'Select a doctor'}
-                </div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-4)' }}>Queue for</div>
+                <select
+                  className="input"
+                  value={queue.selectedDoctorId}
+                  onChange={e => { queue.setSelectedDoctorId(e.target.value); queue.clearError() }}
+                  style={{ width: 'auto', height: 38, fontSize: 14.5, fontWeight: 800, padding: '0 12px', color: 'var(--text-1)' }}
+                >
+                  {queue.doctors.map(d => (
+                    <option key={d.id} value={d.id}>{d.name} — {d.dept}</option>
+                  ))}
+                </select>
               </div>
 
               {/* LIVE QUEUE HERO — the two things a receptionist needs at a glance, big enough to read from a step back */}
@@ -324,12 +346,10 @@ export default function ReceptionistDesk() {
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>Issue Token — {selectedDoctor?.name}</div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>
-                        <><span>Series </span><strong style={{ color: 'var(--blue)' }}>{selectedDoctor?.series}</strong><span> · pre-printed slip</span></>
+                        <>Series <strong style={{ color: 'var(--blue)' }}>{selectedDoctor?.series}</strong> · pre-printed slip</>
                       </div>
                     </div>
                   </div>
-
-
 
                   <form
                     onSubmit={e => { e.preventDefault(); if (canIssue) handleIssueToken() }}
@@ -338,12 +358,29 @@ export default function ReceptionistDesk() {
                     {tokenSource === 'physical' && (
                       <div>
                         <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Printed Token Number</label>
+
+                        {/* Tap the next slip number instead of typing it — the nearest available one is highlighted. */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                          {nextAvailableTokens.map((n, i) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => { setPhysicalToken(String(n)); queue.clearError() }}
+                              className={`btn btn-sm ${physicalToken === String(n) ? 'btn-primary' : i === 0 ? 'btn-amber' : 'btn-ghost'}`}
+                              style={{ width: 44, height: 40, padding: 0, justifyContent: 'center', fontWeight: 800, fontFamily: 'monospace', fontSize: 13.5 }}
+                              title={i === 0 ? 'Next available number' : undefined}
+                            >
+                              {n}
+                            </button>
+                          ))}
+                        </div>
+
                         <input
                           ref={physicalInputRef}
                           className="input"
                           type="number"
                           min={1}
-                          placeholder="e.g. 16"
+                          placeholder="Or type a different number"
                           value={physicalToken}
                           onChange={e => { setPhysicalToken(e.target.value); queue.clearError() }}
                           style={{ height: 42, fontSize: 14, borderColor: queue.error ? 'var(--crimson-border)' : undefined }}
@@ -527,9 +564,8 @@ export default function ReceptionistDesk() {
                               </td>
                               <td style={{ padding: '13px 16px' }}>
                                 {isClosed ? (
-                                  <span style={{ fontSize: 11.5, color: entry.status === 'cancelled' || entry.status === 'left' ? '#ef4444' : 'var(--text-4)', fontWeight: entry.status === 'cancelled' || entry.status === 'left' ? 700 : 400 }}>
-                                    {entry.status === 'cancelled' ? 'Booking Cancelled' : entry.status === 'left' ? 'No-Show / Left' : 'Completed'}
-                                  </span>
+                                  // The Status column already names the state — no need to repeat it here.
+                                  <span style={{ fontSize: 12, color: 'var(--text-4)' }}>—</span>
                                 ) : (
                                   <div style={{ display: 'flex', gap: 6 }}>
                                     <button
@@ -648,6 +684,13 @@ export default function ReceptionistDesk() {
                       <span>Now serving: <strong style={{ color: 'var(--text-2)', fontFamily: 'monospace' }}>{serving ? entryToken(serving) : '—'}</strong></span>
                       <span>Waiting: <strong style={{ color: 'var(--text-2)' }}>{docWaiting.length}</strong> · Avg {d.avgConsultMinutes} min/consult</span>
                     </div>
+                    <button
+                      onClick={e => { e.stopPropagation(); queue.setSelectedDoctorId(d.id); setActiveTab('checkin'); queue.clearError() }}
+                      className="btn btn-primary btn-sm"
+                      style={{ width: '100%', justifyContent: 'center', gap: 6, marginTop: 14 }}
+                    >
+                      <Ticket size={13} /> Manage Queue
+                    </button>
                   </div>
                 )
               })}
