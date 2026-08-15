@@ -401,6 +401,7 @@ select.input option {
 
 /* ── Desktop-only helper ─────────────────────────────────────────────── */
 .desktop-only { display: flex; }
+.mobile-only { display: none; }
 
 /* ── Reception Desk: doctor strip & live-queue hero ─────────────────────── */
 .eyebrow {
@@ -485,6 +486,7 @@ select.input option {
   .page-switcher::-webkit-scrollbar { display: none; }
   .page-tab { padding: 0 10px; font-size: 11px; gap: 5px; }
   .desktop-only { display: none !important; }
+  .mobile-only { display: inline-flex !important; }
 
   /* Sidebar: hidden by default, shown when open */
   .mobile-layout-flex {

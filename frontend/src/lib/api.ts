@@ -162,11 +162,15 @@ export interface ApiQueueEntry {
   nic?: string
   phone: string
   source: 'online' | 'physical'
-  status: 'waiting' | 'called' | 'in_progress' | 'completed' | 'left'
+  /** `cancelled` only ever arrives from a merged online appointment the patient cancelled — never settable via `setQueueEntryStatus`. */
+  status: 'waiting' | 'called' | 'in_progress' | 'completed' | 'left' | 'cancelled'
   /** ISO timestamp strings — the caller converts to `Date`. */
   issuedAt: string
   calledAt?: string
 }
+
+/** Statuses the Reception Desk may actively set — matches the backend's `allowed` list in updateQueueEntryStatus. */
+export type SettableQueueStatus = 'waiting' | 'called' | 'in_progress' | 'completed' | 'left'
 
 /** One doctor's public standing on the lobby board. */
 export interface ApiBoardEntry {
@@ -351,7 +355,7 @@ export const api = {
       body: JSON.stringify({ doctorId }),
     }),
 
-  setQueueEntryStatus: (id: string, status: ApiQueueEntry['status']) =>
+  setQueueEntryStatus: (id: string, status: SettableQueueStatus) =>
     request<{ entry: ApiQueueEntry }>(`/queue/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),

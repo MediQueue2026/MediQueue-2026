@@ -201,7 +201,7 @@ export function useReceptionQueue() {
   }, [current, offline, selectedDoctorId])
 
   const setStatus = useCallback(
-    async (id: string, status: QueueStatus) => {
+    async (id: string, status: Exclude<QueueStatus, 'cancelled'>) => {
       if (offline) {
         setEntries(prev => setEntryStatusReducer(prev, id, status))
         return

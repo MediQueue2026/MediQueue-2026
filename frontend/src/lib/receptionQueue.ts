@@ -227,9 +227,9 @@ export function estimateWaitMinutes(positionInLine: number, doctor?: ReceptionDo
   return positionInLine * avg + penalty
 }
 
-export function averageWaitMinutes(entries: QueueEntry[]): number {
-  const waits = RECEPTION_DOCTORS.flatMap((doc) =>
-    waitingFor(entries, doc.id).map((_, i) => estimateWaitMinutes(i + 1, doc)),
+export function averageWaitMinutes(entries: QueueEntry[], doctors: ReceptionDoctor[] = RECEPTION_DOCTORS): number {
+  const waits = doctors.flatMap((doc) =>
+    waitingFor(entries, doc.id, doc).map((_, i) => estimateWaitMinutes(i + 1, doc)),
   )
   if (waits.length === 0) return 0
   return Math.round(waits.reduce((sum, w) => sum + w, 0) / waits.length)
