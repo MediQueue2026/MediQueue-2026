@@ -101,6 +101,7 @@ export async function updateDoctor(req, res, next) {
     next(err);
   }
 }
+export async function getDoctors(req, res, next) {
 
 export async function getDoctorSummary(req, res, next) {
   try {
@@ -292,6 +293,30 @@ export async function getDoctorHours(req, res, next) {
 
     const { data, error } = await supabase
       .from('doctors')
+      .select('id, specialization, room_number, current_status, max_appointments_per_hour, series, center_id, medical_centers(name), users(full_name)')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.warn('Supabase query error on doctors:', error.message);
+      return res.json({ doctors: [] });
+    }
+
+    if (!data || data.length === 0) {
+      return res.json({ doctors: [] });
+    }
+
+    res.json({
+      doctors: data.map(d => ({
+        id: d.id,
+        name: d.users?.full_name ?? 'Unknown Doctor',
+        dept: d.specialization,
+        room: d.room_number ?? 'Unassigned',
+        series: d.series ?? '?',
+        status: d.current_status ?? 'active',
+        avgConsultMinutes: Math.max(1, Math.round(60 / (d.max_appointments_per_hour || 4))),
+        centerId: d.center_id ?? null,
+        centerName: d.medical_centers?.name ?? null,
+      })),
       .select('available_hours, max_appointments_per_hour')
       .eq('id', doctorId)
       .single();

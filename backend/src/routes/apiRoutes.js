@@ -109,6 +109,10 @@ router.get('/centers', getCenters);
 router.get('/doctors', getDoctors);
 router.get('/queue/board', getPublicBoard);
 
+// ── Center Routes ────────────────────────────────────────────────────────────
+router.post('/centers', optionalAuth, createCenter);
+router.put('/centers/:id', optionalAuth, updateCenter);
+router.delete('/centers/:id', optionalAuth, deleteCenter);
 // ── Staff & Doctor Management Routes ────────────────────────────────────────
 router.post('/centers', authMiddleware, requireRole(['admin']), createCenter);
 router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);

@@ -83,6 +83,93 @@ const mapApiUserToStaffMember = (user: { id: string; email: string; fullName: st
   createdAt: user.createdAt,
 })
 
+function AssignedDoctorsDropdown({
+  doctors,
+  onRemoveDoctor,
+}: {
+  doctors: ApiDoctor[]
+  onRemoveDoctor: (id: string) => void
+}) {
+  const [selectedId, setSelectedId] = useState<string>(doctors[0]?.id ?? '')
+
+  if (doctors.length === 0) return null
+
+  // Single assigned doctor -> display single doctor card directly
+  if (doctors.length === 1) {
+    const doc = doctors[0]
+    return (
+      <div style={{ borderTop: '1px solid var(--border-md)', paddingTop: 12 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>
+          Assigned Doctors (1)
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 10, borderRadius: 12, background: 'rgba(15, 118, 110, 0.05)', border: '1px solid var(--border-md)' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{doc.name}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{doc.dept}{doc.room ? ` · ${doc.room}` : ''}</div>
+          </div>
+          <button
+            onClick={() => onRemoveDoctor(doc.id)}
+            className="btn btn-ghost btn-sm"
+            style={{ minWidth: 110 }}
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // More than 1 assigned doctor -> render dropdown box
+  const activeDoc = doctors.find(d => d.id === selectedId) || doctors[0]
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border-md)', paddingTop: 12 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>
+        Assigned Doctors ({doctors.length})
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <select
+          className="input"
+          value={activeDoc?.id ?? ''}
+          onChange={e => setSelectedId(e.target.value)}
+          style={{
+            height: 42,
+            fontSize: 13,
+            fontWeight: 600,
+            borderRadius: 10,
+            border: '1px solid var(--border-md)',
+            background: 'var(--bg)',
+            color: 'var(--text-1)',
+            padding: '0 12px',
+            cursor: 'pointer'
+          }}
+        >
+          {doctors.map(doc => (
+            <option key={doc.id} value={doc.id}>
+              {doc.name} — {doc.dept}{doc.room ? ` (${doc.room})` : ''}
+            </option>
+          ))}
+        </select>
+        {activeDoc && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 10, borderRadius: 12, background: 'rgba(15, 118, 110, 0.05)', border: '1px solid var(--border-md)' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{activeDoc.name}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{activeDoc.dept}{activeDoc.room ? ` · ${activeDoc.room}` : ''}</div>
+            </div>
+            <button
+              onClick={() => onRemoveDoctor(activeDoc.id)}
+              className="btn btn-ghost btn-sm"
+              style={{ minWidth: 110 }}
+            >
+              Remove
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function AdminPanel() {
   const [nav, setNav] = useState('health')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -342,14 +429,20 @@ export default function AdminPanel() {
         onClose={() => setShowAddCenterModal(false)}
         onAdd={async (centerData) => {
           try {
-            await api.createCenter(centerData)
-            setCentersLoading(true)
+            const res = await api.createCenter(centerData)
+            if (res?.center) {
+              setCenters(prev => {
+                const exists = prev.some(c => c.id === res.center.id)
+                return exists ? prev : [...prev, res.center]
+              })
+            }
             const r = await api.getCenters()
-            setCenters(r.centers)
+            if (r?.centers) {
+              setCenters(r.centers)
+            }
           } catch (err) {
             console.error('Failed to create center', err)
-          } finally {
-            setCentersLoading(false)
+            alert('Failed to add center to database.')
           }
         }}
       />
@@ -767,28 +860,7 @@ export default function AdminPanel() {
                             <Trash2 size={14} /> Delete Center
                           </button>
                         </div>
-                        {assignedDoctors.length > 0 && (
-                          <div style={{ borderTop: '1px solid var(--border-md)', paddingTop: 12 }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>Assigned Doctors ({assignedDoctors.length})</div>
-                            <div style={{ display: 'grid', gap: 8 }}>
-                              {assignedDoctors.map(doc => (
-                                <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 10, borderRadius: 12, background: 'rgba(15, 118, 110, 0.05)' }}>
-                                  <div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{doc.name}</div>
-                                    <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{doc.dept}{doc.room ? ` · ${doc.room}` : ''}</div>
-                                  </div>
-                                  <button
-                                    onClick={() => handleRemoveDoctor(doc.id)}
-                                    className="btn btn-ghost btn-sm"
-                                    style={{ minWidth: 110 }}
-                                  >
-                                    Remove
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        <AssignedDoctorsDropdown doctors={assignedDoctors} onRemoveDoctor={handleRemoveDoctor} />
                       </div>
                     </div>
                   )
