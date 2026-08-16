@@ -401,6 +401,7 @@ select.input option {
 
 /* ── Desktop-only helper ─────────────────────────────────────────────── */
 .desktop-only { display: flex; }
+.mobile-only { display: none; }
 
 /* ── Reception Desk: doctor strip & live-queue hero ─────────────────────── */
 .eyebrow {
@@ -485,6 +486,7 @@ select.input option {
   .page-switcher::-webkit-scrollbar { display: none; }
   .page-tab { padding: 0 10px; font-size: 11px; gap: 5px; }
   .desktop-only { display: none !important; }
+  .mobile-only { display: inline-flex !important; }
 
   /* Sidebar: hidden by default, shown when open */
   .mobile-layout-flex {
@@ -832,4 +834,23 @@ select.input option {
     white-space: nowrap;
   }
   .auth-form-pane { padding: 26px; }
+}
+
+.hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.hover-lift:hover { transform: translateY(-2px); box-shadow: 0 4px 12px var(--glass-shadow); }
+
+/* Receptionist Desk Mobile Drawer & Layout */
+@media (max-width: 768px) {
+  .reception-sidebar {
+    position: fixed !important;
+    left: -280px;
+    top: 0;
+    bottom: 0;
+    z-index: 1001;
+    transition: left 0.3s ease;
+    box-shadow: 4px 0 20px rgba(0,0,0,0.2);
+  }
+  .reception-sidebar.mobile-open {
+    left: 0 !important;
+  }
 }

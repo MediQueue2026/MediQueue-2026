@@ -61,7 +61,7 @@ const DEMO_STORAGE_KEY = 'mediqueue_demo_user'
 
 /** Stand-in identities for offline preview only — these carry no real access. */
 const DEMO_USERS: Record<Exclude<UserRole, null>, { id: string; name: string; email: string }> = {
-  patient: { id: 'demo-patient', name: 'Rajan Mehta', email: 'patient@mediqueue.io' },
+  patient: { id: 'demo-patient', name: 'Patient User', email: 'patient@mediqueue.io' },
   doctor: { id: 'demo-doctor', name: 'Dr. Ethan Carr', email: 'dr.carr@mediqueue.io' },
   receptionist: { id: 'demo-reception', name: 'Chamari Silva', email: 'reception@mediqueue.io' },
   admin: { id: 'demo-admin', name: 'System Administrator', email: 'admin@mediqueue.io' },
