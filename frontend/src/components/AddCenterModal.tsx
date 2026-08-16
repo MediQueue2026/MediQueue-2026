@@ -23,14 +23,15 @@ export default function AddCenterModal({ isOpen, onClose, onAdd }: {
   const [phone, setPhone] = useState('')
   const [status, setStatus] = useState<ApiCenter['status']>('operational')
   const [submitted, setSubmitted] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   if (!isOpen) return null
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSubmitted(true)
-    setTimeout(() => {
-      onAdd?.({
+    setSubmitting(true)
+    try {
+      await onAdd?.({
         name,
         city,
         address: address || city,
@@ -39,16 +40,23 @@ export default function AddCenterModal({ isOpen, onClose, onAdd }: {
         phone: phone || undefined,
         status,
       })
-      setSubmitted(false)
-      setName('')
-      setCity('')
-      setAddress('')
-      setOpeningHours('08:00 - 18:00')
-      setServices('General Medicine, Cardiology')
-      setPhone('')
-      setStatus('operational')
-      onClose()
-    }, 300)
+      setSubmitted(true)
+      setTimeout(() => {
+        setSubmitted(false)
+        setName('')
+        setCity('')
+        setAddress('')
+        setOpeningHours('08:00 - 18:00')
+        setServices('General Medicine, Cardiology')
+        setPhone('')
+        setStatus('operational')
+        onClose()
+      }, 800)
+    } catch (err) {
+      console.error('Failed to add medical center', err)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -204,9 +212,9 @@ export default function AddCenterModal({ isOpen, onClose, onAdd }: {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
-              <button type="button" onClick={onClose} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
-              <button type="submit" className="btn btn-primary" style={{ gap: 8, height: 42, padding: '0 20px', fontSize: 14 }}>
-                <Plus size={16} /> Add Medical Center
+              <button type="button" onClick={onClose} disabled={submitting} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
+              <button type="submit" disabled={submitting} className="btn btn-primary" style={{ gap: 8, height: 42, padding: '0 20px', fontSize: 14 }}>
+                <Plus size={16} /> {submitting ? 'Adding…' : 'Add Medical Center'}
               </button>
             </div>
           </form>

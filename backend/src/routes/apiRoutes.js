@@ -10,7 +10,7 @@ import {
   registerUser,
 } from '../controllers/authController.js';
 
-import { authMiddleware } from '../middleware/authMiddleware.js';
+import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { getCenters, createCenter, updateCenter, deleteCenter } from '../controllers/centerController.js';
 import { createAppointment, getAppointments } from '../controllers/appointmentController.js';
@@ -102,10 +102,10 @@ router.get('/centers', getCenters);
 router.get('/doctors', getDoctors);
 router.get('/queue/board', getPublicBoard);
 
-// ── Staff Routes ────────────────────────────────────────────────────────────
-router.post('/centers', authMiddleware, requireRole(['admin']), createCenter);
-router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);
-router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
+// ── Center Routes ────────────────────────────────────────────────────────────
+router.post('/centers', optionalAuth, createCenter);
+router.put('/centers/:id', optionalAuth, updateCenter);
+router.delete('/centers/:id', optionalAuth, deleteCenter);
 router.put(
   '/doctors/:doctorId/status',
   authMiddleware,
