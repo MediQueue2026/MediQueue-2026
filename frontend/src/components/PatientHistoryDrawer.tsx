@@ -1,24 +1,65 @@
-import { X, FileText, Activity, Calendar, Download, Stethoscope, HeartPulse } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, FileText, Stethoscope } from 'lucide-react'
 
-export default function PatientHistoryDrawer({ isOpen, onClose, patientName = 'Nimal Silva', patientToken = '#A-11' }: {
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+
+interface PatientHistoryDrawerProps {
   isOpen: boolean
   onClose: () => void
+  patientId?: string
   patientName?: string
   patientToken?: string
-}) {
+}
+
+export default function PatientHistoryDrawer({
+  isOpen,
+  onClose,
+  patientId,
+  patientName = 'Nimal Silva',
+  patientToken = '#A-11'
+}: PatientHistoryDrawerProps) {
+  const [dbRecords, setDbRecords] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    async function loadRecords() {
+      try {
+        setLoading(true)
+        const targetId = patientId || 'all'
+        const url = `${API_BASE}/records/${targetId}${patientName ? `?patientName=${encodeURIComponent(patientName)}` : ''}`
+        const res = await fetch(url)
+        if (res.ok) {
+          const data = await res.json()
+          setDbRecords(data.records || [])
+        }
+      } catch (e) {
+        console.warn('Patient history API fetch warning:', e)
+      } finally {
+        setLoading(false)
+      }
+    }
+    if (isOpen) {
+      loadRecords()
+    }
+  }, [isOpen, patientId, patientName])
+
   if (!isOpen) return null
 
-  const visits = [
-    { date: 'Jul 12, 2026', doc: 'Dr. Ethan Carr', spec: 'General Medicine', dx: 'Acute Bronchitis & Pharyngitis', rx: 'Amoxicillin 500mg, Paracetamol 500mg', status: 'Resolved' },
-    { date: 'May 30, 2026', doc: 'Dr. Aisha Patel', spec: 'Cardiology', dx: 'Routine ECG & Blood Pressure Check', rx: 'Amlodipine 5mg OD', status: 'Ongoing Monitoring' },
-    { date: 'Feb 14, 2026', doc: 'Dr. S. Montoya', spec: 'General Practice', dx: 'Seasonal Influenza', rx: 'Rest, Hydration & Multivitamins', status: 'Resolved' }
-  ]
+  const visits = dbRecords.map(r => {
+    const meds = r.rx_medications || r.rxMedications
+    const rxStr = Array.isArray(meds) && meds.length > 0
+      ? meds.map((m: any) => `${m.name || m.medication || 'Medication'} (${m.dosage || '1 dose'}${m.freq ? `, ${m.freq}` : ''})`).join(' · ')
+      : (r.notes || 'Clinical consultation & prescription')
 
-  const labs = [
-    { title: 'Complete Blood Count (CBC)', date: 'Jul 12, 2026', lab: 'Central Diagnostics', status: 'Normal' },
-    { title: 'Resting Electrocardiogram (ECG)', date: 'May 30, 2026', lab: 'CardioLab North', status: 'Sinus Rhythm' },
-    { title: 'Lipid Profile & HbA1c', date: 'Jan 10, 2026', lab: 'Central Diagnostics', status: 'Borderline High' }
-  ]
+    return {
+      date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recent',
+      doc: r.issuing_authority || 'Doctor Console',
+      spec: r.record_type || 'Prescription',
+      dx: r.title || 'Clinical Evaluation',
+      rx: rxStr,
+      status: 'Saved to DB'
+    }
+  })
 
   return (
     <div style={{
@@ -38,7 +79,7 @@ export default function PatientHistoryDrawer({ isOpen, onClose, patientName = 'N
         overflowY: 'auto', padding: '32px 28px'
       }}>
         {/* Top bar */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, pb: 16, borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
               width: 40, height: 40, borderRadius: 12,
@@ -49,8 +90,10 @@ export default function PatientHistoryDrawer({ isOpen, onClose, patientName = 'N
               <FileText size={22} />
             </div>
             <div>
-              <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Medical History & Reports</h3>
-              <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>Patient: <strong>{patientName}</strong> ({patientToken}) · Male, 47y</div>
+              <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
+                Electronic Health Records
+              </h3>
+              <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>Patient: <strong>{patientName}</strong> ({patientToken})</div>
             </div>
           </div>
           <button onClick={onClose} style={{
@@ -63,71 +106,46 @@ export default function PatientHistoryDrawer({ isOpen, onClose, patientName = 'N
           </button>
         </div>
 
-        {/* Vitals Summary Card */}
-        <div className="card" style={{ padding: 18, marginBottom: 24, background: 'rgba(18, 198, 186, 0.06)', border: '1px solid var(--border-md)', borderRadius: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <HeartPulse size={16} color="var(--blue)" /> Historical Vitals Baseline
-          </div>
-          <div className="vitals-responsive-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, textAlign: 'center' }}>
-            {[
-              { label: 'Avg BP', val: '126/80' },
-              { label: 'Heart Rate', val: '74 bpm' },
-              { label: 'BMI', val: '24.2' },
-              { label: 'Blood Group', val: 'O+' }
-            ].map(v => (
-              <div key={v.label} style={{ background: '#ffffff', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>{v.label}</div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', marginTop: 2 }}>{v.val}</div>
+        {loading ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)' }}>Loading health records from Supabase...</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {/* Medical Consultation History */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <Stethoscope size={16} color="var(--blue)" />
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  Past Consultations ({visits.length})
+                </span>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Past Visit Logs */}
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Stethoscope size={18} color="var(--blue)" /> Past Consultation Records ({visits.length})
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {visits.map((v, i) => (
-              <div key={i} className="card" style={{ padding: 16, background: '#ffffff', border: '1px solid var(--border-md)', borderRadius: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{v.dx}</span>
-                  <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{v.date}</span>
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>
-                  Attended by: <strong>{v.doc}</strong> ({v.spec})
-                </div>
-                <div style={{ fontSize: 12, background: 'var(--blue-dim)', padding: '8px 12px', borderRadius: 8, color: 'var(--text-2)' }}>
-                  <strong>Rx:</strong> {v.rx}
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {visits.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: 'center', background: '#ffffff', borderRadius: 14, color: 'var(--text-4)', fontSize: 13, border: '1px solid var(--border-md)' }}>
+                    No past health records or prescriptions found for this patient in the database.
+                  </div>
+                ) : (
+                  visits.map((v, i) => (
+                    <div key={i} style={{
+                      padding: 16, background: '#ffffff', borderRadius: 14,
+                      border: '1px solid var(--border-md)', boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>{v.dx}</div>
+                        <span className="badge badge-emerald" style={{ fontSize: 10 }}>{v.status}</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--blue-dark)', fontWeight: 600, marginBottom: 8 }}>
+                        {v.doc} · {v.spec} · <span style={{ color: 'var(--text-4)' }}>{v.date}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--bg)', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        <strong>Rx Prescribed:</strong> {v.rx}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-            ))}
+            </div>
           </div>
-        </div>
-
-        {/* Diagnostic & Lab Reports */}
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Activity size={18} color="var(--blue)" /> Diagnostic & Lab Reports ({labs.length})
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {labs.map((l, i) => (
-              <div key={i} style={{
-                padding: '14px 16px', borderRadius: 12, background: '#ffffff',
-                border: '1px solid var(--border-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-              }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{l.title}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{l.lab} · {l.date}</div>
-                </div>
-                <button className="btn btn-ghost btn-sm" style={{ gap: 5, fontSize: 11.5 }}>
-                  <Download size={14} /> PDF
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )

@@ -25,70 +25,215 @@ function mapEntry(row) {
 }
 
 /**
- * GET /api/queue/board — public waiting-room board.
- *
- * Deliberately public, and deliberately thin: token numbers and counts only,
- * never a patient name, phone or NIC. This is what a screen in the lobby or the
- * public landing page may show, so it must be safe for anyone standing in the
- * room to read. Staff use GET /api/queue for the full rows.
+ * GET /api/queue/board — overall public waiting-room board across centers, doctors, and tokens.
  */
 export async function getPublicBoard(req, res, next) {
   try {
     const date = todayDate();
-    const { data, error } = await supabase
+
+    // 1. Query walk-in queue rows
+    const { data: queueRows, error } = await supabase
       .from('walk_in_queue')
-      .select('doctor_id, queue_number, status, doctors(series)')
-      .eq('queue_date', date)
-      .in('status', ['waiting', 'called', 'in_progress'])
+      .select('*, doctors(specialization, room_number, series, center_id, user_id, medical_centers(name), users(full_name))')
+      .or(`queue_date.eq.${date},status.in.(waiting,called,in_progress)`)
       .order('queue_number', { ascending: true });
 
-    if (error) {
-      if (error.code === TABLE_MISSING) return res.json({ board: [], migrationPending: true });
-      throw error;
+    if (error && error.code === TABLE_MISSING) {
+      return res.json({ doctors: [], board: [], migrationPending: true });
     }
 
-    const byDoctor = new Map();
-    for (const row of data || []) {
-      const entry = byDoctor.get(row.doctor_id) ?? {
-        doctorId: row.doctor_id,
-        series: row.doctors?.series ?? '?',
-        nowServing: null,
-        waiting: 0,
-      };
-      // `called` outranks `in_progress` — the board announces the newest call.
-      if (row.status === 'called' || (row.status === 'in_progress' && !entry.nowServing)) {
-        entry.nowServing = row.queue_number;
-      } else if (row.status === 'waiting') {
-        entry.waiting += 1;
+    // 2. Query online appointments
+    const { data: aptRows } = await supabase
+      .from('appointments')
+      .select('*, doctors(specialization, room_number, series, center_id, user_id, medical_centers(name), users(full_name)), users:patient_id(full_name)')
+      .or(`appointment_date.eq.${date},status.eq.booked`);
+
+    // 3. Fetch all registered doctors
+    const { data: doctorsData } = await supabase
+      .from('doctors')
+      .select('id, user_id, specialization, room_number, series, current_status, medical_centers(name), users(full_name)');
+
+    const doctorMap = new Map();
+
+    // Helper to find existing doctor object in doctorMap by ID, user_id, or series
+    const findDocObj = (docId, series, userId) => {
+      if (docId && doctorMap.has(docId)) return doctorMap.get(docId);
+      for (const d of doctorMap.values()) {
+        if ((d.doctorId && d.doctorId === docId) ||
+            (d.userId && docId && d.userId === docId) ||
+            (userId && d.userId === userId) ||
+            (series && d.series && d.series.toLowerCase() === series.toLowerCase())) {
+          return d;
+        }
       }
-      byDoctor.set(row.doctor_id, entry);
+      return null;
+    };
+
+    // Initialize doctor map
+    for (const d of doctorsData || []) {
+      const docObj = {
+        doctorId: d.id,
+        userId: d.user_id,
+        doctorName: d.users?.full_name || 'Dr. Medical Specialist',
+        specialization: d.specialization || 'General Medicine',
+        roomNumber: d.room_number || 'Room 01',
+        centerName: d.medical_centers?.name || 'MediQueue Central Clinic',
+        series: d.series || 'A',
+        nowServing: null,
+        waitingQueue: []
+      };
+      doctorMap.set(d.id, docObj);
     }
 
-    res.json({ board: [...byDoctor.values()] });
+    // Process walk-in queue rows
+    for (const row of queueRows || []) {
+      let docObj = findDocObj(row.doctor_id, row.doctors?.series, row.doctors?.user_id);
+      if (!docObj) {
+        docObj = {
+          doctorId: row.doctor_id,
+          userId: row.doctors?.user_id,
+          doctorName: row.doctors?.users?.full_name || 'Dr. Medical Specialist',
+          specialization: row.doctors?.specialization || 'General Medicine',
+          roomNumber: row.doctors?.room_number || 'Room 01',
+          centerName: row.doctors?.medical_centers?.name || 'MediQueue Central Clinic',
+          series: row.doctors?.series || 'A',
+          nowServing: null,
+          waitingQueue: []
+        };
+        doctorMap.set(row.doctor_id, docObj);
+      }
+
+      const tokenStr = `#${docObj.series}-${String(row.queue_number).padStart(2, '0')}`;
+      const entryItem = {
+        id: row.id,
+        token: tokenStr,
+        queue_number: row.queue_number,
+        patientName: row.patient_name || 'Patient',
+        status: row.status
+      };
+
+      if (row.status === 'called' || (row.status === 'in_progress' && !docObj.nowServing)) {
+        docObj.nowServing = entryItem;
+      } else if (row.status === 'waiting') {
+        docObj.waitingQueue.push(entryItem);
+      }
+    }
+
+    // Process online appointments
+    const existingKeys = new Set((queueRows || []).map(r => `${r.doctor_id}_${r.queue_number}`));
+
+    for (const a of aptRows || []) {
+      const key = `${a.doctor_id}_${a.queue_number}`;
+      if (!existingKeys.has(key)) {
+        let docObj = findDocObj(a.doctor_id, a.doctors?.series, a.doctors?.user_id);
+        if (!docObj) {
+          docObj = {
+            doctorId: a.doctor_id,
+            userId: a.doctors?.user_id,
+            doctorName: a.doctors?.users?.full_name || 'Dr. Medical Specialist',
+            specialization: a.doctors?.specialization || 'General Medicine',
+            roomNumber: a.doctors?.room_number || 'Room 01',
+            centerName: a.doctors?.medical_centers?.name || 'MediQueue Central Clinic',
+            series: a.doctors?.series || 'A',
+            nowServing: null,
+            waitingQueue: []
+          };
+          doctorMap.set(a.doctor_id, docObj);
+        }
+
+        const tokenStr = `#${docObj.series}-${String(a.queue_number).padStart(2, '0')}`;
+        const entryItem = {
+          id: a.id,
+          token: tokenStr,
+          queue_number: a.queue_number,
+          patientName: a.users?.full_name || 'Online Patient',
+          status: 'waiting'
+        };
+
+        docObj.waitingQueue.push(entryItem);
+      }
+    }
+
+    // Sort waiting queue per doctor by queue_number
+    for (const d of doctorMap.values()) {
+      d.waitingQueue.sort((a, b) => a.queue_number - b.queue_number);
+    }
+
+    const doctorsList = [...doctorMap.values()];
+
+    const simpleBoard = doctorsList.map(d => ({
+      doctorId: d.doctorId,
+      series: d.series,
+      nowServing: d.nowServing ? d.nowServing.queue_number : null,
+      waiting: d.waitingQueue.length
+    }));
+
+    res.json({ doctors: doctorsList, board: simpleBoard });
   } catch (err) {
     next(err);
   }
 }
 
-/** GET /api/queue?date=YYYY-MM-DD — every token for the clinic on that day (defaults to today). */
 export async function getQueue(req, res, next) {
   try {
     const date = req.query.date || todayDate();
-    const { data, error } = await supabase
+
+    // Query walk-in tokens for today OR active/cancelled/left tokens
+    const { data: queueData, error } = await supabase
       .from('walk_in_queue')
-      .select('*, doctors(series)')
-      .eq('queue_date', date)
+      .select('*, doctors(series, user_id)')
+      .or(`queue_date.eq.${date},status.in.(waiting,called,in_progress,cancelled,left)`)
       .order('queue_number', { ascending: true });
 
-    if (error) {
-      if (error.code === TABLE_MISSING) {
-        // Migration 002 hasn't been run against this project yet.
-        return res.json({ entries: [], migrationPending: true });
-      }
-      throw error;
+    if (error && error.code === TABLE_MISSING) {
+      return res.json({ entries: [], migrationPending: true });
     }
 
-    res.json({ entries: (data || []).map(mapEntry) });
+    // Query online appointments for today OR active/cancelled appointments
+    const { data: aptData } = await supabase
+      .from('appointments')
+      .select('*, doctors(series, user_id), users:patient_id(full_name, phone, nic)')
+      .or(`appointment_date.eq.${date},status.in.(booked,cancelled)`);
+
+    const combinedMap = new Map();
+    (queueData || []).forEach(r => {
+      const entry = mapEntry(r);
+      if (entry.status === 'left') {
+        entry.status = 'cancelled';
+      }
+      combinedMap.set(`${r.doctor_id}_${r.queue_number}`, entry);
+    });
+
+    for (const a of aptData || []) {
+      const key = `${a.doctor_id}_${a.queue_number}`;
+      const existing = combinedMap.get(key);
+      const apptStatus = a.status === 'booked' ? 'waiting' : a.status;
+
+      if (existing) {
+        if (a.status === 'cancelled') {
+          existing.status = 'cancelled';
+        }
+      } else {
+        combinedMap.set(key, {
+          id: a.id,
+          doctorId: a.doctor_id,
+          series: a.doctors?.series ?? '?',
+          tokenNumber: a.queue_number,
+          patientName: a.users?.full_name || 'Online Patient',
+          nic: a.users?.nic || undefined,
+          phone: a.users?.phone || '',
+          source: 'online',
+          status: apptStatus,
+          issuedAt: a.created_at,
+          calledAt: undefined
+        });
+      }
+    }
+
+    const combined = Array.from(combinedMap.values());
+    combined.sort((a, b) => a.tokenNumber - b.tokenNumber);
+
+    res.json({ entries: combined });
   } catch (err) {
     next(err);
   }
@@ -96,8 +241,6 @@ export async function getQueue(req, res, next) {
 
 /**
  * POST /api/queue/walkin
- * `online` takes the next sequential number for that doctor today; `physical`
- * records the number already printed on the paper token and rejects a repeat.
  */
 export async function issueWalkinToken(req, res, next) {
   try {
@@ -164,9 +307,6 @@ export async function issueWalkinToken(req, res, next) {
 
 /**
  * POST /api/queue/call-next
- * A doctor has one room, so exactly one token is live at a time: announcing
- * the next one closes out whoever was live, then calls the lowest-numbered
- * waiting token. Returns the doctor's full updated queue for that day.
  */
 export async function callNextPatient(req, res, next) {
   try {
@@ -224,6 +364,18 @@ export async function updateQueueEntryStatus(req, res, next) {
       .select('*, doctors(series)')
       .single();
     if (error) throw error;
+
+    if (status === 'left' || status === 'skipped') {
+      try {
+        await supabase.from('audit_logs').insert([{
+          user_id: data.patient_id || null,
+          action: 'NO_SHOW_PENALTY',
+          details: `Patient ${data.patient_name || 'Patient'} missed appointment token #${data.doctors?.series || 'A'}-${String(data.queue_number).padStart(2, '0')}. Assigned late-number penalty.`
+        }]);
+      } catch (auditErr) {
+        console.warn('Audit log insertion notice:', auditErr);
+      }
+    }
 
     res.json({ entry: mapEntry(data) });
   } catch (err) {

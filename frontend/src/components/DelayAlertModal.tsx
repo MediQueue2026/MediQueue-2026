@@ -1,10 +1,20 @@
 import { useState } from 'react'
-import { X, Clock, AlertTriangle, Send, CheckCircle2, MessageSquare } from 'lucide-react'
+import { AlertTriangle, Clock, Send, X, CheckCircle2, MessageSquare } from 'lucide-react'
 
-export default function DelayAlertModal({ isOpen, onClose, onSend }: {
+export default function DelayAlertModal({
+  isOpen,
+  onClose,
+  onSend,
+  doctorName = 'Your Doctor',
+  roomNumber = 'Consultation Room',
+  dept = 'General Practice'
+}: {
   isOpen: boolean
   onClose: () => void
-  onSend?: (delayMinutes: number, reason: string) => void
+  onSend: (delay: number, reason: string) => void
+  doctorName?: string
+  roomNumber?: string
+  dept?: string
 }) {
   const [delay, setDelay] = useState(15)
   const [reason, setReason] = useState('Emergency consultation in progress')
@@ -13,12 +23,12 @@ export default function DelayAlertModal({ isOpen, onClose, onSend }: {
   if (!isOpen) return null
 
   const handleDispatch = () => {
+    onSend(delay, reason)
     setSent(true)
     setTimeout(() => {
-      onSend?.(delay, reason)
       setSent(false)
       onClose()
-    }, 1200)
+    }, 1500)
   }
 
   return (
@@ -26,24 +36,21 @@ export default function DelayAlertModal({ isOpen, onClose, onSend }: {
       position: 'fixed', inset: 0, zIndex: 10000,
       background: 'rgba(6, 35, 33, 0.65)',
       backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 540, maxHeight: '90vh',
-        background: 'rgba(255, 255, 255, 0.88)',
+        width: '100%', maxWidth: 520,
+        background: 'rgba(255, 255, 255, 0.95)',
         backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(245, 158, 11, 0.35)',
-        borderRadius: 20, padding: '36px 32px',
-        boxShadow: '0 20px 60px rgba(8, 48, 45, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-        position: 'relative', overflowY: 'auto'
+        borderRadius: 20, padding: 28,
+        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
+        position: 'relative'
       }}>
         <button onClick={onClose} style={{
-          position: 'absolute', top: 20, right: 20,
-          background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.22)',
-          borderRadius: '50%', width: 34, height: 34,
+          position: 'absolute', top: 18, right: 18,
+          background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)',
+          borderRadius: '50%', width: 32, height: 32,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: 'var(--text-2)', cursor: 'pointer'
         }}>
@@ -61,16 +68,16 @@ export default function DelayAlertModal({ isOpen, onClose, onSend }: {
           </div>
           <div>
             <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Automatic Delay Alert</h3>
-            <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>Dr. Ethan Carr · Room 04 (General Medicine)</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>{doctorName} · {roomNumber} ({dept})</div>
           </div>
         </div>
 
         {sent ? (
           <div style={{ textAlign: 'center', padding: '32px 0' }}>
             <CheckCircle2 size={52} color="#10B981" style={{ margin: '0 auto 14px' }} />
-            <h4 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)' }}>Alert Dispatched to 7 Patients!</h4>
+            <h4 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)' }}>Alert Dispatched to Subscribers!</h4>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
-              Simulated SMS & App notification sent. Live queue est. times updated.
+              SMS & In-App delay notification sent. Live queue est. times updated.
             </p>
           </div>
         ) : (
@@ -119,7 +126,7 @@ export default function DelayAlertModal({ isOpen, onClose, onSend }: {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, color: '#D97706', marginBottom: 4 }}>
                 <MessageSquare size={14} /> SMS & App Broadcast Preview:
               </div>
-              "Notice from MediQueue: Dr. Ethan Carr is running approx. <strong>{delay} mins</strong> behind schedule due to <em>{reason}</em>. Thank you for your patience."
+              "Notice from MediQueue: {doctorName} is running approx. <strong>{delay} mins</strong> behind schedule due to <em>{reason}</em>. Thank you for your patience."
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>

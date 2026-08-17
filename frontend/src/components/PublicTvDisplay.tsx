@@ -1,23 +1,26 @@
-import { useState } from 'react'
-import { X, Volume2, Bell, Clock, ShieldCheck, Stethoscope, Users, Wifi } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, Volume2, Bell, Clock, ShieldCheck, Stethoscope, Users, Wifi, Building2 } from 'lucide-react'
 import { entryToken } from '../lib/receptionQueue'
 import type { QueueEntry, ReceptionDoctor } from '../lib/receptionQueue'
 
-/** Fallback board content for when the display is opened standalone (/tv-display). */
-const DEMO_QUEUE = [
-  { token: '#A-12', name: 'Kasun Perera', est: '5 min', status: 'Next In Line' },
-  { token: '#A-13', name: 'Dilini Fernando', est: '12 min', status: 'Waiting' },
-  { token: '#A-14', name: 'Rajan Mehta', est: '18 min', status: 'Waiting' },
-  { token: '#A-15', name: 'Sunil W.', est: '25 min', status: 'Waiting' },
-  { token: '#A-16', name: 'Anura Kumara', est: '32 min', status: 'Waiting' },
-]
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+
+interface DoctorBoard {
+  doctorId: string
+  doctorName: string
+  specialization: string
+  roomNumber: string
+  centerName: string
+  series: string
+  nowServing: { token: string; patientName: string } | null
+  waitingQueue: { token: string; patientName: string; queue_number: number }[]
+}
 
 export default function PublicTvDisplay({
   isOpen, onClose, doctor, current, waiting, estimateWait, onCallNext,
 }: {
   isOpen: boolean
   onClose: () => void
-  /** Live props — supplied by the Reception Desk. Omitted on the standalone route. */
   doctor?: ReceptionDoctor
   current?: QueueEntry
   waiting?: QueueEntry[]
@@ -25,39 +28,69 @@ export default function PublicTvDisplay({
   onCallNext?: () => void
 }) {
   const [flash, setFlash] = useState(false)
-  // Standalone demo state, only used when no live queue is passed in.
-  const [demoIndex, setDemoIndex] = useState(0)
+  const [selectedDocIndex, setSelectedDocIndex] = useState(0)
 
-  const isLive = waiting !== undefined
+  // Live DB Board State for Overall Queue across all doctors & centers
+  const [dbDoctors, setDbDoctors] = useState<DoctorBoard[]>([])
 
-  const currentServing = isLive
-    ? (current ? entryToken(current) : '—')
-    : (demoIndex === 0 ? '#A-11' : '#A-12')
-  const patientName = isLive
-    ? (current?.patientName ?? 'Waiting for next patient')
-    : (demoIndex === 0 ? 'Nimal Silva' : 'Kasun Perera')
+  // 3-second live polling loop from Supabase Board API
+  useEffect(() => {
+    if (!isOpen) return
 
-  const waitingQueue = isLive
-    ? waiting!.map((entry, i) => ({
-        token: entryToken(entry),
-        name: entry.patientName,
-        est: `${estimateWait ? estimateWait(entry) : (i + 1) * 10} min`,
-        status: i === 0 ? 'Next In Line' : 'Waiting',
-      }))
-    : DEMO_QUEUE
+    const fetchBoard = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/queue/board`)
+        if (res.ok) {
+          const data = await res.json()
+          if (Array.isArray(data.doctors) && data.doctors.length > 0) {
+            setDbDoctors(data.doctors)
+          }
+        }
+      } catch (e) {
+        console.warn('Lobby TV Board API poll warning:', e)
+      }
+    }
 
-  const doctorLine = doctor
-    ? { name: `${doctor.name} · ${doctor.dept}`, room: doctor.room }
-    : { name: 'Dr. Ethan Carr · General Medicine', room: 'Room 04' }
+    fetchBoard()
+    const timer = setInterval(fetchBoard, 3000)
+    return () => clearInterval(timer)
+  }, [isOpen])
 
   if (!isOpen) return null
 
   const handleCallNext = () => {
     setFlash(true)
     setTimeout(() => setFlash(false), 2500)
-    if (isLive) onCallNext?.()
-    else setDemoIndex(i => (i === 0 ? 1 : 0))
+    onCallNext?.()
   }
+
+  // Active doctor board object from DB stream
+  const activeDocBoard = dbDoctors[selectedDocIndex] || dbDoctors[0] || null
+
+  const currentServing = activeDocBoard?.nowServing?.token
+    || (current ? entryToken(current) : '—')
+  
+  const patientName = activeDocBoard?.nowServing?.patientName
+    || (current?.patientName ?? 'Waiting for next patient')
+
+  const waitingQueue = activeDocBoard && Array.isArray(activeDocBoard.waitingQueue) && activeDocBoard.waitingQueue.length > 0
+    ? activeDocBoard.waitingQueue.map((entry: any, i: number) => ({
+        token: entry.token || `#${activeDocBoard.series}-${String(entry.queue_number || i + 1).padStart(2, '0')}`,
+        name: entry.patientName || entry.patient_name || 'Patient',
+        est: `${(i + 1) * 10} min`,
+        status: i === 0 ? 'Next In Line' : 'Waiting',
+      }))
+    : (waiting ? waiting.map((entry, i) => ({
+        token: entryToken(entry),
+        name: entry.patientName,
+        est: `${estimateWait ? estimateWait(entry) : (i + 1) * 10} min`,
+        status: i === 0 ? 'Next In Line' : 'Waiting',
+      })) : [])
+
+  const doctorLine = activeDocBoard
+    ? { name: `${activeDocBoard.doctorName} · ${activeDocBoard.specialization}`, room: activeDocBoard.roomNumber, center: activeDocBoard.centerName }
+    : (doctor ? { name: `${doctor.name} · ${doctor.dept}`, room: doctor.room, center: 'MediQueue Central Clinic' }
+               : { name: 'Dr. Medical Specialist · General Practice', room: 'Room 01', center: 'MediQueue Central Clinic' })
 
   return (
     <div style={{
@@ -93,19 +126,43 @@ export default function PublicTvDisplay({
               fontSize: 'clamp(14px, 2.5vw, 22px)',
               fontWeight: 900, letterSpacing: '-0.02em', color: '#ffffff', lineHeight: 1.1,
             }}>
-              MediQueue — Live Consultation Board
+              MediQueue — Live Consultation & Lobby Board
             </h1>
-            <div style={{ fontSize: 'clamp(11px, 1.5vw, 13px)', color: 'rgba(255,255,255,0.65)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span>{doctorLine.name}</span>
+            <div style={{ fontSize: 'clamp(11px, 1.5vw, 13px)', color: 'rgba(255,255,255,0.75)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+              <span style={{ color: '#F59E0B', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Building2 size={12} /> {doctorLine.center}
+              </span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
-              <span style={{ color: '#10B981', fontWeight: 700 }}>{doctorLine.room} (Floor 1)</span>
+              <span style={{ color: '#ffffff', fontWeight: 700 }}>{doctorLine.name}</span>
+              <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
+              <span style={{ color: '#10B981', fontWeight: 800 }}>{doctorLine.room}</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
               <span style={{ color: '#10B981', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Wifi size={11} /> Live
+                <Wifi size={11} /> Live DB Polling Active (3s)
               </span>
             </div>
           </div>
         </div>
+
+        {/* Doctor selector tabs for multi-room lobby view */}
+        {dbDoctors.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+            {dbDoctors.map((d, idx) => (
+              <button
+                key={d.doctorId}
+                onClick={() => setSelectedDocIndex(idx)}
+                style={{
+                  background: selectedDocIndex === idx ? '#10B981' : 'rgba(255,255,255,0.08)',
+                  color: '#ffffff', border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 700,
+                  cursor: 'pointer', whiteSpace: 'nowrap'
+                }}
+              >
+                {d.roomNumber}: {d.doctorName.split(' ')[0]} ({d.nowServing ? d.nowServing.token : 'Idle'})
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
@@ -114,7 +171,7 @@ export default function PublicTvDisplay({
             className="btn btn-emerald"
             style={{ gap: 7, fontSize: 'clamp(11px, 1.5vw, 14px)', padding: 'clamp(8px, 1.5vh, 12px) clamp(12px, 2vw, 20px)', borderRadius: 10 }}
           >
-            <Bell size={16} /> Simulate Chime / Call Next
+            <Bell size={16} /> Chime / Call Next
           </button>
           <button
             onClick={onClose}
@@ -129,7 +186,7 @@ export default function PublicTvDisplay({
         </div>
       </div>
 
-      {/* ── MAIN CONTENT — responsive grid (row on large, column on mobile) ── */}
+      {/* ── MAIN CONTENT ── */}
       <div className="tv-main-grid" style={{
         display: 'grid',
         gridTemplateColumns: '1.2fr 1fr',
@@ -140,7 +197,7 @@ export default function PublicTvDisplay({
         overflow: 'hidden',
       }}>
 
-        {/* LEFT — NOW SERVING */}
+        {/* LEFT — NOW SERVING CARD */}
         <div style={{
           background: flash
             ? 'linear-gradient(135deg, rgba(16,185,129,0.25) 0%, rgba(18,198,186,0.15) 100%)'
@@ -163,21 +220,19 @@ export default function PublicTvDisplay({
           }} />
 
           <div>
-            {/* Live label */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 'clamp(10px, 2.5vh, 24px)' }}>
               <span className="pulse-live" style={{ width: 10, height: 10 }} />
               <span style={{
                 fontSize: 'clamp(11px, 1.5vw, 15px)',
                 fontWeight: 900, letterSpacing: '0.10em', textTransform: 'uppercase', color: '#10B981',
               }}>
-                Now Serving · {doctorLine.room}
+                Now Serving · {doctorLine.room} ({doctorLine.center})
               </span>
             </div>
 
-            {/* Token Number — giant display */}
             <div style={{ textAlign: 'center', margin: 'clamp(8px, 2vh, 20px) 0' }}>
               <div style={{ fontSize: 'clamp(11px, 1.6vw, 14px)', color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.10em', marginBottom: 8 }}>
-                Token Number
+                Current Patient Token
               </div>
               <div style={{
                 fontSize: 'clamp(56px, 12vw, 130px)',
@@ -198,7 +253,6 @@ export default function PublicTvDisplay({
             </div>
           </div>
 
-          {/* Bottom instruction strip */}
           <div style={{
             background: 'rgba(0, 0, 0, 0.28)',
             border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -208,7 +262,7 @@ export default function PublicTvDisplay({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Volume2 size={18} color="#10B981" />
               <span style={{ fontSize: 'clamp(10px, 1.3vw, 13px)', color: 'rgba(255,255,255,0.75)' }}>
-                Please proceed to {doctorLine.room} when your token flashes
+                Please proceed to {doctorLine.room} at {doctorLine.center} when your token flashes
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'clamp(10px, 1.2vw, 13px)', fontWeight: 700, color: '#10b3a8', flexShrink: 0 }}>
@@ -218,7 +272,7 @@ export default function PublicTvDisplay({
           </div>
         </div>
 
-        {/* RIGHT — WAITING QUEUE */}
+        {/* RIGHT — UPCOMING QUEUE */}
         <div style={{
           background: 'rgba(255, 255, 255, 0.03)',
           border: '1px solid rgba(18, 198, 186, 0.18)',
@@ -227,7 +281,6 @@ export default function PublicTvDisplay({
           display: 'flex', flexDirection: 'column',
           minHeight: 0, overflow: 'hidden',
         }}>
-          {/* Queue header */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             marginBottom: 'clamp(10px, 2vh, 18px)',
@@ -237,7 +290,7 @@ export default function PublicTvDisplay({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Users size={18} color="#10b3a8" />
               <span style={{ fontSize: 'clamp(13px, 2vw, 18px)', fontWeight: 800, color: '#ffffff' }}>
-                Upcoming Queue
+                Upcoming Patient Queue — {doctorLine.name}
               </span>
             </div>
             <span style={{ fontSize: 'clamp(10px, 1.3vw, 12px)', color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>
@@ -245,58 +298,59 @@ export default function PublicTvDisplay({
             </span>
           </div>
 
-          {/* Queue list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
-            {waitingQueue.length === 0 && (
+            {waitingQueue.length === 0 ? (
               <div style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'rgba(255,255,255,0.4)', fontSize: 'clamp(12px, 1.6vw, 15px)',
+                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                color: 'rgba(255,255,255,0.4)', fontSize: 'clamp(12px, 1.6vw, 15px)', textAlign: 'center'
               }}>
-                No patients waiting
+                <Users size={40} color="rgba(255,255,255,0.3)" style={{ marginBottom: 10 }} />
+                No patients currently waiting in queue for {doctorLine.room}
               </div>
-            )}
-            {waitingQueue.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  background: i === 0 ? 'rgba(16, 179, 168, 0.14)' : 'rgba(255, 255, 255, 0.03)',
-                  border: i === 0 ? '1px solid rgba(16, 179, 168, 0.38)' : '1px solid rgba(255, 255, 255, 0.06)',
-                  borderRadius: 14,
-                  padding: 'clamp(10px, 1.8vh, 16px) clamp(12px, 2vw, 18px)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  flexShrink: 0,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{
-                    fontFamily: 'monospace',
-                    fontSize: 'clamp(16px, 2.5vw, 26px)',
-                    fontWeight: 900,
-                    color: i === 0 ? '#10B981' : '#12c6ba',
-                    minWidth: 'clamp(52px, 8vw, 72px)',
-                  }}>
-                    {item.token}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 'clamp(12px, 1.6vw, 15px)', fontWeight: 700, color: '#ffffff' }}>{item.name}</div>
-                    <div style={{ fontSize: 'clamp(10px, 1.2vw, 12px)', color: i === 0 ? '#10B981' : 'rgba(255,255,255,0.5)' }}>
-                      {item.status}
+            ) : (
+              waitingQueue.map((item, i) => (
+                <div
+                  key={i}
+                  style={{
+                    background: i === 0 ? 'rgba(16, 179, 168, 0.14)' : 'rgba(255, 255, 255, 0.03)',
+                    border: i === 0 ? '1px solid rgba(16, 179, 168, 0.38)' : '1px solid rgba(255, 255, 255, 0.06)',
+                    borderRadius: 14,
+                    padding: 'clamp(10px, 1.8vh, 16px) clamp(12px, 2vw, 18px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      fontFamily: 'monospace',
+                      fontSize: 'clamp(16px, 2.5vw, 26px)',
+                      fontWeight: 900,
+                      color: i === 0 ? '#10B981' : '#12c6ba',
+                      minWidth: 'clamp(52px, 8vw, 72px)',
+                    }}>
+                      {item.token}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 'clamp(12px, 1.6vw, 15px)', fontWeight: 700, color: '#ffffff' }}>{item.name}</div>
+                      <div style={{ fontSize: 'clamp(10px, 1.2vw, 12px)', color: i === 0 ? '#10B981' : 'rgba(255,255,255,0.5)' }}>
+                        {item.status}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{
-                    fontSize: 'clamp(11px, 1.5vw, 14px)',
-                    fontWeight: 800, color: '#F59E0B',
-                    display: 'flex', alignItems: 'center', gap: 4,
-                  }}>
-                    <Clock size={13} /> ~{item.est}
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{
+                      fontSize: 'clamp(11px, 1.5vw, 14px)',
+                      fontWeight: 800, color: '#F59E0B',
+                      display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                      <Clock size={13} /> ~{item.est}
+                    </div>
+                    <div style={{ fontSize: 'clamp(9px, 1vw, 11px)', color: 'rgba(255,255,255,0.4)' }}>Est. Wait</div>
                   </div>
-                  <div style={{ fontSize: 'clamp(9px, 1vw, 11px)', color: 'rgba(255,255,255,0.4)' }}>Est. Wait</div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -310,8 +364,8 @@ export default function PublicTvDisplay({
         fontSize: 'clamp(10px, 1.3vw, 12px)', color: 'rgba(255,255,255,0.55)',
         flexShrink: 0, flexWrap: 'wrap', gap: 8,
       }}>
-        <span>MediQueue · Intelligent Queue Management System · v3.2.1</span>
-        <span style={{ color: '#10B981', fontWeight: 700 }}>● System Live</span>
+        <span>MediQueue · {doctorLine.center} · Multi-Room Consultation Stream</span>
+        <span style={{ color: '#10B981', fontWeight: 700 }}>● Supabase Live Database Sync</span>
       </div>
     </div>
   )

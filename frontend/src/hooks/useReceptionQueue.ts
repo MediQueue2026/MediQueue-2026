@@ -82,14 +82,26 @@ export function useReceptionQueue() {
     return () => { cancelled = true }
   }, [])
 
+  // Live 3-second doctor status & queue polling loop across doctor terminals
+  useEffect(() => {
+    if (offline) return
+    const interval = setInterval(() => {
+      Promise.all([api.getDoctors(), api.getQueue()]).then(([doctorsRes, queueRes]) => {
+        setDoctors(doctorsRes.doctors)
+        setEntries(queueRes.entries.map(fromApiEntry))
+      }).catch(() => {})
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [offline])
+
   const selectedDoctor = useMemo(() => doctors.find(d => d.id === selectedDoctorId), [doctors, selectedDoctorId])
 
-  const doctorQueue = useMemo(() => forDoctor(entries, selectedDoctorId), [entries, selectedDoctorId])
-  const waiting = useMemo(() => waitingFor(entries, selectedDoctorId), [entries, selectedDoctorId])
-  const current = useMemo(() => currentFor(entries, selectedDoctorId), [entries, selectedDoctorId])
-  const issuedNumbers = useMemo(() => issuedNumbersFor(entries, selectedDoctorId), [entries, selectedDoctorId])
+  const doctorQueue = useMemo(() => forDoctor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
+  const waiting = useMemo(() => waitingFor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
+  const current = useMemo(() => currentFor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
+  const issuedNumbers = useMemo(() => issuedNumbersFor(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
 
-  const nextNumber = useMemo(() => nextTokenNumber(entries, selectedDoctorId), [entries, selectedDoctorId])
+  const nextNumber = useMemo(() => nextTokenNumber(entries, selectedDoctorId, selectedDoctor), [entries, selectedDoctorId, selectedDoctor])
   const nextToken = useMemo(
     () => formatToken(selectedDoctor?.series ?? '?', nextNumber),
     [selectedDoctor, nextNumber],
@@ -189,7 +201,7 @@ export function useReceptionQueue() {
   }, [current, offline, selectedDoctorId])
 
   const setStatus = useCallback(
-    async (id: string, status: QueueStatus) => {
+    async (id: string, status: Exclude<QueueStatus, 'cancelled'>) => {
       if (offline) {
         setEntries(prev => setEntryStatusReducer(prev, id, status))
         return
@@ -213,6 +225,19 @@ export function useReceptionQueue() {
     },
     [waiting, selectedDoctor],
   )
+
+  /** Re-fetches doctors (and today's queue) from the server. Used after add/edit. */
+  const refresh = useCallback(async () => {
+    if (offline) return
+    try {
+      const [doctorsRes, queueRes] = await Promise.all([api.getDoctors(), api.getQueue()])
+      setDoctors(doctorsRes.doctors)
+      setEntries(queueRes.entries.map(fromApiEntry))
+      setSelectedDoctorId(prev =>
+        doctorsRes.doctors.some(d => d.id === prev) ? prev : (doctorsRes.doctors[0]?.id ?? ''),
+      )
+    } catch { /* silently ignore */ }
+  }, [offline])
 
   return {
     // data
@@ -244,5 +269,6 @@ export function useReceptionQueue() {
     setStatus,
     clearError: () => setError(''),
     waitFor,
+    refresh,
   }
 }
