@@ -122,6 +122,8 @@ export interface ApiUser {
   avatarUrl: string | null
   isActive: boolean
   createdAt?: string | null
+  /** The medical center this receptionist manages — null until they've requested/been assigned one. */
+  centerId?: string | null
 }
 
 export interface AuthSessionResponse {
@@ -203,7 +205,12 @@ export interface ApiCenter {
   opening_hours: string
   services: string[]
   phone?: string
+  email?: string
   status?: 'operational' | 'maintenance' | 'closed'
+  /** Super Admin approval state — a receptionist-requested center starts 'pending'. */
+  approvalStatus?: 'pending' | 'approved' | 'rejected'
+  requestedByName?: string | null
+  rejectionReason?: string | null
   created_at?: string
 }
 
@@ -315,6 +322,41 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
+  // ── Doctor Requests (Receptionist -> Super Admin Approvals) ──
+  getDoctorRequests: (params?: { status?: string }) => {
+    const query = params?.status ? `?status=${encodeURIComponent(params.status)}` : ''
+    return request<{ requests: ApiDoctorRequest[] }>(`/doctor-requests${query}`)
+  },
+
+  createDoctorRequest: (input: {
+    requestType: 'ASSIGN_EXISTING' | 'REGISTER_NEW'
+    centerId: string
+    centerName?: string
+    doctorId?: string | null
+    doctorName: string
+    email?: string
+    phone?: string
+    specialization: string
+    roomNumber?: string
+    series?: string
+    maxAppointmentsPerHour?: number
+  }) =>
+    request<{ message: string; request: ApiDoctorRequest }>('/doctor-requests', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  approveDoctorRequest: (id: string) =>
+    request<{ message: string; requestId: string; status: 'approved'; doctor?: ApiDoctor }>(`/doctor-requests/${id}/approve`, {
+      method: 'PATCH',
+    }),
+
+  rejectDoctorRequest: (id: string, reason?: string) =>
+    request<{ message: string; requestId: string; status: 'rejected'; reason?: string }>(`/doctor-requests/${id}/reject`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason }),
+    }),
+
   getPendingDoctors: () =>
     request<{ pendingDoctors: ApiDoctor[] }>('/doctors/pending'),
 
@@ -342,13 +384,13 @@ export const api = {
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
 
-  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; status?: 'operational' | 'maintenance' | 'closed' }) =>
+  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; status?: 'operational' | 'maintenance' | 'closed' }) =>
     request<{ message: string; center: ApiCenter }>('/centers', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
 
-  updateCenter: (id: string, updates: Partial<{ name: string; city: string; address: string; openingHours: string; services: string[]; phone: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
+  updateCenter: (id: string, updates: Partial<{ name: string; city: string; address: string; openingHours: string; services: string[]; phone: string; email: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
     request<{ message: string; center: ApiCenter }>(`/centers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
@@ -357,6 +399,20 @@ export const api = {
   deleteCenter: (id: string) => request<{ message: string }>(`/centers/${id}`, {
     method: 'DELETE',
   }),
+
+  // ── Medical Center Approvals (Receptionist request -> Super Admin) ──
+  getPendingCenters: () => request<{ pendingCenters: ApiCenter[] }>('/centers/pending'),
+
+  approveCenter: (id: string) =>
+    request<{ message: string; center: ApiCenter }>(`/centers/${id}/approve`, {
+      method: 'PATCH',
+    }),
+
+  rejectCenter: (id: string, reason?: string) =>
+    request<{ message: string; centerId: string; approvalStatus: 'rejected'; reason?: string }>(`/centers/${id}/reject`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason }),
+    }),
 
   getAuditLogs: () => request<{ logs: AuditLog[]; source: 'database' | 'dummy' }>('/admin/audit-logs'),
 

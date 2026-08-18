@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Activity, AlertCircle, Bell, BellRing, CheckCircle2, Clock, Hash, Plus, Radio,
+  Activity, AlertCircle, Bell, BellRing, Building2, CheckCircle2, Clock, Hash, Plus, Radio,
   Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil, Menu, X
 } from 'lucide-react'
 import AccountMenu from '../components/AccountMenu'
 import PublicTvDisplay from '../components/PublicTvDisplay'
 import AddDoctorModal from '../components/AddDoctorModal'
 import DoctorHoursModal from '../components/DoctorHoursModal'
+import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
@@ -15,6 +16,7 @@ import {
   averageWaitMinutes, waitingFor
 } from '../lib/receptionQueue'
 import type { TokenSource } from '../lib/receptionQueue'
+import { api } from '../lib/api'
 import type { ApiDoctor } from '../lib/api'
 
 
@@ -50,6 +52,7 @@ export default function ReceptionistDesk() {
   const [showAddDoctor, setShowAddDoctor] = useState(false)
   const [editingDoctor, setEditingDoctor] = useState<ApiDoctor | null>(null)
   const [hoursDoctor, setHoursDoctor] = useState<ApiDoctor | null>(null)
+  const [showAddCenter, setShowAddCenter] = useState(false)
 
   // Counter form — patients book their own online tokens from the Patient app;
   // this desk only records walk-ins against a pre-printed physical slip.
@@ -717,6 +720,14 @@ export default function ReceptionistDesk() {
                 doctor={hoursDoctor}
                 onSaved={() => queue.refresh()}
               />
+              <AddCenterModal
+                isOpen={showAddCenter}
+                onClose={() => setShowAddCenter(false)}
+                mode="request"
+                onAdd={async (centerData) => {
+                  await api.createCenter(centerData)
+                }}
+              />
 
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -726,13 +737,22 @@ export default function ReceptionistDesk() {
                     Add doctors · Set available hours · Total capacity = hours × max per hour
                   </div>
                 </div>
-                <button
-                  onClick={() => setShowAddDoctor(true)}
-                  className="btn btn-primary"
-                  style={{ gap: 7, padding: '0 18px', height: 40 }}
-                >
-                  <Plus size={15} /> Add Doctor
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    onClick={() => setShowAddCenter(true)}
+                    className="btn btn-ghost"
+                    style={{ gap: 7, padding: '0 18px', height: 40 }}
+                  >
+                    <Building2 size={15} /> Request Medical Center
+                  </button>
+                  <button
+                    onClick={() => setShowAddDoctor(true)}
+                    className="btn btn-primary"
+                    style={{ gap: 7, padding: '0 18px', height: 40 }}
+                  >
+                    <Plus size={15} /> Add Doctor
+                  </button>
+                </div>
               </div>
 
               {/* Cards grid */}

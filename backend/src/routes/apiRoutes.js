@@ -12,7 +12,7 @@ import {
 
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
-import { getCenters, createCenter, updateCenter, deleteCenter } from '../controllers/centerController.js';
+import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter } from '../controllers/centerController.js';
 import { createAppointment, getAppointments, getPatientAppointments, cancelAppointment } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary, getPendingDoctors, approveDoctor, rejectDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
@@ -111,13 +111,16 @@ router.get('/doctors', getDoctors);
 router.get('/queue/board', getPublicBoard);
 
 // ── Center Routes ────────────────────────────────────────────────────────────
-router.post('/centers', optionalAuth, createCenter);
-router.put('/centers/:id', optionalAuth, updateCenter);
-router.delete('/centers/:id', optionalAuth, deleteCenter);
-// ── Staff & Doctor Management Routes ────────────────────────────────────────
-router.post('/centers', authMiddleware, requireRole(['admin']), createCenter);
+// A receptionist may submit a new center (goes in 'pending'); only an admin
+// creates one that's immediately 'approved'. See centerController.createCenter.
+router.post('/centers', authMiddleware, requireRole(['receptionist', 'admin']), createCenter);
 router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);
 router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
+router.get('/centers/pending', authMiddleware, requireRole(['admin']), getPendingCenters);
+router.patch('/centers/:id/approve', authMiddleware, requireRole(['admin']), approveCenter);
+router.patch('/centers/:id/reject', authMiddleware, requireRole(['admin']), rejectCenter);
+
+// ── Staff & Doctor Management Routes ────────────────────────────────────────
 router.put(
   '/doctors/:doctorId/status',
   optionalAuth,
@@ -165,5 +168,11 @@ router.patch('/admin/audit-logs/:id/status', authMiddleware, requireRole(['admin
 router.get('/doctors/pending', authMiddleware, requireRole(['admin']), getPendingDoctors);
 router.patch('/doctors/:doctorId/approve', authMiddleware, requireRole(['admin']), approveDoctor);
 router.patch('/doctors/:doctorId/reject', authMiddleware, requireRole(['admin']), rejectDoctor);
+
+// ── Doctor Requests Routes (Receptionist -> Super Admin Approval) ──────────
+router.post('/doctor-requests', authMiddleware, requireRole(['receptionist', 'admin']), createDoctorRequest);
+router.get('/doctor-requests', authMiddleware, requireRole(['admin']), getDoctorRequests);
+router.patch('/doctor-requests/:id/approve', authMiddleware, requireRole(['admin']), approveDoctorRequest);
+router.patch('/doctor-requests/:id/reject', authMiddleware, requireRole(['admin']), rejectDoctorRequest);
 
 export default router;
