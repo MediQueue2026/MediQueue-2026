@@ -16,7 +16,7 @@ import AssignDoctorModal from '../components/AssignDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
 import { api } from '../lib/api'
-import type { ApiCenter, ApiDoctor, AuditLog } from '../lib/api'
+import type { ApiCenter, ApiDoctor, ApiDoctorRequest, AuditLog } from '../lib/api'
 
 const NAV_ADMIN = [
   { id: 'health', icon: <Activity size={15} />, label: 'System Health' },
@@ -205,20 +205,37 @@ export default function AdminPanel() {
   const [logsSource, setLogsSource] = useState<'database' | 'dummy' | null>(null)
 
   // Doctor Approvals State
-  const [pendingDoctors, setPendingDoctors] = useState<ApiDoctor[]>([])
+  const [pendingRequests, setPendingRequests] = useState<ApiDoctorRequest[]>([])
   const [pendingLoading, setPendingLoading] = useState(false)
-  const [rejectingDoctor, setRejectingDoctor] = useState<ApiDoctor | null>(null)
+  const [rejectingDoctor, setRejectingDoctor] = useState<ApiDoctorRequest | null>(null)
   const [rejectionReasonInput, setRejectionReasonInput] = useState('')
+
+  // Medical Center Requests State (Receptionist -> Super Admin)
+  const [pendingCenterRequests, setPendingCenterRequests] = useState<ApiCenter[]>([])
+  const [centerRequestsLoading, setCenterRequestsLoading] = useState(false)
+  const [rejectingCenterRequest, setRejectingCenterRequest] = useState<ApiCenter | null>(null)
+  const [centerRejectionReasonInput, setCenterRejectionReasonInput] = useState('')
 
   const fetchPendingDoctors = () => {
     setPendingLoading(true)
-    api.getPendingDoctors()
-      .then(r => setPendingDoctors(r.pendingDoctors || []))
+    api.getDoctorRequests({ status: 'pending' })
+      .then(r => setPendingRequests(r.requests || []))
       .catch(err => {
-        console.error('Failed to load pending doctors', err)
-        setPendingDoctors([])
+        console.error('Failed to load pending doctor requests', err)
+        setPendingRequests([])
       })
       .finally(() => setPendingLoading(false))
+  }
+
+  const fetchPendingCenterRequests = () => {
+    setCenterRequestsLoading(true)
+    api.getPendingCenters()
+      .then(r => setPendingCenterRequests(r.pendingCenters || []))
+      .catch(err => {
+        console.error('Failed to load pending medical center requests', err)
+        setPendingCenterRequests([])
+      })
+      .finally(() => setCenterRequestsLoading(false))
   }
 
   useEffect(() => {
@@ -230,6 +247,7 @@ export default function AdminPanel() {
       let active = true
       setCentersLoading(true)
       setDoctorsLoading(true)
+      fetchPendingCenterRequests()
 
       Promise.all([api.getCenters(), api.getDoctors()])
         .then(([centersRes, doctorsRes]) => {
@@ -374,6 +392,7 @@ export default function AdminPanel() {
         openingHours: editingCenter.opening_hours,
         services: editingCenter.services,
         phone: editingCenter.phone || undefined,
+        email: editingCenter.email || undefined,
         status: editingCenter.status,
       })
       setCenters(prev => prev.map(item => item.id === center.id ? center : item))
@@ -437,28 +456,53 @@ export default function AdminPanel() {
     }
   }
 
-  const handleApproveDoctor = async (doctorId: string) => {
+  const handleApproveDoctor = async (requestId: string) => {
     try {
-      await api.approveDoctor(doctorId)
+      await api.approveDoctorRequest(requestId)
       fetchPendingDoctors()
       const r = await api.getDoctors()
       setDoctors(r.doctors)
     } catch (error) {
-      console.error('Failed to approve doctor', error)
-      alert('Could not approve doctor. Please try again.')
+      console.error('Failed to approve doctor request', error)
+      alert('Could not approve doctor request. Please try again.')
     }
   }
 
   const handleConfirmRejectDoctor = async () => {
     if (!rejectingDoctor) return
     try {
-      await api.rejectDoctor(rejectingDoctor.id, rejectionReasonInput.trim() || undefined)
+      await api.rejectDoctorRequest(rejectingDoctor.id, rejectionReasonInput.trim() || undefined)
       setRejectingDoctor(null)
       setRejectionReasonInput('')
       fetchPendingDoctors()
     } catch (error) {
-      console.error('Failed to reject doctor', error)
-      alert('Could not reject doctor. Please try again.')
+      console.error('Failed to reject doctor request', error)
+      alert('Could not reject doctor request. Please try again.')
+    }
+  }
+
+  const handleApproveCenterRequest = async (centerId: string) => {
+    try {
+      await api.approveCenter(centerId)
+      fetchPendingCenterRequests()
+      const r = await api.getCenters()
+      setCenters(r.centers)
+    } catch (error) {
+      console.error('Failed to approve medical center request', error)
+      alert('Could not approve medical center request. Please try again.')
+    }
+  }
+
+  const handleConfirmRejectCenterRequest = async () => {
+    if (!rejectingCenterRequest) return
+    try {
+      await api.rejectCenter(rejectingCenterRequest.id, centerRejectionReasonInput.trim() || undefined)
+      setRejectingCenterRequest(null)
+      setCenterRejectionReasonInput('')
+      fetchPendingCenterRequests()
+    } catch (error) {
+      console.error('Failed to reject medical center request', error)
+      alert('Could not reject medical center request. Please try again.')
     }
   }
 
@@ -727,7 +771,7 @@ export default function AdminPanel() {
 
               {pendingLoading ? (
                 <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--text-4)' }}>Loading pending approvals…</div>
-              ) : pendingDoctors.length === 0 ? (
+              ) : pendingRequests.length === 0 ? (
                 <div style={{
                   padding: '56px 24px', textAlign: 'center', background: 'rgba(255,255,255,0.7)',
                   borderRadius: 16, border: '1.5px dashed var(--border-md)'
@@ -740,14 +784,14 @@ export default function AdminPanel() {
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 18 }}>
-                  {pendingDoctors.map(doc => (
+                  {pendingRequests.map(doc => (
                     <div key={doc.id} className="card glass-form-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
                         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                          <Avatar name={doc.name} size={44} />
+                          <Avatar name={doc.doctorName} size={44} />
                           <div>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)' }}>{doc.name}</div>
-                            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--blue)' }}>{doc.dept}</div>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)' }}>{doc.doctorName}</div>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--blue)' }}>{doc.specialization}</div>
                           </div>
                         </div>
                         <span style={{
@@ -755,7 +799,7 @@ export default function AdminPanel() {
                           background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)',
                           color: '#d97706', textTransform: 'uppercase', letterSpacing: '0.05em'
                         }}>
-                          Pending
+                          {doc.requestType === 'ASSIGN_EXISTING' ? 'Assignment' : 'New Registration'} · Pending
                         </span>
                       </div>
 
@@ -764,8 +808,8 @@ export default function AdminPanel() {
                         borderRadius: 10, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6
                       }}>
                         <div>Center: <strong style={{ color: 'var(--text-1)' }}>{doc.centerName || 'Medical Center'}</strong></div>
-                        <div>Room: <strong style={{ color: 'var(--text-1)' }}>{doc.room || '—'}</strong> · Token Series: <strong style={{ color: 'var(--blue)' }}>{doc.series || 'A'}</strong></div>
-                        <div>Requested By: <strong style={{ color: 'var(--text-2)' }}>{doc.requestedByName || 'Receptionist'}</strong></div>
+                        <div>Room: <strong style={{ color: 'var(--text-1)' }}>{doc.roomNumber || '—'}</strong> · Token Series: <strong style={{ color: 'var(--blue)' }}>{doc.series || 'A'}</strong></div>
+                        <div>Requested By: <strong style={{ color: 'var(--text-2)' }}>{doc.receptionistName || 'Receptionist'}</strong></div>
                         {doc.email && <div>Email: <span style={{ color: 'var(--text-3)' }}>{doc.email}</span></div>}
                       </div>
 
@@ -802,7 +846,7 @@ export default function AdminPanel() {
               <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, padding: 28, background: '#ffffff', borderRadius: 16 }}>
                 <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)', marginBottom: 8 }}>Reject Doctor Registration</h3>
                 <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 14 }}>
-                  Provide an optional rejection reason for Dr. <strong>{rejectingDoctor.name}</strong>.
+                  Provide an optional rejection reason for Dr. <strong>{rejectingDoctor.doctorName}</strong>.
                 </p>
                 <textarea
                   className="input"
@@ -945,6 +989,103 @@ export default function AdminPanel() {
                 </button>
               </div>
 
+              {/* PENDING MEDICAL CENTER REQUESTS (Receptionist -> Super Admin) */}
+              {!centerRequestsLoading && pendingCenterRequests.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', marginBottom: 4 }}>
+                    Pending Medical Center Requests ({pendingCenterRequests.length})
+                  </h4>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 14 }}>
+                    Requested by receptionists. The center stays hidden from booking and reception use until approved here.
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 8 }}>
+                    {pendingCenterRequests.map(req => (
+                      <div key={req.id} style={{
+                        background: 'rgba(245, 158, 11, 0.04)', border: '1px solid rgba(245, 158, 11, 0.28)',
+                        borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                            <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--blue-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Building2 size={18} color="var(--blue)" />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>{req.name}</div>
+                              <div style={{ fontSize: 12, color: 'var(--text-4)' }}>{req.city}{req.address ? ` · ${req.address}` : ''}</div>
+                            </div>
+                          </div>
+                          <span style={{
+                            fontSize: 10.5, fontWeight: 800, padding: '3px 8px', borderRadius: 6,
+                            background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)',
+                            color: '#d97706', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap'
+                          }}>
+                            Pending
+                          </span>
+                        </div>
+
+                        <div style={{
+                          background: 'rgba(30, 41, 59, 0.03)', border: '1px solid var(--border-md)',
+                          borderRadius: 10, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6
+                        }}>
+                          <div>Hours: <strong style={{ color: 'var(--text-1)' }}>{req.opening_hours}</strong> · Phone: <strong style={{ color: 'var(--text-1)' }}>{req.phone || '—'}</strong></div>
+                          <div>Email: <strong style={{ color: 'var(--text-1)' }}>{req.email || '—'}</strong></div>
+                          <div>Requested By: <strong style={{ color: 'var(--text-2)' }}>{req.requestedByName || 'Receptionist'}</strong></div>
+                          {req.services && req.services.length > 0 && (
+                            <div>Services: <span style={{ color: 'var(--text-3)' }}>{req.services.join(', ')}</span></div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <button
+                            onClick={() => handleApproveCenterRequest(req.id)}
+                            className="btn btn-emerald btn-sm"
+                            style={{ flex: 1, justifyContent: 'center', gap: 6, height: 38 }}
+                          >
+                            <CheckCircle2 size={14} /> Approve
+                          </button>
+                          <button
+                            onClick={() => { setRejectingCenterRequest(req); setCenterRejectionReasonInput('') }}
+                            className="btn btn-ghost btn-sm"
+                            style={{ flex: 1, justifyContent: 'center', gap: 6, height: 38, color: 'var(--crimson)' }}
+                          >
+                            <UserX size={14} /> Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Center Request Rejection Modal */}
+              {rejectingCenterRequest && (
+                <div style={{
+                  position: 'fixed', inset: 0, zIndex: 10000,
+                  background: 'rgba(6, 35, 33, 0.65)', backdropFilter: 'blur(10px)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+                }}>
+                  <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, padding: 28, background: '#ffffff', borderRadius: 16 }}>
+                    <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)', marginBottom: 8 }}>Reject Medical Center Request</h3>
+                    <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 14 }}>
+                      Provide an optional rejection reason for <strong>{rejectingCenterRequest.name}</strong>.
+                    </p>
+                    <textarea
+                      className="input"
+                      placeholder="e.g. Duplicate facility, incomplete address..."
+                      value={centerRejectionReasonInput}
+                      onChange={e => setCenterRejectionReasonInput(e.target.value)}
+                      style={{ height: 80, fontSize: 13, padding: 10, marginBottom: 16, width: '100%' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                      <button onClick={() => setRejectingCenterRequest(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                      <button onClick={handleConfirmRejectCenterRequest} className="btn btn-primary btn-sm" style={{ background: 'var(--crimson)', borderColor: 'var(--crimson)' }}>
+                        Confirm Rejection
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {centersLoading && (
                 <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-4)' }}>
                   <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite' }} />
@@ -980,6 +1121,7 @@ export default function AdminPanel() {
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, background: 'var(--blue-dim)', padding: 12, borderRadius: 10, fontSize: 12, marginBottom: 14 }}>
                         <div><span style={{ color: 'var(--text-4)' }}>Hours:</span> <strong>{c.opening_hours}</strong></div>
                         <div><span style={{ color: 'var(--text-4)' }}>Phone:</span> <strong>{c.phone || '—'}</strong></div>
+                        <div style={{ gridColumn: '1/-1' }}><span style={{ color: 'var(--text-4)' }}>Email:</span> <strong>{c.email || '—'}</strong></div>
                         {c.services && c.services.length > 0 && (
                           <div style={{ gridColumn: '1/-1' }}>
                             <span style={{ color: 'var(--text-4)' }}>Services: </span>
@@ -1319,6 +1461,10 @@ export default function AdminPanel() {
                   <div style={{ display: 'grid', gap: 6 }}>
                     <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Phone</label>
                     <input className="input" value={editingCenter.phone || ''} onChange={e => setEditingCenter({ ...editingCenter, phone: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Email</label>
+                    <input className="input" type="email" value={editingCenter.email || ''} onChange={e => setEditingCenter({ ...editingCenter, email: e.target.value })} />
                   </div>
                   <div style={{ display: 'grid', gap: 6 }}>
                     <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Services (comma separated)</label>

@@ -79,10 +79,20 @@ function toPublicUser(row) {
     role: row.role,
     avatarUrl: row.avatar_url ?? null,
     isActive: row.is_active !== false,
+    centerId: row.center_id ?? null,
   };
 }
 
 const USER_COLUMNS = 'id, email, full_name, phone, role, avatar_url, is_active, password_hash';
+/** Adds center_id — the medical center a receptionist manages (see migration 005). */
+const USER_COLUMNS_WITH_CENTER = `${USER_COLUMNS}, center_id`;
+
+/** Postgres/PostgREST codes meaning "that column doesn't exist on this DB yet". */
+const MISSING_COLUMN_CODES = new Set(['PGRST204', '42703']);
+function isMissingColumnError(error) {
+  if (!error) return false;
+  return MISSING_COLUMN_CODES.has(error.code) || /column/i.test(error.message || '');
+}
 
 /** PostgREST / Postgres codes meaning "the auth migration hasn't been run here yet". */
 const MIGRATION_CODES = new Set([
@@ -110,16 +120,53 @@ function assertNotMigrationError(error) {
 }
 
 async function findUserByEmail(email) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('users')
-    .select(USER_COLUMNS)
+    .select(USER_COLUMNS_WITH_CENTER)
     .ilike('email', email)          // email is matched case-insensitively
     .maybeSingle();
+
+  if (error && isMissingColumnError(error)) {
+    // center_id (migration 005) hasn't been added to this DB yet — degrade
+    // gracefully rather than treating it as the base 003_auth setup being missing.
+    ({ data, error } = await supabase
+      .from('users')
+      .select(USER_COLUMNS)
+      .ilike('email', email)
+      .maybeSingle());
+  }
+
   if (error) {
     assertNotMigrationError(error);
     throw new AuthError(error.message, 500);
   }
   return data ?? null;
+}
+
+/**
+ * A receptionist is the manager of exactly one medical center (see migration
+ * 005). Until that center is approved by the Super Admin, they may not sign
+ * in — this is what "add a center as a receptionist" is gated by.
+ */
+async function assertReceptionistCenterApproved(row) {
+  if (row.role !== 'receptionist' || !row.center_id) return;
+
+  const { data: center } = await supabase
+    .from('medical_centers')
+    .select('name, approval_status')
+    .eq('id', row.center_id)
+    .maybeSingle();
+
+  const approvalStatus = center?.approval_status ?? 'approved';
+  if (approvalStatus === 'approved') return;
+
+  const centerName = center?.name ?? 'Your medical center';
+  throw new AuthError(
+    approvalStatus === 'rejected'
+      ? `${centerName}'s registration was rejected by the Super Admin. Contact your administrator.`
+      : `${centerName} is awaiting Super Admin approval. You'll be able to sign in once it's approved.`,
+    403,
+  );
 }
 
 async function recordLoginAttempt({ userId, email, role, status, failureReason, req }) {
@@ -219,6 +266,16 @@ export async function login({ email, password }, req) {
       status: 'failed', failureReason: 'Account suspended', req,
     });
     throw new AuthError('This account has been suspended. Contact your administrator.', 403);
+  }
+
+  try {
+    await assertReceptionistCenterApproved(row);
+  } catch (err) {
+    await recordLoginAttempt({
+      userId: row.id, email: normalisedEmail, role: row.role,
+      status: 'failed', failureReason: 'Center not approved', req,
+    });
+    throw err;
   }
 
   const user = toPublicUser(row);
@@ -412,16 +469,31 @@ export async function refresh(refreshToken, req) {
     throw new AuthError('Session could not be verified. Please sign in again.', 401);
   }
 
-  const { data: row } = await supabase
+  let { data: row, error: rowErr } = await supabase
     .from('users')
-    .select(USER_COLUMNS)
+    .select(USER_COLUMNS_WITH_CENTER)
     .eq('id', session.user_id)
     .maybeSingle();
+
+  if (rowErr && isMissingColumnError(rowErr)) {
+    ({ data: row } = await supabase
+      .from('users')
+      .select(USER_COLUMNS)
+      .eq('id', session.user_id)
+      .maybeSingle());
+  }
 
   if (!row) throw new AuthError('Account no longer exists.', 401);
   if (row.is_active === false) {
     await supabase.from('refresh_sessions').delete().eq('user_id', row.id);
     throw new AuthError('This account has been suspended.', 403);
+  }
+
+  try {
+    await assertReceptionistCenterApproved(row);
+  } catch (err) {
+    await supabase.from('refresh_sessions').delete().eq('user_id', row.id);
+    throw err;
   }
 
   // Rotate: burn the used row, then issue a fresh pair.
@@ -447,7 +519,10 @@ export async function logout(refreshToken, userId) {
 }
 
 export async function getUserById(id) {
-  const { data } = await supabase.from('users').select(USER_COLUMNS).eq('id', id).maybeSingle();
+  let { data, error } = await supabase.from('users').select(USER_COLUMNS_WITH_CENTER).eq('id', id).maybeSingle();
+  if (error && isMissingColumnError(error)) {
+    ({ data } = await supabase.from('users').select(USER_COLUMNS).eq('id', id).maybeSingle());
+  }
   return data ? toPublicUser(data) : null;
 }
 

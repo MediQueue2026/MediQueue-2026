@@ -125,18 +125,20 @@ export default function AddDoctorModal({
           return
         }
 
-        const res = await api.createDoctor({
-          existingDoctorId: selectedDoc.id,
+        await api.createDoctorRequest({
+          requestType: 'ASSIGN_EXISTING',
           centerId: targetCenterId,
+          centerName: _centerName || undefined,
+          doctorId: selectedDoc.id,
+          doctorName: selectedDoc.name,
           specialization: selectedDoc.dept || finalSpec || 'General Medicine',
           roomNumber: roomNumber.trim() || undefined,
           series: series.trim().toUpperCase() || undefined,
           maxAppointmentsPerHour: Number(maxPerHour) || 4,
         })
 
-        setSuccessMsg(`Request sent! ${selectedDoc.name} has been submitted for Super Admin approval.`)
+        setSuccessMsg(`Request sent! Assignment request for ${selectedDoc.name} has been submitted for Super Admin approval.`)
         setDone(true)
-        onCreated?.(res.doctor)
       } else {
         // Mode: 'new'
         if (!fullName.trim() || !finalSpec) {
@@ -145,20 +147,21 @@ export default function AddDoctorModal({
           return
         }
 
-        const res = await api.createDoctor({
-          fullName: fullName.trim(),
+        await api.createDoctorRequest({
+          requestType: 'REGISTER_NEW',
+          centerId: targetCenterId,
+          centerName: _centerName || undefined,
+          doctorName: fullName.trim(),
           email: email.trim() || undefined,
           phone: phone.trim() || undefined,
-          centerId: targetCenterId,
           specialization: finalSpec,
           roomNumber: roomNumber.trim() || undefined,
           series: series.trim().toUpperCase() || undefined,
           maxAppointmentsPerHour: Number(maxPerHour) || 4,
         })
 
-        setSuccessMsg(`Request sent! Dr. ${fullName.trim()} has been submitted for Super Admin approval.`)
+        setSuccessMsg(`Request sent! Registration for Dr. ${fullName.trim()} has been submitted for Super Admin approval.`)
         setDone(true)
-        onCreated?.(res.doctor)
       }
 
       setTimeout(() => { resetState(); onClose() }, 2000)

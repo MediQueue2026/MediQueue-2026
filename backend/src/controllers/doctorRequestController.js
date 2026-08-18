@@ -76,14 +76,16 @@ export async function createDoctorRequest(req, res, next) {
     }
 
     // Log action to audit_logs
-    await supabase.from('audit_logs').insert([{
-      actor_name: receptionistName,
-      actor_role: 'receptionist',
-      event_type: 'request',
-      action: `Submitted request to add doctor ${doctorName} (${specialization}) to ${finalCenterName || 'Center'}`,
-      center_name: finalCenterName || 'Center',
-      status: 'pending',
-    }]).catch(() => {});
+    try {
+      await supabase.from('audit_logs').insert([{
+        actor_name: receptionistName,
+        actor_role: 'receptionist',
+        event_type: 'request',
+        action: `Submitted request to add doctor ${doctorName} (${specialization}) to ${finalCenterName || 'Center'}`,
+        center_name: finalCenterName || 'Center',
+        status: 'pending',
+      }]);
+    } catch (_) {}
 
     res.status(201).json({
       message: 'Doctor request submitted successfully to Super Admin',
@@ -96,13 +98,25 @@ export async function createDoctorRequest(req, res, next) {
 
 export async function getDoctorRequests(req, res, next) {
   try {
-    const { data, error } = await supabase
+    const { status } = req.query;
+
+    let query = supabase
       .from('doctor_requests')
       .select('*')
       .order('created_at', { ascending: false });
 
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data, error } = await query;
+
     if (error || !data) {
-      return res.json({ requests: MEMORY_DOCTOR_REQUESTS.map(mapDbRequestToPublic) });
+      let memoryList = MEMORY_DOCTOR_REQUESTS;
+      if (status) {
+        memoryList = memoryList.filter(r => r.status === status);
+      }
+      return res.json({ requests: memoryList.map(mapDbRequestToPublic) });
     }
 
     res.json({ requests: data.map(mapDbRequestToPublic) });
@@ -140,24 +154,34 @@ export async function approveDoctorRequest(req, res, next) {
 
     if (reqRecord.request_type === 'ASSIGN_EXISTING' && reqRecord.doctor_id) {
       // Update existing doctor profile
-      const { data: updatedDoc, error: updateErr } = await supabase
+      const updates = {
+        center_id: reqRecord.center_id,
+        room_number: reqRecord.room_number,
+        series: reqRecord.series,
+        specialization: reqRecord.specialization,
+        max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
+        approval_status: 'approved',
+      };
+
+      let { data: updatedDoc, error: updateErr } = await supabase
         .from('doctors')
-        .update({
-          center_id: reqRecord.center_id,
-          room_number: reqRecord.room_number,
-          series: reqRecord.series,
-          specialization: reqRecord.specialization,
-          max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
-        })
+        .update(updates)
         .eq('id', reqRecord.doctor_id)
         .select('*, medical_centers(name), users(full_name)')
         .maybeSingle();
 
-      if (updateErr) {
-        console.warn('Failed to update doctor center assignment:', updateErr.message);
-      } else {
-        createdDoctor = updatedDoc;
+      if (updateErr && (updateErr.message.includes('approval_status') || updateErr.code === 'PGRST204')) {
+        delete updates.approval_status;
+        const fb = await supabase
+          .from('doctors')
+          .update(updates)
+          .eq('id', reqRecord.doctor_id)
+          .select('*, medical_centers(name), users(full_name)')
+          .maybeSingle();
+        updatedDoc = fb.data;
       }
+
+      createdDoctor = updatedDoc;
     } else {
       // REGISTER_NEW doctor
       const emailToUse = reqRecord.email || `dr.${reqRecord.doctor_name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
@@ -190,19 +214,32 @@ export async function approveDoctorRequest(req, res, next) {
       }
 
       if (userId) {
-        const { data: newDocProfile } = await supabase
+        const insertPayload = {
+          user_id: userId,
+          center_id: reqRecord.center_id,
+          specialization: reqRecord.specialization,
+          room_number: reqRecord.room_number || null,
+          series: reqRecord.series || null,
+          max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
+          current_status: 'active',
+          approval_status: 'approved',
+        };
+
+        let { data: newDocProfile, error: docErr } = await supabase
           .from('doctors')
-          .insert([{
-            user_id: userId,
-            center_id: reqRecord.center_id,
-            specialization: reqRecord.specialization,
-            room_number: reqRecord.room_number || null,
-            series: reqRecord.series || null,
-            max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
-            current_status: 'active',
-          }])
+          .insert([insertPayload])
           .select('*, medical_centers(name), users(full_name)')
           .single();
+
+        if (docErr && (docErr.message.includes('approval_status') || docErr.code === 'PGRST204')) {
+          delete insertPayload.approval_status;
+          const fb = await supabase
+            .from('doctors')
+            .insert([insertPayload])
+            .select('*, medical_centers(name), users(full_name)')
+            .single();
+          newDocProfile = fb.data;
+        }
 
         createdDoctor = newDocProfile;
       }
@@ -214,27 +251,45 @@ export async function approveDoctorRequest(req, res, next) {
         .from('doctor_requests')
         .update({ status: 'approved', updated_at: new Date().toISOString() })
         .eq('id', id);
-    } else {
-      reqRecord.status = 'approved';
-      reqRecord.updated_at = new Date().toISOString();
+    }
+    
+    // Also update in-memory record if exists
+    const memMatch = MEMORY_DOCTOR_REQUESTS.find(r => r.id === id);
+    if (memMatch) {
+      memMatch.status = 'approved';
+      memMatch.updated_at = new Date().toISOString();
     }
 
     // Create Audit Log
     const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
-    await supabase.from('audit_logs').insert([{
-      actor_name: adminName,
-      actor_role: 'admin',
-      event_type: 'approval',
-      action: `Approved request: Added Dr. ${reqRecord.doctor_name} to ${reqRecord.center_name}`,
-      center_name: reqRecord.center_name,
-      status: 'approved',
-    }]).catch(() => {});
+    try {
+      await supabase.from('audit_logs').insert([{
+        actor_name: adminName,
+        actor_role: 'admin',
+        event_type: 'approval',
+        action: `Approved request: Added Dr. ${reqRecord.doctor_name} to ${reqRecord.center_name}`,
+        center_name: reqRecord.center_name,
+        status: 'approved',
+      }]);
+    } catch (_) {}
 
     res.json({
       message: 'Doctor request approved successfully',
       requestId: id,
       status: 'approved',
-      doctor: createdDoctor,
+      doctor: createdDoctor ? {
+        id: createdDoctor.id,
+        name: createdDoctor.users?.full_name ?? reqRecord.doctor_name,
+        dept: createdDoctor.specialization,
+        room: createdDoctor.room_number ?? '—',
+        series: createdDoctor.series ?? '?',
+        status: createdDoctor.current_status ?? 'active',
+        approvalStatus: 'approved',
+        avgConsultMinutes: Math.max(1, Math.round(60 / (createdDoctor.max_appointments_per_hour || 4))),
+        maxAppointmentsPerHour: createdDoctor.max_appointments_per_hour ?? 4,
+        centerId: createdDoctor.center_id,
+        centerName: createdDoctor.medical_centers?.name ?? reqRecord.center_name,
+      } : null,
     });
   } catch (err) {
     next(err);
@@ -272,22 +327,27 @@ export async function rejectDoctorRequest(req, res, next) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', id);
-    } else {
-      reqRecord.status = 'rejected';
-      reqRecord.rejection_reason = reason || 'Rejected by Admin';
-      reqRecord.updated_at = new Date().toISOString();
+    }
+    
+    const memMatch = MEMORY_DOCTOR_REQUESTS.find(r => r.id === id);
+    if (memMatch) {
+      memMatch.status = 'rejected';
+      memMatch.rejection_reason = reason || 'Rejected by Admin';
+      memMatch.updated_at = new Date().toISOString();
     }
 
     // Create Audit Log
     const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
-    await supabase.from('audit_logs').insert([{
-      actor_name: adminName,
-      actor_role: 'admin',
-      event_type: 'approval',
-      action: `Rejected request for Dr. ${reqRecord.doctor_name} (${reason || 'No reason provided'})`,
-      center_name: reqRecord.center_name,
-      status: 'rejected',
-    }]).catch(() => {});
+    try {
+      await supabase.from('audit_logs').insert([{
+        actor_name: adminName,
+        actor_role: 'admin',
+        event_type: 'approval',
+        action: `Rejected request for Dr. ${reqRecord.doctor_name} (${reason || 'No reason provided'})`,
+        center_name: reqRecord.center_name,
+        status: 'rejected',
+      }]);
+    } catch (_) {}
 
     res.json({
       message: 'Doctor request rejected',

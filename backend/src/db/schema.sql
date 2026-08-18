@@ -52,6 +52,7 @@ CREATE TABLE public.medical_centers (
   opening_hours TEXT NOT NULL,
   services TEXT[] DEFAULT '{}',
   phone TEXT,
+  email TEXT,
   status TEXT CHECK (status IN ('operational', 'maintenance', 'closed')) NOT NULL DEFAULT 'operational',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -139,9 +140,9 @@ ALTER TABLE public.health_records DISABLE ROW LEVEL SECURITY;
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- Insert Medical Centers
-INSERT INTO public.medical_centers (id, name, address, city, opening_hours, services, phone, status) VALUES
-('a1000000-0000-0000-0000-000000000001', 'MediQueue Central Clinic', '124 Medical Plaza', 'Colombo 07', '08:00 - 20:00', ARRAY['Cardiology', 'General Medicine', 'Pediatrics'], '0112345678', 'operational'),
-('a1000000-0000-0000-0000-000000000002', 'MediQueue North Branch', '45 Station Road', 'Kandy', '09:00 - 18:00', ARRAY['Orthopedics', 'General Medicine'], '0812345678', 'operational');
+INSERT INTO public.medical_centers (id, name, address, city, opening_hours, services, phone, email, status) VALUES
+('a1000000-0000-0000-0000-000000000001', 'MediQueue Central Clinic', '124 Medical Plaza', 'Colombo 07', '08:00 - 20:00', ARRAY['Cardiology', 'General Medicine', 'Pediatrics'], '0112345678', 'central@mediqueue.io', 'operational'),
+('a1000000-0000-0000-0000-000000000002', 'MediQueue North Branch', '45 Station Road', 'Kandy', '09:00 - 18:00', ARRAY['Orthopedics', 'General Medicine'], '0812345678', 'north@mediqueue.io', 'operational');
 
 -- Insert Initial Users
 INSERT INTO public.users (id, email, full_name, phone, role, nic, emergency_contact_name, emergency_contact_phone, blood_group, allergies, chronic_conditions) VALUES
