@@ -64,8 +64,12 @@ CREATE TABLE public.doctors (
   specialization TEXT NOT NULL,
   max_appointments_per_hour INT DEFAULT 4, -- BR-02: Configurable max appointments/hour limit
   current_status TEXT CHECK (current_status IN ('active', 'delayed', 'break', 'offline')) DEFAULT 'active',
+  approval_status TEXT CHECK (approval_status IN ('pending', 'approved', 'rejected')) DEFAULT 'approved',
+  requested_by_name TEXT,
+  rejection_reason TEXT,
   delay_minutes INT DEFAULT 0,
   room_number TEXT,
+  series TEXT,
   available_hours JSONB DEFAULT '{}', -- Weekly schedule: {"1":{"startTime":"08:00","endTime":"17:00","isAvailable":true}, ...}
   created_at TIMESTAMPTZ DEFAULT NOW()
 );

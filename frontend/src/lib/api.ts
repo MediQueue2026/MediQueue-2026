@@ -137,6 +137,11 @@ export interface ApiDoctor {
   room: string
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
+  approvalStatus?: 'pending' | 'approved' | 'rejected'
+  requestedByName?: string | null
+  rejectionReason?: string | null
+  email?: string | null
+  phone?: string | null
   avgConsultMinutes: number
   maxAppointmentsPerHour?: number
   centerId?: string | null
@@ -213,6 +218,26 @@ export interface AuditLog {
   status: 'approved' | 'pending' | 'completed' | 'rejected'
 }
 
+export interface ApiDoctorRequest {
+  id: string
+  requestType: 'ASSIGN_EXISTING' | 'REGISTER_NEW'
+  receptionistId?: string | null
+  receptionistName: string
+  centerId: string
+  centerName: string
+  doctorId?: string | null
+  doctorName: string
+  email?: string | null
+  phone?: string | null
+  specialization: string
+  roomNumber?: string | null
+  series?: string | null
+  maxAppointmentsPerHour?: number
+  status: 'pending' | 'approved' | 'rejected'
+  rejectionReason?: string | null
+  createdAt: string
+}
+
 export const api = {
   // ── Auth ──
   login: (email: string, password: string) =>
@@ -275,16 +300,33 @@ export const api = {
     }),
 
   createDoctor: (input: {
-    fullName: string
-    specialization: string
+    fullName?: string
+    specialization?: string
     roomNumber?: string
     series?: string
     maxAppointmentsPerHour?: number
     centerId?: string | null
+    existingDoctorId?: string
+    email?: string
+    phone?: string
   }) =>
     request<{ message: string; doctor: ApiDoctor }>('/doctors', {
       method: 'POST',
       body: JSON.stringify(input),
+    }),
+
+  getPendingDoctors: () =>
+    request<{ pendingDoctors: ApiDoctor[] }>('/doctors/pending'),
+
+  approveDoctor: (id: string) =>
+    request<{ message: string; doctor: ApiDoctor }>(`/doctors/${id}/approve`, {
+      method: 'PATCH',
+    }),
+
+  rejectDoctor: (id: string, reason?: string) =>
+    request<{ message: string; doctorId: string; approvalStatus: 'rejected'; reason?: string }>(`/doctors/${id}/reject`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason }),
     }),
 
   getDoctorHours: (doctorId: string) =>

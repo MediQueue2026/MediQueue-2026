@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import {
-  Activity, Building2, FileText, GitBranch, LogOut, Menu, Plus,
+  Activity, Building2, FileText, LogOut, Menu, Plus,
   Search, Settings, Ticket, Users, X, RefreshCw, CheckCircle2,
   AlertCircle, UserCheck, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
   Pencil, Pause, Play, Trash2
@@ -20,6 +20,7 @@ import type { ApiCenter, ApiDoctor, AuditLog } from '../lib/api'
 
 const NAV_ADMIN = [
   { id: 'health', icon: <Activity size={15} />, label: 'System Health' },
+  { id: 'approvals', icon: <UserCheck size={15} />, label: 'Doctor Approvals' },
   { id: 'roles', icon: <Users size={15} />, label: 'Staff & Roles' },
   { id: 'clinics', icon: <Building2 size={15} />, label: 'Medical Centers' },
   { id: 'api', icon: <MessageSquare size={15} />, label: 'Message Center' },
@@ -193,7 +194,7 @@ export default function AdminPanel() {
   const [deletingCenter, setDeletingCenter] = useState<ApiCenter | null>(null)
   const [activeCenter, setActiveCenter] = useState<ApiCenter | null>(null)
   const [doctors, setDoctors] = useState<ApiDoctor[]>([])
-  const [doctorsLoading, setDoctorsLoading] = useState(false)
+  const [_doctorsLoading, setDoctorsLoading] = useState(false)
 
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -203,7 +204,28 @@ export default function AdminPanel() {
   const [logsLoading, setLogsLoading] = useState(false)
   const [logsSource, setLogsSource] = useState<'database' | 'dummy' | null>(null)
 
+  // Doctor Approvals State
+  const [pendingDoctors, setPendingDoctors] = useState<ApiDoctor[]>([])
+  const [pendingLoading, setPendingLoading] = useState(false)
+  const [rejectingDoctor, setRejectingDoctor] = useState<ApiDoctor | null>(null)
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('')
+
+  const fetchPendingDoctors = () => {
+    setPendingLoading(true)
+    api.getPendingDoctors()
+      .then(r => setPendingDoctors(r.pendingDoctors || []))
+      .catch(err => {
+        console.error('Failed to load pending doctors', err)
+        setPendingDoctors([])
+      })
+      .finally(() => setPendingLoading(false))
+  }
+
   useEffect(() => {
+    if (nav === 'approvals') {
+      fetchPendingDoctors()
+    }
+
     if (nav === 'clinics') {
       let active = true
       setCentersLoading(true)
@@ -412,6 +434,31 @@ export default function AdminPanel() {
     } catch (error) {
       console.error('Failed to change center status', error)
       alert('Could not change facility status. Please try again.')
+    }
+  }
+
+  const handleApproveDoctor = async (doctorId: string) => {
+    try {
+      await api.approveDoctor(doctorId)
+      fetchPendingDoctors()
+      const r = await api.getDoctors()
+      setDoctors(r.doctors)
+    } catch (error) {
+      console.error('Failed to approve doctor', error)
+      alert('Could not approve doctor. Please try again.')
+    }
+  }
+
+  const handleConfirmRejectDoctor = async () => {
+    if (!rejectingDoctor) return
+    try {
+      await api.rejectDoctor(rejectingDoctor.id, rejectionReasonInput.trim() || undefined)
+      setRejectingDoctor(null)
+      setRejectionReasonInput('')
+      fetchPendingDoctors()
+    } catch (error) {
+      console.error('Failed to reject doctor', error)
+      alert('Could not reject doctor. Please try again.')
     }
   }
 
@@ -657,6 +704,121 @@ export default function AdminPanel() {
                 </div>
               </div>
             </>
+          )}
+
+          {/* DOCTOR APPROVALS TAB */}
+          {nav === 'approvals' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <h2 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Doctor Approvals</h2>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
+                    Review doctors requested or registered by receptionists. Approved profiles are activated on the clinic roster.
+                  </div>
+                </div>
+                <button
+                  onClick={fetchPendingDoctors}
+                  className="btn btn-ghost btn-sm"
+                  style={{ gap: 6, border: '1px solid var(--border-md)' }}
+                >
+                  <RefreshCw size={13} className={pendingLoading ? 'spin' : ''} /> Refresh List
+                </button>
+              </div>
+
+              {pendingLoading ? (
+                <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--text-4)' }}>Loading pending approvals…</div>
+              ) : pendingDoctors.length === 0 ? (
+                <div style={{
+                  padding: '56px 24px', textAlign: 'center', background: 'rgba(255,255,255,0.7)',
+                  borderRadius: 16, border: '1.5px dashed var(--border-md)'
+                }}>
+                  <CheckCircle2 size={42} color="#10B981" style={{ margin: '0 auto 12px' }} />
+                  <h4 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)' }}>All Clear — No Pending Approvals</h4>
+                  <p style={{ fontSize: 13, color: 'var(--text-4)', marginTop: 4 }}>
+                    When receptionists add doctors to their medical centers, pending requests will appear here for review.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 18 }}>
+                  {pendingDoctors.map(doc => (
+                    <div key={doc.id} className="card glass-form-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                          <Avatar name={doc.name} size={44} />
+                          <div>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)' }}>{doc.name}</div>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--blue)' }}>{doc.dept}</div>
+                          </div>
+                        </div>
+                        <span style={{
+                          fontSize: 10.5, fontWeight: 800, padding: '3px 8px', borderRadius: 6,
+                          background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)',
+                          color: '#d97706', textTransform: 'uppercase', letterSpacing: '0.05em'
+                        }}>
+                          Pending
+                        </span>
+                      </div>
+
+                      <div style={{
+                        background: 'rgba(30, 41, 59, 0.03)', border: '1px solid var(--border-md)',
+                        borderRadius: 10, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6
+                      }}>
+                        <div>Center: <strong style={{ color: 'var(--text-1)' }}>{doc.centerName || 'Medical Center'}</strong></div>
+                        <div>Room: <strong style={{ color: 'var(--text-1)' }}>{doc.room || '—'}</strong> · Token Series: <strong style={{ color: 'var(--blue)' }}>{doc.series || 'A'}</strong></div>
+                        <div>Requested By: <strong style={{ color: 'var(--text-2)' }}>{doc.requestedByName || 'Receptionist'}</strong></div>
+                        {doc.email && <div>Email: <span style={{ color: 'var(--text-3)' }}>{doc.email}</span></div>}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                        <button
+                          onClick={() => handleApproveDoctor(doc.id)}
+                          className="btn btn-emerald btn-sm"
+                          style={{ flex: 1, justifyContent: 'center', gap: 6, height: 38 }}
+                        >
+                          <CheckCircle2 size={14} /> Approve Doctor
+                        </button>
+                        <button
+                          onClick={() => { setRejectingDoctor(doc); setRejectionReasonInput('') }}
+                          className="btn btn-ghost btn-sm"
+                          style={{ flex: 1, justifyContent: 'center', gap: 6, height: 38, color: 'var(--crimson)' }}
+                        >
+                          <UserX size={14} /> Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Rejection Modal */}
+          {rejectingDoctor && (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 10000,
+              background: 'rgba(6, 35, 33, 0.65)', backdropFilter: 'blur(10px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+            }}>
+              <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, padding: 28, background: '#ffffff', borderRadius: 16 }}>
+                <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)', marginBottom: 8 }}>Reject Doctor Registration</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 14 }}>
+                  Provide an optional rejection reason for Dr. <strong>{rejectingDoctor.name}</strong>.
+                </p>
+                <textarea
+                  className="input"
+                  placeholder="e.g. Incomplete credentials, medical center not authorized..."
+                  value={rejectionReasonInput}
+                  onChange={e => setRejectionReasonInput(e.target.value)}
+                  style={{ height: 80, fontSize: 13, padding: 10, marginBottom: 16, width: '100%' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button onClick={() => setRejectingDoctor(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                  <button onClick={handleConfirmRejectDoctor} className="btn btn-primary btn-sm" style={{ background: 'var(--crimson)', borderColor: 'var(--crimson)' }}>
+                    Confirm Rejection
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* STAFF & ROLES MANAGEMENT TAB */}

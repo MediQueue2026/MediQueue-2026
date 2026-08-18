@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Navigation, Phone, Calendar, Stethoscope, Compass } from 'lucide-react'
+import { MapPin, Navigation, Phone, Calendar, Compass } from 'lucide-react'
 
 // Fix default Leaflet icon paths in React Vite
 const defaultIcon = L.icon({
@@ -168,7 +168,7 @@ export function LiveClinicMap({
           map.setView([userLat, userLng], 13, { animate: true })
         }
       },
-      err => {
+      _err => {
         setGeoLocating(false)
         setGeoError('Could not retrieve your GPS location. Please check browser permissions.')
       },

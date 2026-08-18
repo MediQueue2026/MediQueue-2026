@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { X, Stethoscope, CheckCircle2, UserPlus } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { X, Stethoscope, CheckCircle2, UserPlus, ShieldAlert, Building2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiDoctor } from '../lib/api'
 
@@ -14,19 +14,33 @@ export default function AddDoctorModal({
   isOpen,
   onClose,
   centerId,
+  centerName: _centerName,
   onCreated,
   editDoctor,
+  allDoctors = [],
 }: {
   isOpen: boolean
   onClose: () => void
   centerId?: string | null
-  onCreated?: (doctor: ApiDoctor) => void
+  centerName?: string | null
+  onCreated?: (doctor?: ApiDoctor) => void
   /** Pass an existing doctor to switch to edit mode */
   editDoctor?: ApiDoctor | null
+  /** Pass list of all doctors in the system to choose from in "Assign Existing" mode */
+  allDoctors?: ApiDoctor[]
 }) {
   const isEdit = !!editDoctor
 
+  // Mode: 'existing' vs 'new' for adding doctors
+  const [mode, setMode] = useState<'existing' | 'new'>('existing')
+
+  // Selected existing doctor ID
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string>('')
+
+  // New Doctor form fields
   const [fullName, setFullName] = useState(editDoctor?.name ?? '')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [specialization, setSpecialization] = useState(editDoctor?.dept ?? 'General Medicine')
   const [customSpec, setCustomSpec] = useState('')
   const [roomNumber, setRoomNumber] = useState(editDoctor?.room ?? '')
@@ -34,25 +48,65 @@ export default function AddDoctorModal({
   const [maxPerHour, setMaxPerHour] = useState(String(editDoctor?.maxAppointmentsPerHour ?? 4))
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(false)
+  const [successMsg, setSuccessMsg] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  // System doctors list (fetched if not provided)
+  const [systemDoctors, setSystemDoctors] = useState<ApiDoctor[]>(allDoctors)
+
+  useEffect(() => {
+    if (isOpen && !isEdit) {
+      if (allDoctors.length > 0) {
+        setSystemDoctors(allDoctors)
+        setSelectedDoctorId(allDoctors[0]?.id || '')
+      } else {
+        api.getDoctors()
+          .then(res => {
+            setSystemDoctors(res.doctors)
+            if (res.doctors.length > 0) setSelectedDoctorId(res.doctors[0].id)
+          })
+          .catch(() => {})
+      }
+    }
+  }, [isOpen, isEdit, allDoctors])
+
+  useEffect(() => {
+    if (editDoctor) {
+      setFullName(editDoctor.name)
+      setSpecialization(editDoctor.dept || 'General Medicine')
+      setRoomNumber(editDoctor.room || '')
+      setSeries(editDoctor.series || '')
+      setMaxPerHour(String(editDoctor.maxAppointmentsPerHour || 4))
+    }
+  }, [editDoctor])
+
   const resetState = () => {
-    setFullName(''); setSpecialization('General Medicine'); setCustomSpec('')
-    setRoomNumber(''); setSeries(''); setMaxPerHour('4')
-    setSaving(false); setDone(false); setError(null)
+    setMode('existing')
+    setSelectedDoctorId('')
+    setFullName('')
+    setEmail('')
+    setPhone('')
+    setSpecialization('General Medicine')
+    setCustomSpec('')
+    setRoomNumber('')
+    setSeries('')
+    setMaxPerHour('4')
+    setSaving(false)
+    setDone(false)
+    setSuccessMsg('')
+    setError(null)
   }
 
   if (!isOpen) return null
 
   const finalSpec = specialization === 'Other' ? customSpec.trim() : specialization
+  const targetCenterId = centerId || 'a1000000-0000-0000-0000-000000000001'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!fullName.trim() || !finalSpec) return
     setSaving(true)
     setError(null)
     try {
-      let doctor: ApiDoctor
       if (isEdit && editDoctor) {
         const res = await api.updateDoctor(editDoctor.id, {
           specialization: finalSpec,
@@ -60,23 +114,56 @@ export default function AddDoctorModal({
           series: series.trim().toUpperCase() || undefined,
           maxAppointmentsPerHour: Number(maxPerHour) || 4,
         })
-        doctor = res.doctor
+        setSuccessMsg('Doctor profile updated successfully.')
+        setDone(true)
+        onCreated?.(res.doctor)
+      } else if (mode === 'existing') {
+        const selectedDoc = systemDoctors.find(d => d.id === selectedDoctorId)
+        if (!selectedDoc) {
+          setError('Please select an existing doctor from the list.')
+          setSaving(false)
+          return
+        }
+
+        const res = await api.createDoctor({
+          existingDoctorId: selectedDoc.id,
+          centerId: targetCenterId,
+          specialization: selectedDoc.dept || finalSpec || 'General Medicine',
+          roomNumber: roomNumber.trim() || undefined,
+          series: series.trim().toUpperCase() || undefined,
+          maxAppointmentsPerHour: Number(maxPerHour) || 4,
+        })
+
+        setSuccessMsg(`Request sent! ${selectedDoc.name} has been submitted for Super Admin approval.`)
+        setDone(true)
+        onCreated?.(res.doctor)
       } else {
+        // Mode: 'new'
+        if (!fullName.trim() || !finalSpec) {
+          setError('Please fill in doctor name and specialization.')
+          setSaving(false)
+          return
+        }
+
         const res = await api.createDoctor({
           fullName: fullName.trim(),
+          email: email.trim() || undefined,
+          phone: phone.trim() || undefined,
+          centerId: targetCenterId,
           specialization: finalSpec,
           roomNumber: roomNumber.trim() || undefined,
           series: series.trim().toUpperCase() || undefined,
           maxAppointmentsPerHour: Number(maxPerHour) || 4,
-          centerId: centerId ?? null,
         })
-        doctor = res.doctor
+
+        setSuccessMsg(`Request sent! Dr. ${fullName.trim()} has been submitted for Super Admin approval.`)
+        setDone(true)
+        onCreated?.(res.doctor)
       }
-      setDone(true)
-      onCreated?.(doctor)
-      setTimeout(() => { resetState(); onClose() }, 1400)
+
+      setTimeout(() => { resetState(); onClose() }, 2000)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not save doctor. Please try again.')
+      setError(err instanceof Error ? err.message : 'Could not save doctor profile. Please try again.')
       setSaving(false)
     }
   }
@@ -91,8 +178,8 @@ export default function AddDoctorModal({
       padding: 16,
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 520, maxHeight: '92vh',
-        background: 'rgba(255,255,255,0.94)',
+        width: '100%', maxWidth: 540, maxHeight: '92vh',
+        background: 'rgba(255,255,255,0.95)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(18, 198, 186, 0.28)',
@@ -111,7 +198,7 @@ export default function AddDoctorModal({
         </button>
 
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 26 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
           <div style={{
             width: 46, height: 46, borderRadius: 13,
             background: 'linear-gradient(135deg, rgba(18,198,186,0.12), rgba(59,130,246,0.12))',
@@ -123,55 +210,166 @@ export default function AddDoctorModal({
           </div>
           <div>
             <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
-              {isEdit ? 'Edit Doctor' : 'Add New Doctor'}
+              {isEdit ? 'Edit Doctor Profile' : 'Add / Register Doctor for Center'}
             </h3>
             <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>
-              {isEdit ? "Update this doctor's details." : 'Register a doctor at your medical center.'}
+              {isEdit ? "Update doctor's room and schedule parameters." : 'Assign an existing doctor or enter details for a new doctor.'}
             </div>
           </div>
         </div>
+
+        {/* Mode Switcher for Non-edit mode */}
+        {!isEdit && !done && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+            background: 'rgba(18, 198, 186, 0.07)', padding: 4,
+            borderRadius: 12, border: '1px solid rgba(18, 198, 186, 0.18)',
+            marginBottom: 20
+          }}>
+            <button
+              type="button"
+              onClick={() => setMode('existing')}
+              style={{
+                padding: '9px 12px', borderRadius: 9, border: 'none',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                background: mode === 'existing' ? '#ffffff' : 'transparent',
+                color: mode === 'existing' ? 'var(--blue)' : 'var(--text-3)',
+                boxShadow: mode === 'existing' ? '0 2px 8px rgba(0,0,0,0.06)' : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+              }}
+            >
+              <Building2 size={14} /> Add Existing Doctor
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('new')}
+              style={{
+                padding: '9px 12px', borderRadius: 9, border: 'none',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                background: mode === 'new' ? '#ffffff' : 'transparent',
+                color: mode === 'new' ? 'var(--blue)' : 'var(--text-3)',
+                boxShadow: mode === 'new' ? '0 2px 8px rgba(0,0,0,0.06)' : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+              }}
+            >
+              <UserPlus size={14} /> Register New Doctor
+            </button>
+          </div>
+        )}
+
+        {/* Super Admin Approval Info Banner */}
+        {!isEdit && !done && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)',
+            borderRadius: 10, padding: '10px 14px', marginBottom: 18, fontSize: 12.5, color: '#1e40af'
+          }}>
+            <ShieldAlert size={18} style={{ flexShrink: 0 }} />
+            <span>Doctor data will be saved in DB with <strong>Pending Approval</strong> status until approved by the <strong>Super Admin</strong>.</span>
+          </div>
+        )}
 
         {/* Success state */}
         {done ? (
           <div style={{ textAlign: 'center', padding: '32px 0' }}>
             <CheckCircle2 size={52} color="#10B981" style={{ margin: '0 auto 14px' }} />
             <h4 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)' }}>
-              {isEdit ? 'Changes Saved!' : 'Doctor Added!'}
+              {isEdit ? 'Changes Saved!' : 'Request Sent!'}
             </h4>
-            <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
-              {isEdit ? 'Doctor profile has been updated.' : 'The new doctor is now on the roster.'}
+            <p style={{ fontSize: 13.5, color: 'var(--text-3)', marginTop: 8, maxWidth: 380, marginInline: 'auto' }}>
+              {successMsg}
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-            {/* Full Name — hidden in edit mode (user row name can't be changed here) */}
-            {!isEdit && (
+            {/* Mode A: Select Existing Registered Doctor */}
+            {!isEdit && mode === 'existing' && (
               <div>
-                <label style={labelStyle}>Full Name</label>
-                <input
-                  className="input"
-                  placeholder="e.g. Dr. Amara Nwosu"
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  required
-                  style={inputStyle}
-                />
+                <label style={labelStyle}>Select Existing Registered Doctor</label>
+                {systemDoctors.length === 0 ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-4)', fontStyle: 'italic', padding: 8 }}>
+                    No existing registered doctors found. Switch to "Register New Doctor".
+                  </div>
+                ) : (
+                  <select
+                    className="input"
+                    value={selectedDoctorId}
+                    onChange={e => {
+                      setSelectedDoctorId(e.target.value)
+                      const d = systemDoctors.find(doc => doc.id === e.target.value)
+                      if (d) {
+                        setSpecialization(d.dept || 'General Medicine')
+                        if (d.room && d.room !== '—') setRoomNumber(d.room)
+                        if (d.series && d.series !== '?') setSeries(d.series)
+                      }
+                    }}
+                    style={inputStyle}
+                  >
+                    {systemDoctors.map(doc => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.name} — {doc.dept} ({doc.centerName || 'Unassigned'})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             )}
 
-            {/* Specialisation */}
-            <div>
-              <label style={labelStyle}>Specialisation</label>
-              <select
-                className="input"
-                value={specialization}
-                onChange={e => setSpecialization(e.target.value)}
-                style={inputStyle}
-              >
-                {SPECIALISATIONS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
+            {/* Mode B: Register New Doctor (or Edit mode) */}
+            {(!isEdit && mode === 'new') && (
+              <>
+                <div>
+                  <label style={labelStyle}>Full Name</label>
+                  <input
+                    className="input"
+                    placeholder="e.g. Dr. Amara Perera"
+                    value={fullName}
+                    onChange={e => setFullName(e.target.value)}
+                    required
+                    style={inputStyle}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={labelStyle}>Email (Optional)</label>
+                    <input
+                      className="input"
+                      type="email"
+                      placeholder="dr.amara@mediqueue.io"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Phone (Optional)</label>
+                    <input
+                      className="input"
+                      placeholder="0771234567"
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Specialisation (Shown for new registration or existing selection refinement) */}
+            {(isEdit || mode === 'new' || mode === 'existing') && (
+              <div>
+                <label style={labelStyle}>Specialisation</label>
+                <select
+                  className="input"
+                  value={specialization}
+                  onChange={e => setSpecialization(e.target.value)}
+                  style={inputStyle}
+                >
+                  {SPECIALISATIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            )}
             {specialization === 'Other' && (
               <div>
                 <label style={labelStyle}>Custom Specialisation</label>
@@ -189,7 +387,7 @@ export default function AddDoctorModal({
             {/* Room + Series in a row */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={labelStyle}>Room Number</label>
+                <label style={labelStyle}>Consultation Room Number</label>
                 <input
                   className="input"
                   placeholder="e.g. Room 04"
@@ -199,7 +397,7 @@ export default function AddDoctorModal({
                 />
               </div>
               <div>
-                <label style={labelStyle}>Token Series (A–Z)</label>
+                <label style={labelStyle}>Token Series Letter (A–Z)</label>
                 <input
                   className="input"
                   placeholder="e.g. A"
@@ -224,7 +422,7 @@ export default function AddDoctorModal({
                 style={inputStyle}
               />
               <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>
-                Total daily capacity = available hours × this number
+                Total daily capacity = available hours × max per hour
               </div>
             </div>
 
@@ -249,14 +447,14 @@ export default function AddDoctorModal({
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={saving || (!isEdit && !fullName.trim()) || !finalSpec}
+                disabled={saving || (!isEdit && mode === 'new' && !fullName.trim())}
                 style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}
               >
                 {saving
                   ? <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
                   : <UserPlus size={16} />
                 }
-                {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Doctor'}
+                {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Save & Submit Request'}
               </button>
             </div>
           </form>
