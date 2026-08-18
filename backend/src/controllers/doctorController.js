@@ -222,61 +222,351 @@ export async function getDoctorSummary(req, res, next) {
 
 /**
  * POST /doctors
- * Creates a stub user (role=doctor) then a doctors profile row.
- * Body: { fullName, specialization, roomNumber, series, maxAppointmentsPerHour, centerId }
+ * Creates or requests a doctor profile row in public.doctors table.
+ * If created by receptionist, approval_status is set to 'pending'.
  */
 export async function createDoctor(req, res, next) {
   try {
-    const { fullName, specialization, roomNumber, series, maxAppointmentsPerHour, centerId } = req.body;
+    const {
+      fullName,
+      specialization,
+      roomNumber,
+      series,
+      maxAppointmentsPerHour,
+      centerId,
+      existingDoctorId,
+      email,
+      phone,
+    } = req.body;
 
+    const requesterRole = req.user?.role || 'receptionist';
+    const requesterName = req.user?.fullName || req.user?.email || 'Receptionist';
+    // If request comes from receptionist, default to 'pending' approval_status
+    const approvalStatus = requesterRole === 'admin' ? 'approved' : 'pending';
+
+    // Fetch center name if provided
+    let centerName = 'Medical Center';
+    if (centerId) {
+      const { data: cRow } = await supabase.from('medical_centers').select('name').eq('id', centerId).maybeSingle();
+      if (cRow) centerName = cRow.name;
+    }
+
+    // Case 1: Assigning an existing doctor to a center
+    if (existingDoctorId) {
+      const updates = {
+        center_id: centerId || null,
+        specialization: specialization || undefined,
+        room_number: roomNumber || null,
+        series: series || null,
+        max_appointments_per_hour: maxAppointmentsPerHour || 4,
+        approval_status: approvalStatus,
+        requested_by_name: requesterName,
+      };
+
+      let updatedDoc = null;
+      let { data, error: updateErr } = await supabase
+        .from('doctors')
+        .update(updates)
+        .eq('id', existingDoctorId)
+        .select('id, specialization, room_number, current_status, approval_status, requested_by_name, max_appointments_per_hour, available_hours, series, center_id, medical_centers(name), users(full_name)')
+        .maybeSingle();
+
+      if (updateErr && (updateErr.message.includes('approval_status') || updateErr.code === 'PGRST204')) {
+        // Fallback: DB column approval_status missing in Supabase schema
+        delete updates.approval_status;
+        delete updates.requested_by_name;
+        const fallbackRes = await supabase
+          .from('doctors')
+          .update(updates)
+          .eq('id', existingDoctorId)
+          .select('id, specialization, room_number, current_status, max_appointments_per_hour, available_hours, series, center_id, medical_centers(name), users(full_name)')
+          .single();
+        data = fallbackRes.data;
+        updateErr = fallbackRes.error;
+      }
+
+      if (updateErr) {
+        return res.status(500).json({ error: `Could not update doctor assignment: ${updateErr.message}` });
+      }
+
+      updatedDoc = data;
+
+      try {
+        await supabase.from('audit_logs').insert([{
+          actor_name: requesterName,
+          actor_role: requesterRole,
+          event_type: 'request',
+          action: `Requested adding doctor ${updatedDoc?.users?.full_name || 'Doctor'} to ${centerName}`,
+          center_name: centerName,
+          status: approvalStatus,
+        }]);
+      } catch (_) {}
+
+      return res.status(200).json({
+        message: approvalStatus === 'pending'
+          ? 'Doctor assignment submitted to Super Admin for approval'
+          : 'Doctor assigned successfully',
+        doctor: {
+          id: updatedDoc?.id || existingDoctorId,
+          name: updatedDoc?.users?.full_name ?? fullName ?? 'Doctor',
+          dept: updatedDoc?.specialization ?? specialization ?? 'General Medicine',
+          room: updatedDoc?.room_number ?? '—',
+          series: updatedDoc?.series ?? '?',
+          status: updatedDoc?.current_status ?? 'active',
+          approvalStatus: updatedDoc?.approval_status ?? approvalStatus,
+          requestedByName: updatedDoc?.requested_by_name ?? requesterName,
+          avgConsultMinutes: Math.max(1, Math.round(60 / (updatedDoc?.max_appointments_per_hour || 4))),
+          maxAppointmentsPerHour: updatedDoc?.max_appointments_per_hour ?? 4,
+          centerId: updatedDoc?.center_id ?? null,
+          centerName: updatedDoc?.medical_centers?.name ?? centerName,
+        },
+      });
+    }
+
+    // Case 2: Registering a brand new doctor
     if (!fullName || !specialization) {
       return res.status(400).json({ error: 'fullName and specialization are required' });
     }
 
-    const stubEmail = `dr.${fullName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
+    const stubEmail = email || `dr.${fullName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
 
-    const { data: userRow, error: userErr } = await supabase
-      .from('users')
-      .insert([{ email: stubEmail, full_name: fullName, role: 'doctor' }])
-      .select('id')
-      .single();
+    let userId = null;
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', stubEmail).maybeSingle();
 
-    if (userErr) {
-      return res.status(500).json({ error: `Could not create user stub: ${userErr.message}` });
+    if (existingUser) {
+      userId = existingUser.id;
+    } else {
+      const { data: userRow, error: userErr } = await supabase
+        .from('users')
+        .insert([{ email: stubEmail, full_name: fullName, phone: phone || null, role: 'doctor' }])
+        .select('id')
+        .single();
+
+      if (userErr) {
+        return res.status(500).json({ error: `Could not create user stub: ${userErr.message}` });
+      }
+      userId = userRow.id;
     }
 
-    const { data: doctorRow, error: docErr } = await supabase
+    const doctorInsertPayload = {
+      user_id: userId,
+      center_id: centerId || null,
+      specialization,
+      room_number: roomNumber || null,
+      series: series || null,
+      max_appointments_per_hour: maxAppointmentsPerHour || 4,
+      current_status: 'active',
+      approval_status: approvalStatus,
+      requested_by_name: requesterName,
+    };
+
+    let doctorRow = null;
+    let { data: newDocData, error: docErr } = await supabase
       .from('doctors')
-      .insert([{
-        user_id: userRow.id,
-        center_id: centerId || null,
-        specialization,
-        room_number: roomNumber || null,
-        series: series || null,
-        max_appointments_per_hour: maxAppointmentsPerHour || 4,
-        current_status: 'active',
-      }])
-      .select('id, specialization, room_number, current_status, max_appointments_per_hour, available_hours, series, center_id, medical_centers(name), users(full_name)')
-      .single();
+      .insert([doctorInsertPayload])
+      .select('id, specialization, room_number, current_status, approval_status, requested_by_name, max_appointments_per_hour, available_hours, series, center_id, medical_centers(name), users(full_name)')
+      .maybeSingle();
+
+    if (docErr && (docErr.message.includes('approval_status') || docErr.code === 'PGRST204')) {
+      // Fallback: column approval_status missing in Supabase schema
+      delete doctorInsertPayload.approval_status;
+      delete doctorInsertPayload.requested_by_name;
+
+      const fallbackInsert = await supabase
+        .from('doctors')
+        .insert([doctorInsertPayload])
+        .select('id, specialization, room_number, current_status, max_appointments_per_hour, available_hours, series, center_id, medical_centers(name), users(full_name)')
+        .single();
+
+      newDocData = fallbackInsert.data;
+      docErr = fallbackInsert.error;
+    }
 
     if (docErr) {
       return res.status(500).json({ error: `Could not create doctor profile: ${docErr.message}` });
     }
 
+    doctorRow = newDocData;
+
+    try {
+      await supabase.from('audit_logs').insert([{
+        actor_name: requesterName,
+        actor_role: requesterRole,
+        event_type: 'request',
+        action: `Submitted registration for Dr. ${fullName} at ${centerName}`,
+        center_name: centerName,
+        status: approvalStatus,
+      }]);
+    } catch (_) {}
+
     res.status(201).json({
-      message: 'Doctor created successfully',
+      message: approvalStatus === 'pending'
+        ? 'Doctor registration submitted to Super Admin for approval'
+        : 'Doctor created successfully',
       doctor: {
-        id: doctorRow.id,
-        name: doctorRow.users?.full_name ?? fullName,
-        dept: doctorRow.specialization,
-        room: doctorRow.room_number ?? '—',
-        series: doctorRow.series ?? '?',
-        status: doctorRow.current_status ?? 'active',
-        avgConsultMinutes: Math.max(1, Math.round(60 / (doctorRow.max_appointments_per_hour || 4))),
-        maxAppointmentsPerHour: doctorRow.max_appointments_per_hour ?? 4,
-        centerId: doctorRow.center_id ?? null,
-        centerName: doctorRow.medical_centers?.name ?? null,
+        id: doctorRow?.id,
+        name: doctorRow?.users?.full_name ?? fullName,
+        dept: doctorRow?.specialization ?? specialization,
+        room: doctorRow?.room_number ?? '—',
+        series: doctorRow?.series ?? '?',
+        status: doctorRow?.current_status ?? 'active',
+        approvalStatus: doctorRow?.approval_status ?? approvalStatus,
+        requestedByName: doctorRow?.requested_by_name ?? requesterName,
+        avgConsultMinutes: Math.max(1, Math.round(60 / (doctorRow?.max_appointments_per_hour || 4))),
+        maxAppointmentsPerHour: doctorRow?.max_appointments_per_hour ?? 4,
+        centerId: doctorRow?.center_id ?? null,
+        centerName: doctorRow?.medical_centers?.name ?? centerName,
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /doctors/pending
+ * Returns doctors pending Super Admin approval.
+ */
+export async function getPendingDoctors(req, res, next) {
+  try {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('*, medical_centers(name), users(full_name, email, phone)')
+      .eq('approval_status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (error.message.includes('approval_status') || error.code === 'PGRST204') {
+        return res.json({ pendingDoctors: [] });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+
+    const mapped = (data || []).map(d => ({
+      id: d.id,
+      userId: d.user_id,
+      name: d.users?.full_name ?? 'Doctor',
+      email: d.users?.email ?? null,
+      phone: d.users?.phone ?? null,
+      dept: d.specialization || 'General Medicine',
+      specialization: d.specialization || 'General Medicine',
+      room: d.room_number ?? '—',
+      series: d.series ?? '?',
+      status: d.current_status ?? 'active',
+      approvalStatus: d.approval_status ?? 'pending',
+      requestedByName: d.requested_by_name ?? 'Receptionist',
+      maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
+      centerId: d.center_id ?? null,
+      centerName: d.medical_centers?.name ?? 'Medical Center',
+      createdAt: d.created_at,
+    }));
+
+    res.json({ pendingDoctors: mapped });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /doctors/:doctorId/approve
+ * Approves a pending doctor record in doctors table.
+ */
+export async function approveDoctor(req, res, next) {
+  try {
+    const { doctorId } = req.params;
+
+    let updated = null;
+    let { data, error } = await supabase
+      .from('doctors')
+      .update({ approval_status: 'approved', rejection_reason: null })
+      .eq('id', doctorId)
+      .select('*, medical_centers(name), users(full_name)')
+      .maybeSingle();
+
+    if (error && (error.message.includes('approval_status') || error.code === 'PGRST204')) {
+      const fallbackRes = await supabase
+        .from('doctors')
+        .select('*, medical_centers(name), users(full_name)')
+        .eq('id', doctorId)
+        .single();
+      data = fallbackRes.data;
+      error = fallbackRes.error;
+    }
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    updated = data;
+
+    const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
+    try {
+      await supabase.from('audit_logs').insert([{
+        actor_name: adminName,
+        actor_role: 'admin',
+        event_type: 'approval',
+        action: `Approved Dr. ${updated.users?.full_name || 'Doctor'} at ${updated.medical_centers?.name || 'Center'}`,
+        center_name: updated.medical_centers?.name || 'Center',
+        status: 'approved',
+      }]);
+    } catch (_) {}
+
+    res.json({
+      message: 'Doctor approved successfully',
+      doctor: {
+        id: updated.id,
+        name: updated.users?.full_name ?? 'Doctor',
+        dept: updated.specialization,
+        room: updated.room_number ?? '—',
+        series: updated.series ?? '?',
+        status: updated.current_status ?? 'active',
+        approvalStatus: 'approved',
+        centerId: updated.center_id,
+        centerName: updated.medical_centers?.name,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /doctors/:doctorId/reject
+ * Rejects a pending doctor record in doctors table.
+ */
+export async function rejectDoctor(req, res, next) {
+  try {
+    const { doctorId } = req.params;
+    const { reason } = req.body;
+
+    const { data: updated, error } = await supabase
+      .from('doctors')
+      .update({ approval_status: 'rejected', rejection_reason: reason || 'Rejected by Admin' })
+      .eq('id', doctorId)
+      .select('*, medical_centers(name), users(full_name)')
+      .single();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
+    try {
+      await supabase.from('audit_logs').insert([{
+        actor_name: adminName,
+        actor_role: 'admin',
+        event_type: 'approval',
+        action: `Rejected Dr. ${updated.users?.full_name || 'Doctor'} registration (${reason || 'No reason'})`,
+        center_name: updated.medical_centers?.name || 'Center',
+        status: 'rejected',
+      }]);
+    } catch (_) {}
+
+    res.json({
+      message: 'Doctor registration rejected',
+      doctorId,
+      approvalStatus: 'rejected',
+      reason: reason || 'Rejected by Admin',
     });
   } catch (err) {
     next(err);
@@ -391,9 +681,26 @@ const FALLBACK_DOCTORS = [
 
 export async function getDoctors(req, res, next) {
   try {
-    const { data: doctorsData, error: dErr } = await supabase
+    const includePending = req.query.includePending === 'true' || req.query.all === 'true';
+
+    let query = supabase
       .from('doctors')
-      .select('*, medical_centers(id, name), users(full_name)');
+      .select('*, medical_centers(id, name), users(full_name, email, phone)');
+
+    if (!includePending) {
+      // By default, show approved doctors or those with null approval_status (legacy seed data)
+      query = query.or('approval_status.eq.approved,approval_status.is.null');
+    }
+
+    let { data: doctorsData, error: dErr } = await query;
+
+    if (dErr && (dErr.message.includes('approval_status') || dErr.code === 'PGRST204')) {
+      const fallbackQuery = await supabase
+        .from('doctors')
+        .select('*, medical_centers(id, name), users(full_name, email, phone)');
+      doctorsData = fallbackQuery.data;
+      dErr = fallbackQuery.error;
+    }
 
     if (dErr) {
       console.warn('Doctors fetch warning:', dErr.message);
@@ -401,7 +708,7 @@ export async function getDoctors(req, res, next) {
 
     const { data: usersData } = await supabase
       .from('users')
-      .select('id, full_name, email')
+      .select('id, full_name, email, phone')
       .eq('role', 'doctor');
 
     const userMap = new Map((usersData || []).map(u => [u.id, u]));
@@ -413,12 +720,17 @@ export async function getDoctors(req, res, next) {
           id: d.id,
           userId: d.user_id,
           name: u?.full_name ?? d.users?.full_name ?? 'Unknown Doctor',
+          email: u?.email ?? d.users?.email ?? null,
+          phone: u?.phone ?? d.users?.phone ?? null,
           dept: d.specialization || 'General Medicine',
           specialization: d.specialization || 'General Medicine',
           room: d.room_number ?? '—',
           series: d.series ?? '?',
           status: d.current_status ?? 'active',
           currentStatus: d.current_status ?? 'active',
+          approvalStatus: d.approval_status ?? 'approved',
+          requestedByName: d.requested_by_name ?? null,
+          rejectionReason: d.rejection_reason ?? null,
           delayMinutes: d.delay_minutes ?? 0,
           avgConsultMinutes: Math.max(1, Math.round(60 / (d.max_appointments_per_hour || 4))),
           maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
@@ -435,11 +747,14 @@ export async function getDoctors(req, res, next) {
         id: u.id,
         userId: u.id,
         name: u.full_name,
+        email: u.email,
+        phone: u.phone,
         dept: 'General Medicine',
         specialization: 'General Medicine',
         room: `Room 0${i + 1}`,
         series: String.fromCharCode(65 + i),
         status: 'active',
+        approvalStatus: 'approved',
         avgConsultMinutes: 15,
         maxAppointmentsPerHour: 4,
         centerId: 'a1000000-0000-0000-0000-000000000001',
@@ -449,7 +764,7 @@ export async function getDoctors(req, res, next) {
       return res.json({ doctors: mappedFromUsers });
     }
 
-    res.json({ doctors: FALLBACK_DOCTORS });
+    res.json({ doctors: FALLBACK_DOCTORS.map(d => ({ ...d, approvalStatus: 'approved' })) });
   } catch (err) {
     next(err);
   }

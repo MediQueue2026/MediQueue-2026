@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, Clock, Send, X, CheckCircle2, MessageSquare } from 'lucide-react'
+import { AlertTriangle, Send, X, CheckCircle2, MessageSquare } from 'lucide-react'
 
 export default function DelayAlertModal({
   isOpen,

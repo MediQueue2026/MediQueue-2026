@@ -706,7 +706,9 @@ export default function ReceptionistDesk() {
                 isOpen={showAddDoctor || !!editingDoctor}
                 onClose={() => { setShowAddDoctor(false); setEditingDoctor(null) }}
                 centerId={queue.doctors[0]?.centerId ?? null}
+                centerName={queue.doctors[0]?.centerName ?? 'Central Clinic'}
                 editDoctor={editingDoctor}
+                allDoctors={queue.doctors}
                 onCreated={() => queue.refresh()}
               />
               <DoctorHoursModal

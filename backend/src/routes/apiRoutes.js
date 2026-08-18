@@ -14,11 +14,12 @@ import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { getCenters, createCenter, updateCenter, deleteCenter } from '../controllers/centerController.js';
 import { createAppointment, getAppointments, getPatientAppointments, cancelAppointment } from '../controllers/appointmentController.js';
-import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary } from '../controllers/doctorController.js';
+import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary, getPendingDoctors, approveDoctor, rejectDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
 import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser } from '../controllers/adminController.js';
 import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
+import { createDoctorRequest, getDoctorRequests, approveDoctorRequest, rejectDoctorRequest } from '../controllers/doctorRequestController.js';
 
 const router = Router();
 
@@ -159,5 +160,10 @@ router.put('/admin/slot-config', authMiddleware, requireRole(['admin']), updateS
 router.get('/admin/audit-logs', authMiddleware, requireRole(['admin']), getAuditLogs);
 router.post('/admin/audit-logs', authMiddleware, requireRole(['admin']), createAuditLog);
 router.patch('/admin/audit-logs/:id/status', authMiddleware, requireRole(['admin']), updateAuditLogStatus);
+
+// ── Doctor Approval Routes ────────────────────────────────────────────────
+router.get('/doctors/pending', authMiddleware, requireRole(['admin']), getPendingDoctors);
+router.patch('/doctors/:doctorId/approve', authMiddleware, requireRole(['admin']), approveDoctor);
+router.patch('/doctors/:doctorId/reject', authMiddleware, requireRole(['admin']), rejectDoctor);
 
 export default router;

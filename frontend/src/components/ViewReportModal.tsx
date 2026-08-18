@@ -65,7 +65,7 @@ export function ViewReportModal({ isOpen, onClose, record }: ViewReportModalProp
             </div>
 
             {(() => {
-              const meds = record.rxMedications || (record as any).rx_medications
+              const meds = (record as any).rxMedications || record.medications || (record as any).rx_medications
               if (!meds || !Array.isArray(meds) || meds.length === 0) return null
               return (
                 <div style={{ marginTop: 10 }}>
