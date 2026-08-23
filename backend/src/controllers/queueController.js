@@ -365,18 +365,6 @@ export async function updateQueueEntryStatus(req, res, next) {
       .single();
     if (error) throw error;
 
-    if (status === 'left' || status === 'skipped') {
-      try {
-        await supabase.from('audit_logs').insert([{
-          user_id: data.patient_id || null,
-          action: 'NO_SHOW_PENALTY',
-          details: `Patient ${data.patient_name || 'Patient'} missed appointment token #${data.doctors?.series || 'A'}-${String(data.queue_number).padStart(2, '0')}. Assigned late-number penalty.`
-        }]);
-      } catch (auditErr) {
-        console.warn('Audit log insertion notice:', auditErr);
-      }
-    }
-
     res.json({ entry: mapEntry(data) });
   } catch (err) {
     next(err);

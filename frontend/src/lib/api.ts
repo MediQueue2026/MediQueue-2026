@@ -219,7 +219,7 @@ export interface AuditLog {
   time: string
   actor: string
   actor_role: 'receptionist' | 'patient' | 'doctor' | 'admin' | 'system'
-  event_type: 'approval' | 'request' | 'token_issued' | 'no_show' | 'prescription' | 'system'
+  event_type: 'signup' | 'profile_updated' | 'user_suspended' | 'user_activated' | 'user_deleted' | 'doctor_approved' | 'doctor_rejected' | 'center_delete' | 'center_suspend' | 'center_edit' | 'system_warning'
   action: string
   center: string
   status: 'approved' | 'pending' | 'completed' | 'rejected'
@@ -414,7 +414,13 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
-  getAuditLogs: () => request<{ logs: AuditLog[]; source: 'database' | 'dummy' }>('/admin/audit-logs'),
+  getAuditLogs: (params?: { startDate?: string; endDate?: string }) => {
+    const query = new URLSearchParams()
+    if (params?.startDate) query.set('startDate', params.startDate)
+    if (params?.endDate) query.set('endDate', params.endDate)
+    const qs = query.toString()
+    return request<{ logs: AuditLog[]; source: 'database' | 'dummy' }>(`/admin/audit-logs${qs ? `?${qs}` : ''}`)
+  },
 
   updateAuditLogStatus: (id: string, status: AuditLog['status']) =>
     request<{ message: string; entry: AuditLog | null }>(`/admin/audit-logs/${id}/status`, {

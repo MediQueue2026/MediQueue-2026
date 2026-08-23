@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { writeAuditLog } from '../services/auditService.js';
 
 /** Postgres/PostgREST codes meaning "that column doesn't exist on this DB yet". */
 const MISSING_COLUMN_CODES = new Set(['PGRST204', '42703']);
@@ -186,20 +187,16 @@ export async function createCenter(req, res, next) {
       }
     }
 
-    try {
-      await supabase.from('audit_logs').insert([{
-        actor_name: requesterName,
-        actor_role: requesterRole,
-        event_type: isAdmin ? 'Center Created' : 'request',
-        action: isAdmin
-          ? `Created new medical center "${name}" in ${city}`
-          : `Submitted request to add medical center "${name}" (${city})`,
-        center_name: name,
-        status: approvalStatus,
-      }]);
-    } catch (auditErr) {
-      // ignore non-critical audit log failure
-    }
+    await writeAuditLog({
+      actorName: requesterName,
+      actorRole: requesterRole,
+      eventType: 'center_edit',
+      action: isAdmin
+        ? `Created new medical center "${name}" in ${city}`
+        : `Submitted request to add medical center "${name}" (${city})`,
+      centerName: name,
+      status: approvalStatus,
+    });
 
     res.status(201).json({
       message: isAdmin
@@ -257,6 +254,17 @@ export async function updateCenter(req, res, next) {
 
     const updated = data && data[0] ? mapDbCenterToPublic(data[0]) : { id, ...updates };
 
+    if (typeof req.body.status === 'string') {
+      await writeAuditLog({
+        actorName: req.user?.fullName || req.user?.email || 'System Admin',
+        actorRole: req.user?.role || 'admin',
+        eventType: req.body.status === 'maintenance' ? 'center_suspend' : 'center_edit',
+        action: `Medical center ${req.body.status === 'maintenance' ? 'suspended' : 'updated'}: ${updated.name || 'Center'}`,
+        centerName: updated.name || 'Center',
+        status: 'completed',
+      });
+    }
+
     res.json({ message: 'Center updated successfully', center: updated });
   } catch (err) {
     next(err);
@@ -266,10 +274,26 @@ export async function updateCenter(req, res, next) {
 export async function deleteCenter(req, res, next) {
   try {
     const { id } = req.params;
+    const { data: centerRow } = await supabase
+      .from('medical_centers')
+      .select('name')
+      .eq('id', id)
+      .maybeSingle();
+
     const { error } = await supabase.from('medical_centers').delete().eq('id', id);
     if (error) {
       return res.status(500).json({ error: error.message });
     }
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'System Admin',
+      actorRole: req.user?.role || 'admin',
+      eventType: 'center_delete',
+      action: `Medical center deleted: ${centerRow?.name || 'Unknown center'}`,
+      centerName: centerRow?.name || 'Center',
+      status: 'completed',
+    });
+
     res.json({ message: 'Center deleted successfully' });
   } catch (err) {
     next(err);
@@ -329,7 +353,7 @@ export async function approveCenter(req, res, next) {
       await supabase.from('audit_logs').insert([{
         actor_name: adminName,
         actor_role: 'admin',
-        event_type: 'approval',
+        event_type: 'center_edit',
         action: `Approved medical center "${updated.name}" in ${updated.city}`,
         center_name: updated.name,
         status: 'approved',
@@ -369,7 +393,7 @@ export async function rejectCenter(req, res, next) {
       await supabase.from('audit_logs').insert([{
         actor_name: adminName,
         actor_role: 'admin',
-        event_type: 'approval',
+        event_type: 'center_edit',
         action: `Rejected medical center "${updated.name}" (${reason || 'No reason provided'})`,
         center_name: updated.name,
         status: 'rejected',

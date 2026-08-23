@@ -23,6 +23,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
 import { supabase } from '../config/supabase.js';
+import { writeAuditLog } from './auditService.js';
 
 const ACCESS_TTL_SECONDS = 15 * 60;            // 15 minutes
 const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;  // 7 days
@@ -330,6 +331,15 @@ export async function register({ email, password, fullName, phone, role }, req) 
   await ensureDoctorProfile(user);
   await ensurePatientProfile(user);
 
+  await writeAuditLog({
+    actorName: user.fullName,
+    actorRole: user.role,
+    eventType: 'signup',
+    action: `${user.role === 'patient' ? 'New patient registered' : 'New user registered'}: ${user.fullName}${user.email ? ` (${user.email})` : ''}`,
+    centerName: 'Platform',
+    status: 'completed',
+  });
+
   const tokens = await issueTokens(user, req);
   await recordLoginAttempt({ userId: user.id, email: user.email, role: user.role, status: 'success', req });
   return { user, ...tokens };
@@ -430,6 +440,16 @@ export async function createStaffUser({ email, password, fullName, phone, role }
 
   const user = toPublicUser(data);
   await ensureDoctorProfile(user);
+
+  await writeAuditLog({
+    actorName: user.fullName,
+    actorRole: user.role,
+    eventType: 'signup',
+    action: `Admin created ${user.role}: ${user.fullName}${user.email ? ` (${user.email})` : ''}`,
+    centerName: 'Platform',
+    status: 'completed',
+  });
+
   return user;
 }
 
