@@ -295,7 +295,7 @@ export async function createDoctor(req, res, next) {
         await supabase.from('audit_logs').insert([{
           actor_name: requesterName,
           actor_role: requesterRole,
-          event_type: 'request',
+          event_type: 'center_edit',
           action: `Requested adding doctor ${updatedDoc?.users?.full_name || 'Doctor'} to ${centerName}`,
           center_name: centerName,
           status: approvalStatus,
@@ -392,7 +392,7 @@ export async function createDoctor(req, res, next) {
       await supabase.from('audit_logs').insert([{
         actor_name: requesterName,
         actor_role: requesterRole,
-        event_type: 'request',
+        event_type: 'center_edit',
         action: `Submitted registration for Dr. ${fullName} at ${centerName}`,
         center_name: centerName,
         status: approvalStatus,
@@ -504,7 +504,7 @@ export async function approveDoctor(req, res, next) {
       await supabase.from('audit_logs').insert([{
         actor_name: adminName,
         actor_role: 'admin',
-        event_type: 'approval',
+        event_type: 'doctor_approved',
         action: `Approved Dr. ${updated.users?.full_name || 'Doctor'} at ${updated.medical_centers?.name || 'Center'}`,
         center_name: updated.medical_centers?.name || 'Center',
         status: 'approved',
@@ -555,7 +555,7 @@ export async function rejectDoctor(req, res, next) {
       await supabase.from('audit_logs').insert([{
         actor_name: adminName,
         actor_role: 'admin',
-        event_type: 'approval',
+        event_type: 'doctor_rejected',
         action: `Rejected Dr. ${updated.users?.full_name || 'Doctor'} registration (${reason || 'No reason'})`,
         center_name: updated.medical_centers?.name || 'Center',
         status: 'rejected',

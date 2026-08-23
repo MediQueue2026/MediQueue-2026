@@ -75,18 +75,6 @@ export async function createDoctorRequest(req, res, next) {
       createdRecord = data;
     }
 
-    // Log action to audit_logs
-    try {
-      await supabase.from('audit_logs').insert([{
-        actor_name: receptionistName,
-        actor_role: 'receptionist',
-        event_type: 'request',
-        action: `Submitted request to add doctor ${doctorName} (${specialization}) to ${finalCenterName || 'Center'}`,
-        center_name: finalCenterName || 'Center',
-        status: 'pending',
-      }]);
-    } catch (_) {}
-
     res.status(201).json({
       message: 'Doctor request submitted successfully to Super Admin',
       request: mapDbRequestToPublic(createdRecord),
@@ -266,7 +254,7 @@ export async function approveDoctorRequest(req, res, next) {
       await supabase.from('audit_logs').insert([{
         actor_name: adminName,
         actor_role: 'admin',
-        event_type: 'approval',
+        event_type: 'doctor_approved',
         action: `Approved request: Added Dr. ${reqRecord.doctor_name} to ${reqRecord.center_name}`,
         center_name: reqRecord.center_name,
         status: 'approved',
@@ -342,7 +330,7 @@ export async function rejectDoctorRequest(req, res, next) {
       await supabase.from('audit_logs').insert([{
         actor_name: adminName,
         actor_role: 'admin',
-        event_type: 'approval',
+        event_type: 'doctor_rejected',
         action: `Rejected request for Dr. ${reqRecord.doctor_name} (${reason || 'No reason provided'})`,
         center_name: reqRecord.center_name,
         status: 'rejected',

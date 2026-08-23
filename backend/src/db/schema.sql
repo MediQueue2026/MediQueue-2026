@@ -112,6 +112,30 @@ CREATE TABLE public.health_records (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 7. Audit Logs Table
+CREATE TABLE public.audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_name TEXT NOT NULL DEFAULT 'System',
+  actor_role TEXT NOT NULL CHECK (actor_role IN ('receptionist', 'patient', 'doctor', 'admin', 'system')) DEFAULT 'system',
+  event_type TEXT NOT NULL CHECK (event_type IN (
+    'signup',
+    'profile_updated',
+    'user_suspended',
+    'user_activated',
+    'user_deleted',
+    'doctor_approved',
+    'doctor_rejected',
+    'center_delete',
+    'center_suspend',
+    'center_edit',
+    'system_warning'
+  )) DEFAULT 'system_warning',
+  action TEXT NOT NULL,
+  center_name TEXT NOT NULL DEFAULT 'Platform',
+  status TEXT NOT NULL CHECK (status IN ('approved', 'pending', 'completed', 'rejected')) DEFAULT 'completed',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- STEP 3: EXPLICIT TABLE-LEVEL PERMISSION GRANTS (Fixes 42501 Permission Denied)
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -121,6 +145,7 @@ GRANT ALL PRIVILEGES ON TABLE public.doctors TO anon, authenticated, service_rol
 GRANT ALL PRIVILEGES ON TABLE public.appointments TO anon, authenticated, service_role, postgres, public;
 GRANT ALL PRIVILEGES ON TABLE public.doctor_subscriptions TO anon, authenticated, service_role, postgres, public;
 GRANT ALL PRIVILEGES ON TABLE public.health_records TO anon, authenticated, service_role, postgres, public;
+GRANT ALL PRIVILEGES ON TABLE public.audit_logs TO anon, authenticated, service_role, postgres, public;
 
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role, postgres, public;
 GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role, postgres, public;
@@ -134,8 +159,9 @@ ALTER TABLE public.doctors DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appointments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctor_subscriptions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.health_records DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs DISABLE ROW LEVEL SECURITY;
 
--- ═══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════
 -- STEP 4: SEED INITIAL PROTOTYPE DATA
 -- ═══════════════════════════════════════════════════════════════════════════════
 

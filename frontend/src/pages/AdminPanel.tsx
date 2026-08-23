@@ -5,7 +5,7 @@ import {
   Activity, Building2, FileText, LogOut, Menu, Plus,
   Search, Settings, Ticket, Users, X, RefreshCw, CheckCircle2,
   AlertCircle, UserCheck, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
-  Pencil, Pause, Play, Trash2
+  Pencil, Pause, Play, Trash2, ChevronLeft, ChevronRight
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -203,6 +203,17 @@ export default function AdminPanel() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [logsSource, setLogsSource] = useState<'database' | 'dummy' | null>(null)
+  const [auditLogFilter, setAuditLogFilter] = useState('All Events')
+  const [auditLogStartDate, setAuditLogStartDate] = useState('')
+  const [auditLogEndDate, setAuditLogEndDate] = useState('')
+
+  const fetchAuditLogs = (params?: { startDate?: string; endDate?: string }) => {
+    setLogsLoading(true)
+    api.getAuditLogs(params)
+      .then(r => { setAuditLogs(r.logs); setLogsSource(r.source) })
+      .catch(() => setAuditLogs([]))
+      .finally(() => setLogsLoading(false))
+  }
 
   // Doctor Approvals State
   const [pendingRequests, setPendingRequests] = useState<ApiDoctorRequest[]>([])
@@ -271,11 +282,7 @@ export default function AdminPanel() {
     }
 
     if (nav === 'logs') {
-      setLogsLoading(true)
-      api.getAuditLogs()
-        .then(r => { setAuditLogs(r.logs); setLogsSource(r.source) })
-        .catch(() => setAuditLogs([]))
-        .finally(() => setLogsLoading(false))
+      fetchAuditLogs({ startDate: auditLogStartDate, endDate: auditLogEndDate })
     }
     if (nav === 'roles') {
       let active = true
@@ -318,6 +325,59 @@ export default function AdminPanel() {
     { icon: <UserCheck size={18} />, label: 'Active Users', value: staffMembers.filter(member => member.status === 'active').length.toLocaleString(), sub: 'Currently enabled', accent: '#0d968d' },
     { icon: <UserX size={18} />, label: 'Suspended Users', value: staffMembers.filter(member => member.status === 'suspended').length.toLocaleString(), sub: 'Needs review', accent: '#f50b0b' },
   ]
+
+  const normalizeAuditEventType = (value?: string) => {
+    const normalized = String(value ?? '').trim().toLowerCase()
+    const map: Record<string, string> = {
+      system: 'system_warning',
+      request: 'signup',
+      approval: 'doctor_approved',
+      approved: 'doctor_approved',
+      rejected: 'doctor_rejected',
+      delete: 'center_delete',
+      suspend: 'user_suspended',
+      edit: 'center_edit',
+    }
+    return map[normalized] ?? normalized
+  }
+
+  const normalizedAuditLogs = auditLogs.map(log => ({
+    ...log,
+    event_type: normalizeAuditEventType(log.event_type) as AuditLog['event_type'],
+  }))
+
+  const allowedAuditLogTypes = [
+    'signup',
+    'profile_updated',
+    'user_suspended',
+    'user_activated',
+    'user_deleted',
+    'doctor_approved',
+    'doctor_rejected',
+    'center_delete',
+    'center_suspend',
+    'center_edit',
+    'system_warning',
+  ] as const
+
+  const auditLogTypeFilters = ['All Events', ...allowedAuditLogTypes]
+  const filteredAuditLogs = (auditLogFilter === 'All Events'
+    ? normalizedAuditLogs.filter(log => allowedAuditLogTypes.includes(log.event_type as typeof allowedAuditLogTypes[number]))
+    : normalizedAuditLogs.filter(log => log.event_type === auditLogFilter && allowedAuditLogTypes.includes(log.event_type as typeof allowedAuditLogTypes[number])))
+
+  const auditLogBadgeStyles: Record<string, { bg: string; border: string; color: string }> = {
+    signup: { bg: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.22)', color: '#059669' },
+    profile_updated: { bg: 'rgba(99,102,241,0.08)', border: '1px solid rgba(79,70,229,0.18)', color: '#4F46E5' },
+    user_suspended: { bg: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)', color: '#D97706' },
+    user_activated: { bg: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.18)', color: '#16A34A' },
+    user_deleted: { bg: 'rgba(239,68,68,0.08)', border: '1px solid rgba(220,38,38,0.18)', color: '#DC2626' },
+    doctor_approved: { bg: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.22)', color: '#059669' },
+    doctor_rejected: { bg: 'rgba(239,68,68,0.08)', border: '1px solid rgba(220,38,38,0.18)', color: '#DC2626' },
+    center_delete: { bg: 'rgba(239,68,68,0.08)', border: '1px solid rgba(220,38,38,0.18)', color: '#DC2626' },
+    center_suspend: { bg: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)', color: '#D97706' },
+    center_edit: { bg: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.18)', color: '#2563EB' },
+    system_warning: { bg: 'rgba(148,163,184,0.08)', border: '1px solid rgba(148,163,184,0.18)', color: '#475569' },
+  }
 
   const handleSaveStaff = async () => {
     if (!editingStaff) return
@@ -1217,17 +1277,80 @@ export default function AdminPanel() {
 
           {/* AUDIT LOGS TAB */}
           {nav === 'logs' && (
-            <div className="card glass-form-card" style={{ padding: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+            <div className="card glass-form-card" style={{ padding: 18, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Platform Audit Logs</h3>
-                  <div style={{ fontSize: 12, color: 'var(--text-4)' }}>
-                    Incoming requests, approvals &amp; actions · {logsSource === 'dummy' ? 'Demo data (backend running)' : logsSource === 'database' ? 'Live from Supabase' : 'Loading…'}
+                  <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)' }}>Platform Audit Logs</h3>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
+                    Track important system events and user actions
                   </div>
                 </div>
-                <button onClick={() => { setLogsLoading(true); api.getAuditLogs().then(r => { setAuditLogs(r.logs); setLogsSource(r.source) }).finally(() => setLogsLoading(false)) }} className="btn btn-ghost btn-sm" style={{ gap: 6 }}>
-                  <RefreshCw size={13} /> Refresh
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.62)', border: '1px solid var(--border-md)', borderRadius: 10, padding: '6px 10px' }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>From</label>
+                    <input
+                      type="date"
+                      value={auditLogStartDate}
+                      onChange={e => setAuditLogStartDate(e.target.value)}
+                      className="input"
+                      style={{ minWidth: 130, height: 32, fontSize: 12, padding: '0 8px', borderRadius: 8, background: 'transparent', border: '1px solid rgba(148,163,184,0.24)' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.62)', border: '1px solid var(--border-md)', borderRadius: 10, padding: '6px 10px' }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>To</label>
+                    <input
+                      type="date"
+                      value={auditLogEndDate}
+                      onChange={e => setAuditLogEndDate(e.target.value)}
+                      className="input"
+                      style={{ minWidth: 130, height: 32, fontSize: 12, padding: '0 8px', borderRadius: 8, background: 'transparent', border: '1px solid rgba(148,163,184,0.24)' }}
+                    />
+                  </div>
+                  <button
+                    onClick={() => fetchAuditLogs({ startDate: auditLogStartDate, endDate: auditLogEndDate })}
+                    className="btn btn-ghost btn-sm"
+                    style={{ gap: 6, background: 'rgba(255,255,255,0.62)', border: '1px solid var(--border-md)', borderRadius: 10 }}
+                  >
+                    <RefreshCw size={13} /> Apply
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAuditLogStartDate('')
+                      setAuditLogEndDate('')
+                      fetchAuditLogs()
+                    }}
+                    className="btn btn-ghost btn-sm"
+                    style={{ gap: 6, background: 'rgba(255,255,255,0.62)', border: '1px solid var(--border-md)', borderRadius: 10 }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '4px 0 12px', borderBottom: '1px solid rgba(148,163,184,0.26)' }}>
+                {auditLogTypeFilters.map((filterName) => {
+                  const isSelected = auditLogFilter === filterName
+                  const badgeStyle = filterName === 'All Events'
+                    ? { background: 'rgba(15,118,110,0.06)', border: '1px solid rgba(15,118,110,0.22)', color: '#0F766E' }
+                    : auditLogBadgeStyles[filterName] ?? { background: 'rgba(148,163,184,0.08)', border: '1px solid rgba(148,163,184,0.18)', color: '#475569' }
+
+                  return (
+                    <button
+                      key={filterName}
+                      onClick={() => setAuditLogFilter(filterName)}
+                      className="btn btn-sm"
+                      style={{
+                        padding: '6px 10px',
+                        minHeight: 30,
+                        borderRadius: 8,
+                        fontWeight: 700,
+                        ...badgeStyle,
+                      }}
+                    >
+                      {filterName === 'All Events' ? 'All Events' : filterName}
+                    </button>
+                  )
+                })}
               </div>
 
               {logsLoading && (
@@ -1238,65 +1361,71 @@ export default function AdminPanel() {
               )}
 
               {!logsLoading && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {auditLogs.map((log) => {
-                    const roleColors: Record<string, { bg: string; color: string; border: string }> = {
-                      receptionist: { bg: 'rgba(16,185,129,0.08)', color: '#059669', border: 'rgba(16,185,129,0.25)' },
-                      patient: { bg: 'rgba(59,130,246,0.08)', color: '#2563EB', border: 'rgba(59,130,246,0.25)' },
-                      doctor: { bg: 'rgba(139,92,246,0.08)', color: '#7C3AED', border: 'rgba(139,92,246,0.25)' },
-                      admin: { bg: 'rgba(245,158,11,0.08)', color: '#D97706', border: 'rgba(245,158,11,0.25)' },
-                      system: { bg: 'rgba(107,114,128,0.08)', color: '#6B7280', border: 'rgba(107,114,128,0.25)' },
-                    }
-                    const statusColors: Record<string, string> = {
-                      approved: '#10B981', pending: '#F59E0B', completed: '#6B7280', rejected: '#EF4444'
-                    }
-                    const roleStyle = roleColors[log.actor_role] || roleColors.system
-                    const eventIcons: Record<string, React.ReactNode> = {
-                      approval: <CheckCircle2 size={13} color="#10B981" />,
-                      request: <AlertCircle size={13} color="#F59E0B" />,
-                      token_issued: <Ticket size={13} color="var(--blue)" />,
-                      no_show: <UserCheck size={13} color="#EF4444" />,
-                      prescription: <Stethoscope size={13} color="#7C3AED" />,
-                      system: <ShieldCheck size={13} color="#6B7280" />,
-                    }
-                    const timeStr = (() => { try { return new Date(log.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) } catch { return log.time } })()
-                    return (
-                      <div key={log.id} style={{ padding: '12px 16px', borderRadius: 10, background: '#ffffff', border: `1px solid var(--border)`, borderLeft: `4px solid ${roleStyle.color}`, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                        <span style={{ fontFamily: 'monospace', color: 'var(--text-4)', fontSize: 11.5, flexShrink: 0, paddingTop: 2 }}>{timeStr}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: roleStyle.bg, color: roleStyle.color, border: `1px solid ${roleStyle.border}`, flexShrink: 0 }}>
-                          {log.actor}
-                        </span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-                          {eventIcons[log.event_type] || eventIcons.system}
-                        </span>
-                        <span style={{ fontSize: 13, color: 'var(--text-2)', flex: 1, minWidth: 180 }}>{log.action}</span>
-                        <select
-                          value={log.status}
-                          onChange={async (e) => {
-                            const newStatus = e.target.value as AuditLog['status']
-                            setAuditLogs(logs => logs.map(l => l.id === log.id ? { ...l, status: newStatus } : l))
-                            try {
-                              await api.updateAuditLogStatus(log.id, newStatus)
-                            } catch (err) {
-                              console.error('Failed to update status', err)
-                              setAuditLogs(logs => logs.map(l => l.id === log.id ? { ...l, status: log.status } : l))
-                            }
-                          }}
-                          style={{
-                            fontSize: 10.5, fontWeight: 700, color: statusColors[log.status] || '#6B7280', flexShrink: 0,
-                            textTransform: 'uppercase', background: 'transparent', border: `1px solid var(--border)`,
-                            borderRadius: 4, padding: '2px 4px', cursor: 'pointer', outline: 'none'
-                          }}
-                        >
-                          <option value="approved">Approved</option>
-                          <option value="pending">Pending</option>
-                          <option value="completed">Completed</option>
-                          <option value="rejected">Rejected</option>
-                        </select>
+                filteredAuditLogs.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: 'var(--text-4)', padding: '30px 12px 12px', fontSize: 13 }}>
+                    No audit log entries found in the database.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {Object.entries(filteredAuditLogs.reduce((acc, log) => {
+                      const dateKey = new Date(log.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      if (!acc[dateKey]) acc[dateKey] = []
+                      acc[dateKey].push(log)
+                      return acc
+                    }, {} as Record<string, AuditLog[]>)).map(([dateKey, dayLogs]) => (
+                      <div key={dateKey} style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid rgba(148,163,184,0.24)', paddingTop: 10 }}>
+                        {dayLogs.map((log) => {
+                          const eventMeta = auditLogBadgeStyles[log.event_type] ?? auditLogBadgeStyles.system
+                          const logDate = new Date(log.time)
+                          const timeStr = isNaN(logDate.getTime()) ? '—' : logDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                          const statusLabel = log.status || 'completed'
+                          const statusColors: Record<string, string> = {
+                            approved: '#10B981',
+                            pending: '#F59E0B',
+                            completed: '#1d51b7',
+                            rejected: '#EF4444',
+                          }
+                          const actorLabel = log.actor || 'System'
+                          const eventTypeLabel = log.event_type || 'system'
+
+                          return (
+                            <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '118px minmax(0, 1fr) 180px 110px', alignItems: 'center', gap: 14, padding: '10px 0', borderBottom: '1px solid rgba(148,163,184,0.18)' }}>
+                              <div style={{ fontSize: 12.5, color: 'var(--text-4)', fontWeight: 600, paddingLeft: 6 }}>{dateKey}</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                                <div style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: eventMeta.bg, border: eventMeta.border, color: eventMeta.color }}>
+                                  {log.event_type === 'signup' && <CheckCircle2 size={14} />}
+                                  {log.event_type === 'profile_updated' && <Pencil size={14} />}
+                                  {(log.event_type === 'user_suspended' || log.event_type === 'center_suspend') && <Pause size={14} />}
+                                  {(log.event_type === 'user_activated' || log.event_type === 'doctor_approved') && <CheckCircle2 size={14} />}
+                                  {(log.event_type === 'user_deleted' || log.event_type === 'center_delete' || log.event_type === 'doctor_rejected') && <UserX size={14} />}
+                                  {(log.event_type === 'center_edit' || log.event_type === 'system_warning') && <ShieldCheck size={14} />}
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                    <span style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: eventMeta.bg, border: eventMeta.border, color: eventMeta.color, textTransform: 'lowercase' }}>{eventTypeLabel}</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--text-2)', fontSize: 13.5 }}>{log.action}</span>
+                                  </div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {log.center || 'Platform'} · {timeStr}
+                                  </div>
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-4)' }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px', borderRadius: 999, background: 'rgba(148,163,184,0.10)', border: '1px solid rgba(148,163,184,0.16)', color: 'var(--text-3)', fontWeight: 700 }}>{actorLabel}</span>
+                                <span style={{ fontFamily: 'monospace', color: 'var(--text-4)' }}>{log.actor_role || 'system'}</span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 70, padding: '5px 8px', borderRadius: 7, fontSize: 10.5, fontWeight: 700, background: `${statusColors[statusLabel] || '#6B7280'}14`, border: `1px solid ${statusColors[statusLabel] || '#6B7280'}33`, color: statusColors[statusLabel] || '#6B7280', textTransform: 'uppercase' }}>
+                                  {statusLabel}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
-                    )
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
           )}

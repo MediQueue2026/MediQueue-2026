@@ -1,109 +1,19 @@
 import { supabase } from '../config/supabase.js';
 import { ensureDoctorProfile } from '../services/authService.js';
+import { writeAuditLog, normalizeAuditEventType } from '../services/auditService.js';
 
-// ── Dummy seed logs used when the audit_logs table is empty or missing ──────
-const DUMMY_AUDIT_LOGS = [
-  {
-    id: 'dummy-1',
-    time: new Date(Date.now() - 1 * 60 * 1000).toISOString(),
-    actor: 'Receptionist · Counter A-01',
-    actor_role: 'receptionist',
-    event_type: 'approval',
-    action: '✅ APPROVED walk-in request from Patient Rajan Mehta — Token A-12 issued',
-    center: 'MediQueue Central Clinic',
-    status: 'approved'
-  },
-  {
-    id: 'dummy-2',
-    time: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
-    actor: 'Patient · Sunil Perera',
-    actor_role: 'patient',
-    event_type: 'request',
-    action: 'Submitted online appointment request for Dr. Ethan Carr — Slot 10:00 AM',
-    center: 'MediQueue Central Clinic',
-    status: 'pending'
-  },
-  {
-    id: 'dummy-3',
-    time: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-    actor: 'Receptionist · Counter A-01',
-    actor_role: 'receptionist',
-    event_type: 'approval',
-    action: '✅ APPROVED appointment request for Sunil Perera — Confirmed with Dr. Ethan Carr',
-    center: 'MediQueue Central Clinic',
-    status: 'approved'
-  },
-  {
-    id: 'dummy-4',
-    time: new Date(Date.now() - 22 * 60 * 1000).toISOString(),
-    actor: 'Patient · Kavya Nair',
-    actor_role: 'patient',
-    event_type: 'request',
-    action: 'Requested SMS token registration — Walk-in, No appointment',
-    center: 'MediQueue North Branch',
-    status: 'pending'
-  },
-  {
-    id: 'dummy-5',
-    time: new Date(Date.now() - 28 * 60 * 1000).toISOString(),
-    actor: 'Receptionist · Counter B-02',
-    actor_role: 'receptionist',
-    event_type: 'token_issued',
-    action: 'Issued walk-in token #B-07 to patient Kavya Nair · SMS sent to 0771234567',
-    center: 'MediQueue North Branch',
-    status: 'completed'
-  },
-  {
-    id: 'dummy-6',
-    time: new Date(Date.now() - 35 * 60 * 1000).toISOString(),
-    actor: 'Patient · Amara De Silva',
-    actor_role: 'patient',
-    event_type: 'request',
-    action: 'Requested appointment cancellation — Token A-09, Dr. Aisha Patel',
-    center: 'MediQueue Central Clinic',
-    status: 'pending'
-  },
-  {
-    id: 'dummy-7',
-    time: new Date(Date.now() - 42 * 60 * 1000).toISOString(),
-    actor: 'Receptionist · Counter A-01',
-    actor_role: 'receptionist',
-    event_type: 'no_show',
-    action: 'Marked Token A-09 as No-Show — Patient Amara De Silva did not arrive',
-    center: 'MediQueue Central Clinic',
-    status: 'completed'
-  },
-  {
-    id: 'dummy-8',
-    time: new Date(Date.now() - 55 * 60 * 1000).toISOString(),
-    actor: 'Dr. Ethan Carr',
-    actor_role: 'doctor',
-    event_type: 'prescription',
-    action: 'Issued prescription for patient Token A-11 — Consultation completed',
-    center: 'MediQueue Central Clinic',
-    status: 'completed'
-  },
-  {
-    id: 'dummy-9',
-    time: new Date(Date.now() - 70 * 60 * 1000).toISOString(),
-    actor: 'System Admin',
-    actor_role: 'admin',
-    event_type: 'system',
-    action: 'Registered new facility: MediQueue North Medical Center — Activated',
-    center: 'Platform',
-    status: 'completed'
-  },
-  {
-    id: 'dummy-10',
-    time: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
-    actor: 'Patient · Roshan Fernando',
-    actor_role: 'patient',
-    event_type: 'request',
-    action: 'Booked appointment online — Dr. Aisha Patel, Cardiology, 14:00 slot',
-    center: 'MediQueue Central Clinic',
-    status: 'approved'
-  }
-];
+function mapAuditLogRow(row) {
+  return {
+    id: row.id,
+    time: row.created_at ?? row.time ?? new Date().toISOString(),
+    actor: row.actor_name || 'System',
+    actor_role: row.actor_role || 'system',
+    event_type: normalizeAuditEventType(row.event_type || 'system'),
+    action: row.action || 'System event',
+    center: row.center_name || 'Platform',
+    status: row.status || 'completed',
+  };
+}
 
 function mapDbUserToPublic(row) {
   return {
@@ -166,6 +76,26 @@ export async function updateUser(req, res, next) {
       await ensureDoctorProfile(publicUser);
     }
 
+    if (typeof req.body.is_active === 'boolean') {
+      await writeAuditLog({
+        actorName: req.user?.fullName || req.user?.email || 'System Admin',
+        actorRole: req.user?.role || 'admin',
+        eventType: updates.is_active ? 'user_activated' : 'user_suspended',
+        action: `${updates.is_active ? 'User activated' : 'User suspended'}: ${publicUser.fullName || publicUser.email}`,
+        centerName: 'Platform',
+        status: 'completed',
+      });
+    } else if (Object.keys(updates).length > 0) {
+      await writeAuditLog({
+        actorName: req.user?.fullName || req.user?.email || 'System Admin',
+        actorRole: req.user?.role || 'admin',
+        eventType: 'profile_updated',
+        action: `Profile updated: ${publicUser.fullName || publicUser.email}`,
+        centerName: 'Platform',
+        status: 'completed',
+      });
+    }
+
     res.json({ user: publicUser });
   } catch (err) {
     next(err);
@@ -175,6 +105,12 @@ export async function updateUser(req, res, next) {
 export async function deleteUser(req, res, next) {
   try {
     const { id } = req.params;
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('full_name, email, role')
+      .eq('id', id)
+      .maybeSingle();
+
     const { error } = await supabase
       .from('users')
       .delete()
@@ -183,6 +119,15 @@ export async function deleteUser(req, res, next) {
     if (error) {
       return res.status(500).json({ error: error.message });
     }
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'System Admin',
+      actorRole: req.user?.role || 'admin',
+      eventType: 'user_deleted',
+      action: `User deleted: ${userRow?.full_name || userRow?.email || 'Unknown user'}`,
+      centerName: 'Platform',
+      status: 'completed',
+    });
 
     res.json({ message: 'User deleted successfully' });
   } catch (err) {
@@ -207,34 +152,39 @@ export async function updateSlotConfig(req, res, next) {
 
 export async function getAuditLogs(req, res, next) {
   try {
-    // Try to fetch from Supabase audit_logs table
-    const { data, error } = await supabase
+    const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : '';
+    const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : '';
+
+    if (startDate && endDate && startDate > endDate) {
+      return res.status(400).json({ error: 'Start date cannot be later than end date.', logs: [], source: 'database' });
+    }
+
+    let query = supabase
       .from('audit_logs')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(200);
 
-    // If table missing or empty, return enriched dummy logs
-    if (error || !data || data.length === 0) {
-      return res.json({ logs: DUMMY_AUDIT_LOGS, source: 'dummy' });
+    if (startDate) {
+      const startIso = new Date(`${startDate}T00:00:00.000Z`).toISOString();
+      query = query.gte('created_at', startIso);
     }
 
-    // Map DB rows to standard shape
-    const logs = data.map(row => ({
-      id: row.id,
-      time: row.created_at,
-      actor: row.actor_name || 'Unknown',
-      actor_role: row.actor_role || 'system',
-      event_type: row.event_type || 'system',
-      action: row.action,
-      center: row.center_name || 'Platform',
-      status: row.status || 'completed'
-    }));
+    if (endDate) {
+      const endIso = new Date(`${endDate}T23:59:59.999Z`).toISOString();
+      query = query.lte('created_at', endIso);
+    }
 
-    res.json({ logs, source: 'database' });
+    const { data, error } = await query;
+
+    if (error) {
+      return res.status(500).json({ error: error.message, logs: [], source: 'database' });
+    }
+
+    const logs = (data || []).map(mapAuditLogRow);
+    return res.json({ logs, source: 'database' });
   } catch (err) {
-    // Fallback to dummy data on any error
-    res.json({ logs: DUMMY_AUDIT_LOGS, source: 'dummy' });
+    return res.status(500).json({ error: err.message || 'Unable to read audit logs', logs: [], source: 'database' });
   }
 }
 
@@ -248,13 +198,12 @@ export async function createAuditLog(req, res, next) {
       .select();
 
     if (error) {
-      // Return success anyway — audit logs are best-effort
-      return res.status(201).json({ message: 'Log noted (table may not exist yet)', entry: null });
+      return res.status(500).json({ error: error.message, entry: null });
     }
 
     res.status(201).json({ message: 'Audit log created', entry: data[0] });
   } catch (err) {
-    res.status(201).json({ message: 'Log noted', entry: null });
+    res.status(500).json({ error: err.message || 'Unable to create audit log', entry: null });
   }
 }
 
@@ -262,11 +211,6 @@ export async function updateAuditLogStatus(req, res, next) {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    
-    // Check if it's a dummy ID (for graceful fallback UI handling)
-    if (id.startsWith('dummy-')) {
-      return res.json({ message: 'Log status updated (simulated)', id, status });
-    }
 
     const { data, error } = await supabase
       .from('audit_logs')
@@ -275,10 +219,15 @@ export async function updateAuditLogStatus(req, res, next) {
       .select();
 
     if (error) {
-       return res.json({ message: 'Log status updated (simulated fallback)', id, status });
+      return res.status(500).json({ error: error.message, entry: null });
     }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'Audit log not found', entry: null });
+    }
+
     res.json({ message: 'Log status updated', entry: data[0] });
   } catch (err) {
-    res.json({ message: 'Log status updated (simulated error)', id: req.params.id, status: req.body.status });
+    res.status(500).json({ error: err.message || 'Unable to update audit log status', entry: null });
   }
 }
