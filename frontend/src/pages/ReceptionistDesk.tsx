@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Activity, AlertCircle, Bell, BellRing, Building2, CheckCircle2, Clock, Hash, Plus, Radio,
+  Activity, AlertCircle, Bell, BellRing, CheckCircle2, Clock, Hash, Plus, Radio,
   Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil, Menu, X
 } from 'lucide-react'
 import AccountMenu from '../components/AccountMenu'
 import PublicTvDisplay from '../components/PublicTvDisplay'
 import AddDoctorModal from '../components/AddDoctorModal'
 import DoctorHoursModal from '../components/DoctorHoursModal'
-import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
@@ -42,17 +41,17 @@ function StatPill({ icon, label, value, accent = 'var(--text-2)' }: {
 export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
 
-  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'my-doctors'>('checkin')
+  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const [patientSearch, setPatientSearch] = useState('')
+  const [doctorSearch, setDoctorSearch] = useState('')
 
   // My Doctors tab
   const [showAddDoctor, setShowAddDoctor] = useState(false)
   const [editingDoctor, setEditingDoctor] = useState<ApiDoctor | null>(null)
   const [hoursDoctor, setHoursDoctor] = useState<ApiDoctor | null>(null)
-  const [showAddCenter, setShowAddCenter] = useState(false)
 
   // Counter form — patients book their own online tokens from the Patient app;
   // this desk only records walk-ins against a pre-printed physical slip.
@@ -181,13 +180,10 @@ export default function ReceptionistDesk() {
             <Ticket size={16} /> Issue Tokens & Queue
           </button>
           <button onClick={() => { setActiveTab('doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
-            <Stethoscope size={16} /> Doctor Roster
+            <Stethoscope size={16} /> Doctors
           </button>
           <button onClick={() => { setActiveTab('patients'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <Users size={16} /> Patients
-          </button>
-          <button onClick={() => { setActiveTab('my-doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'my-doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
-            <CalendarClock size={16} /> Manage Doctors
           </button>
         </div>
 
@@ -624,7 +620,6 @@ export default function ReceptionistDesk() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
                     <thead>
                       <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
-                        <th style={{ padding: '13px 16px' }}>Patient ID</th>
                         <th style={{ padding: '13px 16px' }}>Name</th>
                         <th style={{ padding: '13px 16px' }}>NIC Number</th>
                         <th style={{ padding: '13px 16px' }}>Phone</th>
@@ -637,7 +632,7 @@ export default function ReceptionistDesk() {
                     <tbody>
                       {filteredPatients.length === 0 && (
                         <tr>
-                          <td colSpan={8} style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>
+                          <td colSpan={7} style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>
                             No patients match "{patientSearch}".
                           </td>
                         </tr>
@@ -646,7 +641,6 @@ export default function ReceptionistDesk() {
                         const doc = queue.doctors.find(d => d.id === p.doctorId)
                         return (
                           <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                            <td style={{ padding: '13px 16px', fontWeight: 700, fontFamily: 'monospace' }}>#{p.id.replace(/^q-/, 'P-')}</td>
                             <td style={{ padding: '13px 16px', fontWeight: 600, color: 'var(--text-1)' }}>{p.patientName}</td>
                             <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.nic ?? '—'}</td>
                             <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.phone || '—'}</td>
@@ -666,181 +660,161 @@ export default function ReceptionistDesk() {
             </div>
           )}
 
-          {/* DOCTOR STATUS ROSTER TAB */}
-          {activeTab === 'doctors' && (
-            <div className="responsive-grid-4" style={{ padding: '18px 24px 28px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-              {queue.doctors.map(d => {
-                const serving = currentFor(queue.entries, d.id)
-                const docWaiting = waitingFor(queue.entries, d.id)
-                return (
-                  <div
-                    key={d.id}
-                    className="card glass-form-card hover-lift"
-                    style={{ padding: 20, cursor: 'pointer' }}
-                    onClick={() => { queue.setSelectedDoctorId(d.id); setActiveTab('checkin'); queue.clearError() }}
-                  >
-                    <Avatar name={d.name} size={44} />
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)', marginTop: 12 }}>{d.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--blue-dark)' }}>{d.dept} · {d.room}</div>
-                    <div style={{ marginTop: 12 }}><StatusBadge status={d.status} /></div>
-                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 11.5, color: 'var(--text-4)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <span>Now serving: <strong style={{ color: 'var(--text-2)', fontFamily: 'monospace' }}>{serving ? entryToken(serving) : '—'}</strong></span>
-                      <span>Waiting: <strong style={{ color: 'var(--text-2)' }}>{docWaiting.length}</strong> · Avg {d.avgConsultMinutes} min/consult</span>
+          {/* UNIFIED DOCTORS TAB — Roster + Management merged */}
+          {activeTab === 'doctors' && (() => {
+            const filteredDoctors = queue.doctors.filter(d => {
+              const q = doctorSearch.trim().toLowerCase()
+              return !q ||
+                d.name.toLowerCase().includes(q) ||
+                d.dept.toLowerCase().includes(q) ||
+                (d.room ?? '').toLowerCase().includes(q)
+            })
+            return (
+              <div style={{ padding: '18px 24px 36px' }}>
+
+                {/* Modals */}
+                <AddDoctorModal
+                  isOpen={showAddDoctor || !!editingDoctor}
+                  onClose={() => { setShowAddDoctor(false); setEditingDoctor(null) }}
+                  centerId={queue.doctors[0]?.centerId ?? null}
+                  centerName={queue.doctors[0]?.centerName ?? 'Central Clinic'}
+                  editDoctor={editingDoctor}
+                  allDoctors={queue.doctors}
+                  onCreated={() => queue.refresh()}
+                />
+                <DoctorHoursModal
+                  isOpen={!!hoursDoctor}
+                  onClose={() => setHoursDoctor(null)}
+                  doctor={hoursDoctor}
+                  onSaved={() => queue.refresh()}
+                />
+
+                {/* Header row */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Doctors</h2>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
+                      {filteredDoctors.length} of {queue.doctors.length} doctor{queue.doctors.length !== 1 ? 's' : ''} · manage queues, schedules &amp; info from one place
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    {/* Search */}
+                    <div style={{ position: 'relative' }}>
+                      <Search size={14} color="var(--text-4)" style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                      <input
+                        className="input"
+                        placeholder="Search name, dept, room…"
+                        value={doctorSearch}
+                        onChange={e => setDoctorSearch(e.target.value)}
+                        style={{ paddingLeft: 32, height: 38, fontSize: 13, width: 230 }}
+                      />
                     </div>
                     <button
-                      onClick={e => { e.stopPropagation(); queue.setSelectedDoctorId(d.id); setActiveTab('checkin'); queue.clearError() }}
-                      className="btn btn-primary btn-sm"
-                      style={{ width: '100%', justifyContent: 'center', gap: 6, marginTop: 14 }}
+                      onClick={() => setShowAddDoctor(true)}
+                      className="btn btn-primary"
+                      style={{ gap: 7, padding: '0 16px', height: 38, fontSize: 13 }}
                     >
-                      <Ticket size={13} /> Manage Queue
+                      <Plus size={14} /> Add Doctor
                     </button>
                   </div>
-                )
-              })}
-            </div>
-          )}
+                </div>
 
-          {/* MY DOCTORS MANAGEMENT TAB */}
-          {activeTab === 'my-doctors' && (
-            <div style={{ padding: '18px 24px 36px' }}>
-
-              {/* Modals */}
-              <AddDoctorModal
-                isOpen={showAddDoctor || !!editingDoctor}
-                onClose={() => { setShowAddDoctor(false); setEditingDoctor(null) }}
-                centerId={queue.doctors[0]?.centerId ?? null}
-                centerName={queue.doctors[0]?.centerName ?? 'Central Clinic'}
-                editDoctor={editingDoctor}
-                allDoctors={queue.doctors}
-                onCreated={() => queue.refresh()}
-              />
-              <DoctorHoursModal
-                isOpen={!!hoursDoctor}
-                onClose={() => setHoursDoctor(null)}
-                doctor={hoursDoctor}
-                onSaved={() => queue.refresh()}
-              />
-              <AddCenterModal
-                isOpen={showAddCenter}
-                onClose={() => setShowAddCenter(false)}
-                mode="request"
-                onAdd={async (centerData) => {
-                  await api.createCenter(centerData)
-                }}
-              />
-
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-                <div>
-                  <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>My Doctors</h2>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
-                    Add doctors · Set available hours · Total capacity = hours × max per hour
+                {/* Empty states */}
+                {queue.doctors.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center', padding: '64px 24px',
+                    background: 'rgba(255,255,255,0.5)', borderRadius: 16,
+                    border: '1.5px dashed var(--border-md)',
+                  }}>
+                    <Stethoscope size={40} style={{ margin: '0 auto 16px', color: 'var(--text-4)' }} />
+                    <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-2)' }}>No doctors yet</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-4)', marginTop: 4 }}>Click "Add Doctor" to register the first one.</div>
                   </div>
-                </div>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button
-                    onClick={() => setShowAddCenter(true)}
-                    className="btn btn-ghost"
-                    style={{ gap: 7, padding: '0 18px', height: 40 }}
-                  >
-                    <Building2 size={15} /> Request Medical Center
-                  </button>
-                  <button
-                    onClick={() => setShowAddDoctor(true)}
-                    className="btn btn-primary"
-                    style={{ gap: 7, padding: '0 18px', height: 40 }}
-                  >
-                    <Plus size={15} /> Add Doctor
-                  </button>
-                </div>
-              </div>
+                ) : filteredDoctors.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', background: 'rgba(255,255,255,0.5)', borderRadius: 14, border: '1.5px dashed var(--border-md)', color: 'var(--text-4)' }}>
+                    No doctors match "{doctorSearch}".
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 16 }}>
+                    {filteredDoctors.map(d => {
+                      const serving = currentFor(queue.entries, d.id)
+                      const docWaiting = waitingFor(queue.entries, d.id)
+                      const accentColor = d.status === 'active' ? '#10B981' : d.status === 'delayed' ? 'var(--amber, #f59e0b)' : d.status === 'break' ? 'var(--blue)' : '#94a3b8'
+                      return (
+                        <div key={d.id} className="card glass-form-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14, position: 'relative', overflow: 'hidden' }}>
+                          {/* Status accent stripe */}
+                          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, borderRadius: '16px 16px 0 0', background: accentColor }} />
 
-              {/* Cards grid */}
-              {queue.doctors.length === 0 ? (
-                <div style={{
-                  textAlign: 'center', padding: '56px 24px',
-                  background: 'rgba(255,255,255,0.5)', borderRadius: 16,
-                  border: '1.5px dashed var(--border-md)',
-                }}>
-                  <Stethoscope size={38} style={{ margin: '0 auto 14px', color: 'var(--text-4)' }} />
-                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-2)' }}>No doctors yet</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-4)', marginTop: 4 }}>Click "Add Doctor" to register the first one.</div>
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 16 }}>
-                  {queue.doctors.map(d => {
-                    const serving = currentFor(queue.entries, d.id)
-                    const docWaiting = waitingFor(queue.entries, d.id)
-                    return (
-                      <div key={d.id} className="card glass-form-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14, position: 'relative', overflow: 'hidden' }}>
-                        {/* Accent stripe */}
-                        <div style={{
-                          position: 'absolute', top: 0, left: 0, right: 0, height: 3, borderRadius: '16px 16px 0 0',
-                          background: d.status === 'active' ? '#10B981' : d.status === 'delayed' ? 'var(--amber, #f59e0b)' : d.status === 'break' ? 'var(--blue)' : '#94a3b8',
-                        }} />
+                          {/* Avatar + identity */}
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                            <Avatar name={d.name} size={46} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)', lineHeight: 1.2 }}>{d.name}</div>
+                              <div style={{ fontSize: 12, color: 'var(--blue-dark)', marginTop: 2 }}>{d.dept}</div>
+                              <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 1 }}>
+                                {d.room && d.room !== '—' ? d.room : 'No room'}
+                                {d.series && d.series !== '?' ? ` · Series ${d.series}` : ''}
+                              </div>
+                            </div>
+                            <StatusBadge status={d.status} />
+                          </div>
 
-                        {/* Avatar + name */}
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                          <Avatar name={d.name} size={46} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)', lineHeight: 1.2 }}>{d.name}</div>
-                            <div style={{ fontSize: 12, color: 'var(--blue-dark)', marginTop: 2 }}>{d.dept}</div>
-                            <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 1 }}>
-                              {d.room !== '—' ? d.room : 'No room assigned'}
-                              {d.series && d.series !== '?' ? ` · Series ${d.series}` : ''}
+                          {/* Live stats grid */}
+                          <div style={{
+                            background: 'rgba(18,198,186,0.05)', border: '1px solid rgba(18,198,186,0.15)',
+                            borderRadius: 10, padding: '10px 14px',
+                            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+                          }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Max / Hour</div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>{d.maxAppointmentsPerHour ?? 4}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Now Serving</div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: serving ? 'var(--emerald)' : 'var(--text-3)', fontFamily: 'monospace' }}>{serving ? entryToken(serving) : '—'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Waiting</div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: docWaiting.length > 0 ? 'var(--amber, #f59e0b)' : 'var(--text-3)' }}>{docWaiting.length}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Avg. Consult</div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>{d.avgConsultMinutes} min</div>
                             </div>
                           </div>
-                          <StatusBadge status={d.status} />
-                        </div>
 
-                        {/* Capacity stats */}
-                        <div style={{
-                          background: 'rgba(18,198,186,0.05)', border: '1px solid rgba(18,198,186,0.15)',
-                          borderRadius: 10, padding: '10px 14px',
-                          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
-                        }}>
-                          <div>
-                            <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Max / Hour</div>
-                            <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>{d.maxAppointmentsPerHour ?? 4}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Now Serving</div>
-                            <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', fontFamily: 'monospace' }}>{serving ? entryToken(serving) : '—'}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Waiting</div>
-                            <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--amber, #f59e0b)' }}>{docWaiting.length}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Avg. Consult</div>
-                            <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>{d.avgConsultMinutes} min</div>
+                          {/* Action buttons */}
+                          <div style={{ display: 'flex', gap: 7 }}>
+                            <button
+                              onClick={() => { queue.setSelectedDoctorId(d.id); setActiveTab('checkin'); queue.clearError() }}
+                              className="btn btn-primary btn-sm"
+                              style={{ flex: 2, justifyContent: 'center', gap: 5, fontSize: 12 }}
+                            >
+                              <Ticket size={12} /> Queue
+                            </button>
+                            <button
+                              onClick={() => setEditingDoctor(d)}
+                              className="btn btn-ghost btn-sm"
+                              style={{ flex: 1, justifyContent: 'center', gap: 5, fontSize: 12 }}
+                            >
+                              <Pencil size={12} /> Edit
+                            </button>
+                            <button
+                              onClick={() => setHoursDoctor(d)}
+                              className="btn btn-ghost btn-sm"
+                              style={{ flex: 1, justifyContent: 'center', gap: 5, fontSize: 12, color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
+                            >
+                              <CalendarClock size={12} /> Hours
+                            </button>
                           </div>
                         </div>
-
-                        {/* Action buttons */}
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button
-                            onClick={() => setEditingDoctor(d)}
-                            className="btn btn-ghost btn-sm"
-                            style={{ flex: 1, justifyContent: 'center', gap: 5 }}
-                          >
-                            <Pencil size={12} /> Edit Info
-                          </button>
-                          <button
-                            onClick={() => setHoursDoctor(d)}
-                            className="btn btn-ghost btn-sm"
-                            style={{ flex: 1, justifyContent: 'center', gap: 5, color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
-                          >
-                            <CalendarClock size={12} /> Edit Hours
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
         </div>
       </div>

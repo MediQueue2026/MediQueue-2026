@@ -1,11 +1,12 @@
 import React, { useState } from 'react'
-import { useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import {
-  Activity, AlertCircle, ArrowLeft, ArrowRight, CloudOff, FlaskConical,
+  Activity, AlertCircle, ArrowLeft, ArrowRight, Building2, CloudOff, FlaskConical,
 } from 'lucide-react'
+import AddCenterModal from '../../components/AddCenterModal'
+import { api, ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'
 import type { UserRole } from '../../context/AuthContext'
-import { ApiError, ApiOfflineError } from '../../lib/api'
 import { DEMO_ACCOUNTS, DEMO_PASSWORD } from '../../lib/demoAccounts'
 
 interface LoginPageProps {
@@ -71,8 +72,7 @@ const PORTAL_PATH: Record<Role, string> = {
 export default function LoginPage({ forcedRole }: LoginPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const [searchParams] = useSearchParams()
-  const { login, register, loginAsDemo, backendOffline } = useAuth()
+  const { login, loginAsDemo, backendOffline } = useAuth()
 
   const role: Role = forcedRole
     ?? (location.pathname.includes('doctor') ? 'doctor'
@@ -82,17 +82,12 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
 
   const portal = PORTALS.find(p => p.role === role)!
 
-  const [mode, setMode] = useState<'signin' | 'signup'>(
-    searchParams.get('new') === '1' ? 'signup' : 'signin',
-  )
-
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [phone, setPhone] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [offline, setOffline] = useState(backendOffline)
+  const [showRequestCenter, setShowRequestCenter] = useState(false)
 
   /** Back to where they were headed before the guard bounced them, else the role's home. */
   const destinationFor = (signedInRole: Role) =>
@@ -112,18 +107,10 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
     setError('')
     setSubmitting(true)
     try {
-      const user = mode === 'signup'
-        ? await register({
-            email: email.trim(),
-            password,
-            fullName: fullName.trim(),
-            phone: phone.trim() || undefined,
-            role, // the portal you signed up on decides the account's role
-          })
-        : await login(email.trim(), password)
+      const user = await login(email.trim(), password)
       navigate(destinationFor(user.role as Role), { replace: true })
     } catch (err) {
-      handleFailure(err, mode === 'signup' ? 'Could not create your account.' : 'Sign-in failed. Please try again.')
+      handleFailure(err, 'Sign-in failed. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -153,6 +140,12 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
 
   return (
     <div className="auth-screen">
+      <AddCenterModal
+        isOpen={showRequestCenter}
+        onClose={() => setShowRequestCenter(false)}
+        mode="request"
+        onAdd={async (centerData) => { await api.createCenter(centerData) }}
+      />
       <div className="auth-card">
 
         {/* ── Context ── */}
@@ -218,37 +211,10 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
           </nav>
 
           <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
-            {mode === 'signup' ? 'Create your account' : 'Sign in'}
+            Sign in
           </h2>
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 13, marginTop: 18 }}>
-            {mode === 'signup' && (
-              <>
-                <div>
-                  <label className="auth-field-label" htmlFor="auth-name">Full name</label>
-                  <input
-                    id="auth-name" className="input" required autoComplete="name"
-                    placeholder="Sunil Perera"
-                    value={fullName}
-                    onChange={e => { setFullName(e.target.value); setError('') }}
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="auth-field-label" htmlFor="auth-phone">
-                    Mobile <span style={{ fontWeight: 400, color: 'var(--text-4)' }}>· for queue SMS</span>
-                  </label>
-                  <input
-                    id="auth-phone" className="input" autoComplete="tel"
-                    placeholder="0771234567"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    style={inputStyle}
-                  />
-                </div>
-              </>
-            )}
-
             <div>
               <label className="auth-field-label" htmlFor="auth-email">Email</label>
               <input
@@ -259,24 +225,20 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
                 style={inputStyle}
               />
             </div>
-
             <div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
                 <label className="auth-field-label" htmlFor="auth-password">Password</label>
-                {mode === 'signin' && (
-                  <button type="button" style={{
-                    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                    fontSize: 11.5, color: 'var(--text-4)', marginBottom: 6,
-                  }}>
-                    Forgot?
-                  </button>
-                )}
+                <button type="button" style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  fontSize: 11.5, color: 'var(--text-4)', marginBottom: 6,
+                }}>
+                  Forgot?
+                </button>
               </div>
               <input
                 id="auth-password" className="input" type="password" required
-                minLength={mode === 'signup' ? 8 : undefined}
-                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'}
+                autoComplete="current-password"
+                placeholder="••••••••"
                 value={password}
                 onChange={e => { setPassword(e.target.value); setError('') }}
                 style={inputStyle}
@@ -304,24 +266,8 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
                 opacity: submitting ? 0.6 : 1, cursor: submitting ? 'wait' : 'pointer',
               }}
             >
-              {submitting
-                ? (mode === 'signup' ? 'Creating account…' : 'Signing in…')
-                : <>{mode === 'signup' ? 'Create account' : 'Sign in'} <ArrowRight size={15} /></>}
+              {submitting ? 'Signing in…' : <><span>Sign in</span> <ArrowRight size={15} /></>}
             </button>
-
-            <p style={{ fontSize: 12.5, color: 'var(--text-4)', textAlign: 'center', margin: '2px 0 0' }}>
-              {mode === 'signin' ? "Don't have an account? " : 'Already registered? '}
-              <button
-                type="button"
-                onClick={() => { setMode(m => (m === 'signin' ? 'signup' : 'signin')); setError('') }}
-                style={{
-                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                  color: portal.accent, fontWeight: 700, fontSize: 12.5,
-                }}
-              >
-                {mode === 'signin' ? 'Create one' : 'Sign in'}
-              </button>
-            </p>
 
             {offline && (
               <div style={{
@@ -354,6 +300,27 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
               style={{ gap: 5, flexShrink: 0 }}
             >
               <FlaskConical size={12} /> Use
+            </button>
+          </div>
+
+          {/* Clinic registration — the single sign-up CTA on this page */}
+          <div style={{
+            marginTop: 14, padding: '11px 14px',
+            background: 'rgba(18,198,186,0.07)',
+            border: '1px solid rgba(18,198,186,0.2)',
+            borderRadius: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          }}>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4 }}>
+              <strong style={{ color: 'var(--text-2)' }}>Are you a clinic?</strong> Request to register your medical center.
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRequestCenter(true)}
+              className="btn btn-ghost btn-sm"
+              style={{ gap: 5, flexShrink: 0, fontSize: 12 }}
+            >
+              <Building2 size={12} /> Register
             </button>
           </div>
         </div>
