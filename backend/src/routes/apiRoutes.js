@@ -17,14 +17,21 @@ import { createAppointment, getAppointments, getPatientAppointments, cancelAppoi
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary, getPendingDoctors, approveDoctor, rejectDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
 import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from '../controllers/recordController.js';
-import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser } from '../controllers/adminController.js';
+import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser, getSystemStats, getSettings, setMaintenanceMode } from '../controllers/adminController.js';
 import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
 import { createDoctorRequest, getDoctorRequests, approveDoctorRequest, rejectDoctorRequest } from '../controllers/doctorRequestController.js';
+import { maintenanceMiddleware } from '../middleware/maintenanceMiddleware.js';
 
 const router = Router();
 
 // Health Check
 router.get('/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString() }));
+
+// Public Settings
+router.get('/settings/public', getSettings);
+
+// Apply maintenance middleware to all routes below this (except those explicitly bypassed in the middleware itself)
+router.use(maintenanceMiddleware);
 
 // Database Connection Test Endpoint (With Detailed Diagnostics)
 router.get('/db-check', async (req, res) => {
@@ -163,6 +170,9 @@ router.put('/admin/slot-config', authMiddleware, requireRole(['admin']), updateS
 router.get('/admin/audit-logs', authMiddleware, requireRole(['admin']), getAuditLogs);
 router.post('/admin/audit-logs', authMiddleware, requireRole(['admin']), createAuditLog);
 router.patch('/admin/audit-logs/:id/status', authMiddleware, requireRole(['admin']), updateAuditLogStatus);
+router.get('/admin/system-stats', authMiddleware, requireRole(['admin']), getSystemStats);
+router.get('/admin/settings', authMiddleware, requireRole(['admin']), getSettings);
+router.put('/admin/settings/maintenance', authMiddleware, requireRole(['admin']), setMaintenanceMode);
 
 // ── Doctor Approval Routes ────────────────────────────────────────────────
 router.get('/doctors/pending', authMiddleware, requireRole(['admin']), getPendingDoctors);

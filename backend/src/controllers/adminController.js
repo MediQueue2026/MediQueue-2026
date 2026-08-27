@@ -231,3 +231,150 @@ export async function updateAuditLogStatus(req, res, next) {
     res.status(500).json({ error: err.message || 'Unable to update audit log status', entry: null });
   }
 }
+
+export async function getSettings(req, res, next) {
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('maintenance_mode')
+      .eq('id', 'f1000000-0000-0000-0000-000000000001')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116' || error.code === 'PGRST205' || error.message?.includes('system_settings')) {
+        return res.json({ settings: { maintenance_mode: false }, tableMissing: error.code === 'PGRST205' || error.message?.includes('system_settings') });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ settings: data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function setMaintenanceMode(req, res, next) {
+  try {
+    const { maintenanceMode } = req.body;
+    
+    // Upsert the maintenance mode setting
+    const { data, error } = await supabase
+      .from('system_settings')
+      .upsert(
+        { id: 'f1000000-0000-0000-0000-000000000001', maintenance_mode: maintenanceMode, updated_at: new Date().toISOString() },
+        { onConflict: 'id' }
+      )
+      .select('maintenance_mode')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST205' || error.message?.includes('system_settings')) {
+        return res.status(400).json({
+          error: 'Table "system_settings" does not exist in Supabase database yet. Please run the SQL snippet in Supabase SQL Editor.',
+          code: 'TABLE_MISSING'
+        });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'System Admin',
+      actorRole: req.user?.role || 'admin',
+      eventType: 'system_warning',
+      action: `Maintenance mode ${maintenanceMode ? 'enabled' : 'disabled'}`,
+      centerName: 'Platform',
+      status: 'completed',
+    });
+
+    res.json({ settings: data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getSystemStats(req, res, next) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const startOfDay = `${today}T00:00:00.000Z`;
+    const endOfDay = `${today}T23:59:59.999Z`;
+
+    // Run all queries in parallel
+    const [
+      usersRes,
+      centersRes,
+      doctorsRes,
+      queueTodayRes,
+      appointmentsTodayRes,
+      auditTodayRes,
+      queueAllTimeRes,
+    ] = await Promise.all([
+      supabase.from('users').select('id, role, is_active, created_at'),
+      supabase.from('medical_centers').select('id, name, status, city'),
+      supabase.from('doctors').select('id, current_status, approval_status'),
+      supabase.from('walk_in_queue').select('id, status, checked_in_at').gte('checked_in_at', startOfDay).lte('checked_in_at', endOfDay),
+      supabase.from('appointments').select('id, status, created_at').gte('created_at', startOfDay).lte('created_at', endOfDay),
+      supabase.from('audit_logs').select('id, event_type, created_at').gte('created_at', startOfDay).lte('created_at', endOfDay),
+      supabase.from('walk_in_queue').select('id, status'),
+    ]);
+
+    const users = usersRes.data || [];
+    const centers = centersRes.data || [];
+    const doctors = doctorsRes.data || [];
+    const queueToday = queueTodayRes.data || [];
+    const appointmentsToday = appointmentsTodayRes.data || [];
+    const auditToday = auditTodayRes.data || [];
+    const queueAllTime = queueAllTimeRes.data || [];
+
+    // User stats
+    const totalUsers = users.length;
+    const activeUsers = users.filter(u => u.is_active !== false).length;
+    const suspendedUsers = users.filter(u => u.is_active === false).length;
+    const usersByRole = {
+      admin: users.filter(u => u.role === 'admin').length,
+      doctor: users.filter(u => u.role === 'doctor').length,
+      receptionist: users.filter(u => u.role === 'receptionist').length,
+      patient: users.filter(u => u.role === 'patient').length,
+    };
+    // New signups in last 7 days
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const newUsersWeek = users.filter(u => u.created_at && u.created_at >= sevenDaysAgo).length;
+
+    // Center stats
+    const totalCenters = centers.length;
+    const operationalCenters = centers.filter(c => c.status === 'operational').length;
+    const maintenanceCenters = centers.filter(c => c.status === 'maintenance').length;
+    const closedCenters = centers.filter(c => c.status === 'closed').length;
+
+    // Doctor stats
+    const totalDoctors = doctors.length;
+    const activeDoctors = doctors.filter(d => d.current_status === 'active').length;
+    const approvedDoctors = doctors.filter(d => d.approval_status === 'approved').length;
+    const pendingDoctors = doctors.filter(d => d.approval_status === 'pending').length;
+
+    // Token / Queue stats
+    const tokensToday = queueToday.length + appointmentsToday.length;
+    const completedToday = queueToday.filter(q => q.status === 'completed').length +
+      appointmentsToday.filter(a => a.status === 'completed').length;
+    const waitingNow = queueToday.filter(q => q.status === 'waiting').length;
+    const inProgressNow = queueToday.filter(q => q.status === 'in_progress' || q.status === 'called').length;
+    const totalTokensAllTime = queueAllTime.length;
+
+    // Audit stats
+    const eventsToday = auditToday.length;
+    const eventsByType = {};
+    for (const log of auditToday) {
+      eventsByType[log.event_type] = (eventsByType[log.event_type] || 0) + 1;
+    }
+
+    res.json({
+      fetchedAt: new Date().toISOString(),
+      users: { total: totalUsers, active: activeUsers, suspended: suspendedUsers, byRole: usersByRole, newThisWeek: newUsersWeek },
+      centers: { total: totalCenters, operational: operationalCenters, maintenance: maintenanceCenters, closed: closedCenters },
+      doctors: { total: totalDoctors, active: activeDoctors, approved: approvedDoctors, pending: pendingDoctors },
+      queue: { tokensToday, completedToday, waitingNow, inProgressNow, totalAllTime: totalTokensAllTime },
+      audit: { eventsToday, eventsByType },
+    });
+  } catch (err) {
+    next(err);
+  }
+}

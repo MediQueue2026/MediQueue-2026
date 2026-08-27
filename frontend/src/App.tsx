@@ -9,6 +9,7 @@ import LoginPage from './pages/auth/LoginPage'
 import { DevNavbar } from './components/DevNavbar'
 import { AuthProvider } from './context/AuthContext'
 import { ProtectedRoute } from './routes/ProtectedRoute'
+import { GlobalMaintenanceGate } from './components/GlobalMaintenanceGate'
 
 export default function App() {
   return (
@@ -16,7 +17,8 @@ export default function App() {
       <Router>
         <div style={{ paddingTop: 52 }}>
           <DevNavbar />
-          <Routes>
+          <GlobalMaintenanceGate>
+            <Routes>
             <Route path="/" element={<LandingPage />} />
 
             {/* Sign-in — one screen, four portals. Public by design. */}
@@ -65,6 +67,7 @@ export default function App() {
                 with no one signed in. Shows tokens only, never patient records. */}
             <Route path="/tv-display" element={<TvDisplayPage />} />
           </Routes>
+          </GlobalMaintenanceGate>
         </div>
       </Router>
     </AuthProvider>

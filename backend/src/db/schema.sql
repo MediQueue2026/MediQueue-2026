@@ -146,6 +146,7 @@ GRANT ALL PRIVILEGES ON TABLE public.appointments TO anon, authenticated, servic
 GRANT ALL PRIVILEGES ON TABLE public.doctor_subscriptions TO anon, authenticated, service_role, postgres, public;
 GRANT ALL PRIVILEGES ON TABLE public.health_records TO anon, authenticated, service_role, postgres, public;
 GRANT ALL PRIVILEGES ON TABLE public.audit_logs TO anon, authenticated, service_role, postgres, public;
+GRANT ALL PRIVILEGES ON TABLE public.system_settings TO anon, authenticated, service_role, postgres, public;
 
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role, postgres, public;
 GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role, postgres, public;
@@ -160,6 +161,7 @@ ALTER TABLE public.appointments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctor_subscriptions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.health_records DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_settings DISABLE ROW LEVEL SECURITY;
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- STEP 4: SEED INITIAL PROTOTYPE DATA
@@ -188,3 +190,7 @@ INSERT INTO public.health_records (id, patient_id, doctor_id, title, record_type
 ('r1000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000001', 'Upper Respiratory Infection Rx', 'prescription', 'Dr. Ethan Carr', 'Take medications after meals. Drink plenty of warm fluids.', '[{"name":"Amoxicillin 500mg","dosage":"1 capsule","frequency":"3x daily","duration":"5 days"},{"name":"Paracetamol 500mg","dosage":"2 tablets","frequency":"As needed for fever","duration":"3 days"}]'::jsonb),
 ('r1000000-0000-0000-0000-000000000002', 'b1000000-0000-0000-0000-000000000001', NULL, 'Complete Blood Count (CBC) Report', 'lab_report', 'Central Diagnostics Laboratory', 'Hemoglobin 14.2 g/dL (Normal). WBC count 6.5 x10^3/uL (Normal). Platelets 250 x10^3/uL.', '[]'::jsonb),
 ('r1000000-0000-0000-0000-000000000003', 'b1000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000002', 'Resting Electrocardiogram (ECG)', 'ecg', 'Dr. Aisha Patel', 'Normal sinus rhythm. HR 72 bpm. PR interval 150 ms. No acute ischemic changes.', '[]'::jsonb);
+
+-- Insert System Settings
+INSERT INTO public.system_settings (id, maintenance_mode) VALUES
+('f1000000-0000-0000-0000-000000000001', false);
