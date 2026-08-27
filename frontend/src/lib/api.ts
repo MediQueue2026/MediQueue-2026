@@ -442,6 +442,23 @@ export const api = {
     }),
 
 
+  getSystemStats: () =>
+    request<{
+      fetchedAt: string;
+      users: { total: number; active: number; suspended: number; byRole: Record<string, number>; newThisWeek: number };
+      centers: { total: number; operational: number; maintenance: number; closed: number };
+      doctors: { total: number; active: number; approved: number; pending: number };
+      queue: { tokensToday: number; completedToday: number; waitingNow: number; inProgressNow: number; totalAllTime: number };
+      audit: { eventsToday: number; eventsByType: Record<string, number> };
+    }>('/admin/system-stats'),
+
+  getSettings: () => request<{ settings: { maintenance_mode: boolean } }>('/admin/settings'),
+  getPublicSettings: () => rawRequest<{ settings: { maintenance_mode: boolean } }>('/settings/public'),
+  setMaintenanceMode: (maintenanceMode: boolean) => request<{ settings: { maintenance_mode: boolean } }>('/admin/settings/maintenance', {
+    method: 'PUT',
+    body: JSON.stringify({ maintenanceMode })
+  }),
+
   getQueue: (date?: string) =>
     request<{ entries: ApiQueueEntry[]; migrationPending?: boolean }>(
       `/queue${date ? `?date=${date}` : ''}`,

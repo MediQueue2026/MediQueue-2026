@@ -199,6 +199,41 @@ export default function AdminPanel() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [systemStats, setSystemStats] = useState<any>(null)
+
+  const [maintenanceMode, setMaintenanceMode] = useState(false)
+  const [changingMaintenance, setChangingMaintenance] = useState(false)
+
+  // Fetch initial maintenance state on mount
+  useEffect(() => {
+    api.getSettings().then(r => {
+      setMaintenanceMode(r.settings?.maintenance_mode || false)
+    }).catch(err => console.error('Failed to load maintenance settings', err))
+  }, [])
+
+  const handleToggleMaintenance = async () => {
+    setChangingMaintenance(true)
+    try {
+      const nextMode = !maintenanceMode
+      const res = await api.setMaintenanceMode(nextMode)
+      setMaintenanceMode(res.settings?.maintenance_mode || false)
+    } catch (err: any) {
+      console.error('Failed to toggle maintenance mode', err)
+      alert(err?.message || 'Could not update maintenance mode. Please run the system_settings table creation script in Supabase.')
+    } finally {
+      setChangingMaintenance(false)
+    }
+  }
+
+  const fetchSystemStats = () => {
+    setStatsLoading(true)
+    api.getSystemStats()
+      .then(r => setSystemStats(r))
+      .catch(err => console.error('Failed to load system stats', err))
+      .finally(() => setStatsLoading(false))
+  }
+
   // Live data from Supabase via backend
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
@@ -250,6 +285,10 @@ export default function AdminPanel() {
   }
 
   useEffect(() => {
+    if (nav === 'health') {
+      fetchSystemStats()
+    }
+
     if (nav === 'approvals') {
       fetchPendingDoctors()
     }
@@ -723,8 +762,28 @@ export default function AdminPanel() {
               <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>MediQueue Platform · v3.2.1</div>
             </div>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="desktop-only"><StatusBadge status="operational" /></span>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.5)', padding: '6px 12px', borderRadius: 100, border: '1px solid var(--border-md)' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: maintenanceMode ? 'var(--crimson)' : 'var(--text-2)' }}>
+                {maintenanceMode ? 'Maintenance Mode' : 'Operational'}
+              </span>
+              <button 
+                onClick={handleToggleMaintenance}
+                disabled={changingMaintenance}
+                style={{
+                  width: 36, height: 20, borderRadius: 20,
+                  background: maintenanceMode ? 'var(--crimson)' : '#10B981',
+                  position: 'relative', cursor: changingMaintenance ? 'not-allowed' : 'pointer',
+                  border: 'none', transition: '0.2s', opacity: changingMaintenance ? 0.7 : 1
+                }}
+              >
+                <div style={{
+                  width: 14, height: 14, borderRadius: '50%', background: '#fff',
+                  position: 'absolute', top: 3, left: maintenanceMode ? 19 : 3,
+                  transition: '0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                }} />
+              </button>
+            </div>
             <AccountMenu compact />
           </div>
         </div>
@@ -733,81 +792,118 @@ export default function AdminPanel() {
 
           {/* SYSTEM HEALTH TAB */}
           {nav === 'health' && (
-            <>
-              <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-                <StatCard icon={<Building2 size={18} />} label="Active Centers" value="4 / 4" sub="All operational" accent="var(--text-1)" />
-                <StatCard icon={<Ticket size={18} />} label="Total Tokens Today" value="1,234" sub="Peak: 158/hr" accent="var(--blue)" />
-                <StatCard icon={<Users size={18} />} label="Active Platform Users" value="1,420" sub="Doctors, Staff & Patients" accent="#10B981" />
-                <StatCard icon={<Activity size={18} />} label="Platform Health" value="99.98%" sub="Uptime 30d" accent="#10B981" />
-              </div>
-
-              {/* TRAFFIC & CAPACITY CHART */}
-              <div className="card glass-form-card" style={{ padding: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-                  <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)' }}>Platform Queue Traffic & Patient Load</h3>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>Real-time arrival rate vs max capacity threshold</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {['Today', '7 Days', '30 Days'].map(r => (
-                      <button key={r} onClick={() => setChartRange(r)} className="btn btn-sm" style={{
-                        background: chartRange === r ? 'var(--blue)' : '#fff',
-                        color: chartRange === r ? '#fff' : 'var(--text-2)',
-                        border: '1px solid var(--border-md)'
-                      }}>{r}</button>
-                    ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <h2 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>System Health Dashboard</h2>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
+                    Real-time metrics and platform status overview from the database.
                   </div>
                 </div>
-                <div style={{ height: 220, background: '#ffffff', borderRadius: 12, padding: 16, border: '1px solid var(--border-md)' }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={[
-                      { hour: '08:00', arrivals: 42, capacity: 80 },
-                      { hour: '10:00', arrivals: 112, capacity: 120 },
-                      { hour: '12:00', arrivals: 96, capacity: 120 },
-                      { hour: '14:00', arrivals: 120, capacity: 120 },
-                      { hour: '16:00', arrivals: 158, capacity: 120 },
-                      { hour: '18:00', arrivals: 76, capacity: 80 }
-                    ]}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                      <XAxis dataKey="hour" stroke="var(--text-4)" />
-                      <YAxis stroke="var(--text-4)" />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="arrivals" stroke="var(--blue)" fill="var(--blue-dim)" strokeWidth={2} />
-                      <Area type="monotone" dataKey="capacity" stroke="#F59E0B" fill="none" strokeDasharray="4 4" strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+                <button
+                  onClick={fetchSystemStats}
+                  className="btn btn-ghost btn-sm"
+                  style={{ gap: 6, border: '1px solid var(--border-md)' }}
+                >
+                  <RefreshCw size={13} className={statsLoading ? 'spin' : ''} /> Refresh Data
+                </button>
               </div>
 
-              {/* SERVICES HEALTH TABLE */}
-              <div className="card glass-form-card" style={{ padding: 24 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', marginBottom: 14 }}>Core Infrastructure & Microservices Status</h3>
-                <div className="table-responsive-wrapper">
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 600 }}>
-                    <thead>
-                      <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
-                        <th style={{ padding: '10px 14px' }}>Service Name</th>
-                        <th style={{ padding: '10px 14px' }}>Latency</th>
-                        <th style={{ padding: '10px 14px' }}>30d Uptime</th>
-                        <th style={{ padding: '10px 14px' }}>Active Connections</th>
-                        <th style={{ padding: '10px 14px' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {SERVICES.map(s => (
-                        <tr key={s.name} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-1)' }}>{s.name}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--blue-dark)', fontFamily: 'monospace' }}>{s.latency}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.uptime}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.conns}</td>
-                          <td style={{ padding: '12px 14px' }}><StatusBadge status={s.status} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {statsLoading && !systemStats ? (
+                <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--text-4)' }}>
+                   <RefreshCw size={28} className="spin" style={{ margin: '0 auto 16px', opacity: 0.6, color: 'var(--blue)' }} />
+                   <div style={{ fontSize: 13, fontWeight: 600 }}>Loading system statistics...</div>
                 </div>
-              </div>
-            </>
+              ) : systemStats ? (
+                <>
+                  <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+                    <StatCard icon={<Building2 size={18} />} label="Active Centers" value={`${systemStats.centers.operational} / ${systemStats.centers.total}`} sub={`${systemStats.centers.maintenance} in maintenance`} accent="var(--text-1)" />
+                    <StatCard icon={<Ticket size={18} />} label="Total Tokens Today" value={systemStats.queue.tokensToday.toLocaleString()} sub={`${systemStats.queue.completedToday} completed`} accent="var(--blue)" />
+                    <StatCard icon={<Users size={18} />} label="Active Platform Users" value={systemStats.users.active.toLocaleString()} sub={`${systemStats.users.total} total registered`} accent="#10B981" />
+                    <StatCard icon={<Activity size={18} />} label="Platform Health" value="Optimal" sub={`${systemStats.audit.eventsToday} events logged today`} accent="#10B981" />
+                  </div>
+
+                  {/* detailed stats sections */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
+                    
+                    {/* User Demographics */}
+                    <div className="card glass-form-card" style={{ padding: 24, background: 'linear-gradient(145deg, #ffffff, rgba(255,255,255,0.6))' }}>
+                       <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Users size={18} color="var(--blue)" /> User Distribution
+                       </h3>
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                          {Object.entries(systemStats.users.byRole).map(([role, count]) => (
+                            <div key={role} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
+                               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', textTransform: 'capitalize' }}>{role}s</span>
+                               <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>{count as React.ReactNode}</span>
+                            </div>
+                          ))}
+                          <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px dashed var(--border-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-4)' }}>Suspended Accounts</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--crimson)', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>{systemStats.users.suspended}</span>
+                          </div>
+                       </div>
+                    </div>
+
+                    {/* Doctors Overview */}
+                    <div className="card glass-form-card" style={{ padding: 24, background: 'linear-gradient(145deg, #ffffff, rgba(255,255,255,0.6))' }}>
+                       <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Stethoscope size={18} color="#10B981" /> Doctor Roster
+                       </h3>
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
+                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Total Doctors</span>
+                             <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>{systemStats.doctors.total}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
+                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Currently Active</span>
+                             <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--blue)' }}>{systemStats.doctors.active}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
+                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Approved Profiles</span>
+                             <span style={{ fontSize: 15, fontWeight: 800, color: '#10B981' }}>{systemStats.doctors.approved}</span>
+                          </div>
+                          <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px dashed var(--border-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-4)' }}>Pending Approval</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', padding: '2px 8px', borderRadius: 6 }}>{systemStats.doctors.pending}</span>
+                          </div>
+                       </div>
+                    </div>
+
+                    {/* Queue Performance */}
+                    <div className="card glass-form-card" style={{ padding: 24, background: 'linear-gradient(145deg, #ffffff, rgba(255,255,255,0.6))' }}>
+                       <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Ticket size={18} color="#F59E0B" /> Queue Performance
+                       </h3>
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
+                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Currently Waiting</span>
+                             <span style={{ fontSize: 15, fontWeight: 800, color: '#F59E0B' }}>{systemStats.queue.waitingNow}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
+                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>In Progress / Called</span>
+                             <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--blue)' }}>{systemStats.queue.inProgressNow}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
+                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Completed Today</span>
+                             <span style={{ fontSize: 15, fontWeight: 800, color: '#10B981' }}>{systemStats.queue.completedToday}</span>
+                          </div>
+                          <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px dashed var(--border-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-4)' }}>All Time Tokens</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-3)', background: 'rgba(148,163,184,0.1)', padding: '2px 8px', borderRadius: 6 }}>{systemStats.queue.totalAllTime.toLocaleString()}</span>
+                          </div>
+                       </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                 <div style={{ padding: '60px 0', textAlign: 'center' }}>
+                    <AlertCircle size={32} color="var(--crimson)" style={{ margin: '0 auto 12px', opacity: 0.8 }} />
+                    <div style={{ color: 'var(--crimson)', fontSize: 14, fontWeight: 600 }}>Failed to load system statistics.</div>
+                    <div style={{ color: 'var(--text-4)', fontSize: 12, marginTop: 4 }}>Please try refreshing the page or checking your backend connection.</div>
+                 </div>
+              )}
+            </div>
           )}
 
           {/* DOCTOR APPROVALS TAB */}
@@ -1327,7 +1423,7 @@ export default function AdminPanel() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '4px 0 12px', borderBottom: '1px solid rgba(148,163,184,0.26)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '4px 0 14px', borderBottom: '1px solid rgba(148,163,184,0.26)' }}>
                 {auditLogTypeFilters.map((filterName) => {
                   const isSelected = auditLogFilter === filterName
                   const badgeStyle = filterName === 'All Events'
@@ -1340,11 +1436,24 @@ export default function AdminPanel() {
                       onClick={() => setAuditLogFilter(filterName)}
                       className="btn btn-sm"
                       style={{
-                        padding: '6px 10px',
+                        padding: '5px 12px',
                         minHeight: 30,
-                        borderRadius: 8,
+                        borderRadius: 20,
                         fontWeight: 700,
-                        ...badgeStyle,
+                        fontSize: 11.5,
+                        letterSpacing: '0.02em',
+                        transition: 'all 0.15s ease',
+                        ...(isSelected
+                          ? {
+                              background: badgeStyle.color,
+                              border: `1px solid ${badgeStyle.color}`,
+                              color: '#fff',
+                              boxShadow: `0 2px 8px ${badgeStyle.color}40`,
+                            }
+                          : {
+                              ...badgeStyle,
+                              opacity: 0.75,
+                            }),
                       }}
                     >
                       {filterName === 'All Events' ? 'All Events' : filterName}
@@ -1366,16 +1475,29 @@ export default function AdminPanel() {
                     No audit log entries found in the database.
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                     {Object.entries(filteredAuditLogs.reduce((acc, log) => {
                       const dateKey = new Date(log.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                       if (!acc[dateKey]) acc[dateKey] = []
                       acc[dateKey].push(log)
                       return acc
                     }, {} as Record<string, AuditLog[]>)).map(([dateKey, dayLogs]) => (
-                      <div key={dateKey} style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid rgba(148,163,184,0.24)', paddingTop: 10 }}>
+                      <div key={dateKey} style={{ display: 'flex', flexDirection: 'column' }}>
+                        {/* Date group header */}
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 10, padding: '14px 0 6px',
+                        }}>
+                          <span style={{
+                            fontSize: 11, fontWeight: 800, color: 'var(--text-4)', textTransform: 'uppercase',
+                            letterSpacing: '0.07em', background: 'rgba(148,163,184,0.10)',
+                            border: '1px solid rgba(148,163,184,0.20)', borderRadius: 6,
+                            padding: '2px 8px',
+                          }}>{dateKey}</span>
+                          <div style={{ flex: 1, height: 1, background: 'rgba(148,163,184,0.18)' }} />
+                          <span style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 600 }}>{dayLogs.length} event{dayLogs.length !== 1 ? 's' : ''}</span>
+                        </div>
                         {dayLogs.map((log) => {
-                          const eventMeta = auditLogBadgeStyles[log.event_type] ?? auditLogBadgeStyles.system
+                          const eventMeta = auditLogBadgeStyles[log.event_type] ?? auditLogBadgeStyles.system_warning
                           const logDate = new Date(log.time)
                           const timeStr = isNaN(logDate.getTime()) ? '—' : logDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
                           const statusLabel = log.status || 'completed'
@@ -1386,13 +1508,33 @@ export default function AdminPanel() {
                             rejected: '#EF4444',
                           }
                           const actorLabel = log.actor || 'System'
+                          const actorRole = log.actor_role || 'system'
                           const eventTypeLabel = log.event_type || 'system'
+                          // Build initials for the actor avatar
+                          const initials = actorLabel.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)
 
                           return (
-                            <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '118px minmax(0, 1fr) 180px 110px', alignItems: 'center', gap: 14, padding: '10px 0', borderBottom: '1px solid rgba(148,163,184,0.18)' }}>
-                              <div style={{ fontSize: 12.5, color: 'var(--text-4)', fontWeight: 600, paddingLeft: 6 }}>{dateKey}</div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                                <div style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: eventMeta.bg, border: eventMeta.border, color: eventMeta.color }}>
+                            <div key={log.id} style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'minmax(0, 1fr) minmax(160px, 220px) 90px',
+                              alignItems: 'center',
+                              gap: 12,
+                              padding: '10px 12px',
+                              borderRadius: 10,
+                              marginBottom: 4,
+                              background: 'rgba(255,255,255,0.55)',
+                              border: '1px solid rgba(148,163,184,0.14)',
+                              transition: 'background 0.15s',
+                            }}>
+                              {/* Event info column */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                <div style={{
+                                  width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  background: eventMeta?.bg ?? 'rgba(148,163,184,0.08)',
+                                  border: eventMeta?.border ?? '1px solid rgba(148,163,184,0.18)',
+                                  color: eventMeta?.color ?? '#475569',
+                                }}>
                                   {log.event_type === 'signup' && <CheckCircle2 size={14} />}
                                   {log.event_type === 'profile_updated' && <Pencil size={14} />}
                                   {(log.event_type === 'user_suspended' || log.event_type === 'center_suspend') && <Pause size={14} />}
@@ -1401,21 +1543,55 @@ export default function AdminPanel() {
                                   {(log.event_type === 'center_edit' || log.event_type === 'system_warning') && <ShieldCheck size={14} />}
                                 </div>
                                 <div style={{ minWidth: 0 }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                    <span style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: eventMeta.bg, border: eventMeta.border, color: eventMeta.color, textTransform: 'lowercase' }}>{eventTypeLabel}</span>
-                                    <span style={{ fontWeight: 700, color: 'var(--text-2)', fontSize: 13.5 }}>{log.action}</span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 3 }}>
+                                    <span style={{
+                                      padding: '2px 7px', borderRadius: 5, fontSize: 10.5, fontWeight: 800,
+                                      background: eventMeta?.bg ?? 'rgba(148,163,184,0.08)',
+                                      border: eventMeta?.border ?? '1px solid rgba(148,163,184,0.18)',
+                                      color: eventMeta?.color ?? '#475569',
+                                      textTransform: 'lowercase', letterSpacing: '0.02em',
+                                    }}>{eventTypeLabel}</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: 13 }}>{log.action}</span>
                                   </div>
-                                  <div style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {log.center || 'Platform'} · {timeStr}
+                                  <div style={{ fontSize: 11.5, color: 'var(--text-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {log.center || 'Platform'} &middot; {timeStr}
                                   </div>
                                 </div>
                               </div>
-                              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-4)' }}>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px', borderRadius: 999, background: 'rgba(148,163,184,0.10)', border: '1px solid rgba(148,163,184,0.16)', color: 'var(--text-3)', fontWeight: 700 }}>{actorLabel}</span>
-                                <span style={{ fontFamily: 'monospace', color: 'var(--text-4)' }}>{log.actor_role || 'system'}</span>
+
+                              {/* Actor column */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 9, justifyContent: 'flex-end', minWidth: 0 }}>
+                                <div style={{
+                                  width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                                  background: 'linear-gradient(135deg, #12C6BA22 0%, #0ea5e922 100%)',
+                                  border: '1.5px solid rgba(18,198,186,0.3)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: 10.5, fontWeight: 800, color: 'var(--blue-dark)', letterSpacing: '0.01em',
+                                }}>{initials}</div>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{actorLabel}</div>
+                                  <span style={{
+                                    display: 'inline-block', fontSize: 10, fontWeight: 700,
+                                    padding: '1px 6px', borderRadius: 4,
+                                    background: 'rgba(148,163,184,0.10)',
+                                    border: '1px solid rgba(148,163,184,0.20)',
+                                    color: 'var(--text-4)', textTransform: 'lowercase',
+                                    marginTop: 2,
+                                  }}>{actorRole}</span>
+                                </div>
                               </div>
+
+                              {/* Status column */}
                               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 70, padding: '5px 8px', borderRadius: 7, fontSize: 10.5, fontWeight: 700, background: `${statusColors[statusLabel] || '#6B7280'}14`, border: `1px solid ${statusColors[statusLabel] || '#6B7280'}33`, color: statusColors[statusLabel] || '#6B7280', textTransform: 'uppercase' }}>
+                                <span style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  minWidth: 76, padding: '5px 10px', borderRadius: 8,
+                                  fontSize: 10.5, fontWeight: 800,
+                                  background: `${statusColors[statusLabel] || '#6B7280'}14`,
+                                  border: `1px solid ${statusColors[statusLabel] || '#6B7280'}33`,
+                                  color: statusColors[statusLabel] || '#6B7280',
+                                  textTransform: 'uppercase', letterSpacing: '0.04em',
+                                }}>
                                   {statusLabel}
                                 </span>
                               </div>
