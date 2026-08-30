@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { notificationProvider } from '../config/notification.js';
 
 const TABLE_MISSING = 'PGRST205'; // PostgREST: table not found in schema cache
 const UNIQUE_VIOLATION = '23505';
@@ -299,6 +300,18 @@ export async function issueWalkinToken(req, res, next) {
       throw insertErr;
     }
 
+    const targetPhone = phone?.trim() || null;
+    if (targetPhone) {
+      const seriesLetter = inserted?.doctors?.series || 'A';
+      const formattedToken = `#${seriesLetter}-${String(queueNumber).padStart(2, '0')}`;
+      const smsMessage = `MediQueue: Token ${formattedToken} issued for ${name}. Track live queue status in your dashboard. Thank you!`;
+      
+      // Send Text.lk SMS non-blocking
+      notificationProvider.sendSMS(targetPhone, smsMessage).catch(e => {
+        console.warn('[TOKEN SMS DISPATCH ERROR]', e);
+      });
+    }
+
     res.status(201).json({ entry: mapEntry(inserted) });
   } catch (err) {
     next(err);
@@ -330,9 +343,21 @@ export async function callNextPatient(req, res, next) {
       .limit(1).maybeSingle();
 
     if (nextWaiting) {
-      await supabase.from('walk_in_queue')
+      const { data: calledRow } = await supabase.from('walk_in_queue')
         .update({ status: 'called', called_at: new Date().toISOString() })
-        .eq('id', nextWaiting.id);
+        .eq('id', nextWaiting.id)
+        .select('*, doctors(series, room_number, users(full_name))')
+        .maybeSingle();
+
+      if (calledRow && calledRow.sms_phone) {
+        const docName = calledRow.doctors?.users?.full_name || 'your doctor';
+        const roomStr = calledRow.doctors?.room_number ? ` (Room ${calledRow.doctors.room_number})` : '';
+        const seriesLetter = calledRow.doctors?.series || 'A';
+        const tokenStr = `#${seriesLetter}-${String(calledRow.queue_number).padStart(2, '0')}`;
+
+        const callMsg = `MediQueue Alert: Token ${tokenStr} is NOW CALLED for ${docName}${roomStr}. Please proceed to consultation room immediately.`;
+        notificationProvider.sendSMS(calledRow.sms_phone, callMsg).catch(e => console.warn('[CALL NEXT SMS NOTICE]', e));
+      }
     }
 
     const { data: updated, error } = await supabase

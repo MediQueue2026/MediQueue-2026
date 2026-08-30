@@ -2,31 +2,60 @@ import { supabase } from '../config/supabase.js';
 import { notificationProvider } from '../config/notification.js';
 
 /**
- * Service to dispatch delay and location alerts to subscribed patients (BR-05, FR-07)
+ * Service to dispatch delay and location alerts to subscribed patients & today's patients (BR-05, FR-07)
  */
 export async function notifySubscribedPatients(doctorId, statusUpdate) {
   try {
+    const today = new Date().toISOString().slice(0, 10);
+
     // 1. Get all subscribed patients for this doctor
-    const { data: subs, error } = await supabase
+    const { data: subs } = await supabase
       .from('doctor_subscriptions')
       .select('patient_id, users(full_name, phone)')
       .eq('doctor_id', doctorId);
 
-    if (error || !subs || subs.length === 0) {
-      console.log(`No subscribers found for doctor ID ${doctorId}`);
+    // 2. Get today's active appointments for this doctor
+    const { data: apts } = await supabase
+      .from('appointments')
+      .select('users:patient_id(full_name, phone)')
+      .eq('doctor_id', doctorId)
+      .eq('appointment_date', today)
+      .in('status', ['booked', 'waiting', 'in_consultation']);
+
+    // 3. Get today's active walk-in queue tokens for this doctor
+    const { data: queueTokens } = await supabase
+      .from('walk_in_queue')
+      .select('sms_phone')
+      .eq('doctor_id', doctorId)
+      .eq('queue_date', today)
+      .in('status', ['waiting', 'called', 'in_progress']);
+
+    const phoneSet = new Set();
+
+    (subs || []).forEach(s => {
+      if (s.users?.phone) phoneSet.add(s.users.phone);
+    });
+
+    (apts || []).forEach(a => {
+      if (a.users?.phone) phoneSet.add(a.users.phone);
+    });
+
+    (queueTokens || []).forEach(q => {
+      if (q.sms_phone) phoneSet.add(q.sms_phone);
+    });
+
+    if (phoneSet.size === 0) {
+      console.log(`[SMS NOTICE] No target patient phone numbers found for doctor ID ${doctorId}`);
       return { notifiedCount: 0 };
     }
 
     const { doctorName, delayMinutes, message } = statusUpdate;
-    const alertMessage = message || `MediQueue Alert: ${doctorName} is running ${delayMinutes} mins late. Please adjust your arrival time.`;
+    const alertMessage = message || `MediQueue Alert: ${doctorName || 'Your doctor'} is running ${delayMinutes || 15} mins late. Please adjust your travel arrival time.`;
 
     const results = [];
-    for (const sub of subs) {
-      const phone = sub.users?.phone;
-      if (phone) {
-        const res = await notificationProvider.sendSMS(phone, alertMessage);
-        results.push(res);
-      }
+    for (const phone of phoneSet) {
+      const res = await notificationProvider.sendSMS(phone, alertMessage);
+      results.push(res);
     }
 
     return {
