@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase.js';
 import { checkSlotAvailability } from '../services/slotLimiterService.js';
 import { evaluatePatientNoShowStatus } from '../services/noShowService.js';
+import { notificationProvider } from '../config/notification.js';
 
 export async function createAppointment(req, res, next) {
   try {
@@ -132,6 +133,16 @@ export async function createAppointment(req, res, next) {
       console.warn('walk_in_queue mirror sync notice:', syncErr.message);
     }
 
+    if (patientPhone) {
+      const h = slotHour || 10;
+      const pmHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const slotStr = `${pmHour < 10 ? '0' + pmHour : pmHour}:00 ${ampm}`;
+      
+      const smsMsg = `MediQueue: Appointment booked successfully! Token: ${queueTokenStr} on ${dateStr} at ${slotStr}. Track status live in dashboard. Thank you!`;
+      notificationProvider.sendSMS(patientPhone, smsMsg).catch(e => console.warn('[BOOKING SMS NOTICE]', e));
+    }
+
     res.status(201).json({
       message: 'Appointment booked successfully',
       appointment: {
@@ -251,6 +262,20 @@ export async function cancelAppointment(req, res, next) {
 
     if (apptErr) {
       console.error('Cancel appointment notice:', apptErr.message);
+    }
+
+    // 5. Send Cancellation SMS Notification to Patient
+    const targetPatientId = apptData?.patient_id;
+    let cancelPhone = queueData?.sms_phone;
+    if (!cancelPhone && targetPatientId) {
+      const { data: pUser } = await supabase.from('users').select('phone').eq('id', targetPatientId).maybeSingle();
+      cancelPhone = pUser?.phone;
+    }
+
+    if (cancelPhone) {
+      const tokenNum = apptData?.queue_number || queueData?.queue_number || '';
+      const cancelMsg = `MediQueue Notice: Your booking (Token #${tokenNum}) has been CANCELLED. If this was a mistake, please book again online.`;
+      notificationProvider.sendSMS(cancelPhone, cancelMsg).catch(e => console.warn('[CANCEL SMS NOTICE]', e));
     }
 
     res.json({ message: 'Appointment cancelled successfully', appointment: apptData || queueData });
