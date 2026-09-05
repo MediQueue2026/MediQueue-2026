@@ -2,7 +2,7 @@
  * Thin client for the MediQueue backend (Express + Supabase, see /backend).
  * Same base URL convention as the existing DB-check call in DevNavbar.tsx.
  */
-const API_BASE = 'http://localhost:5000/api'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
 export class ApiError extends Error {
   /** HTTP status, so callers can tell "wrong password" (401) from "server down". */
@@ -481,4 +481,27 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
+
+  uploadFile: async (file: File, bucket = 'general'): Promise<{ fileUrl: string; fileName: string; storageProvider: string }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('bucket', bucket)
+    
+    const token = getAccessToken()
+    const res = await fetch(`${API_BASE}/uploads`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: formData
+    })
+    
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({} as Record<string, unknown>))
+      throw new ApiError((err as { error?: string })?.error || 'File upload failed', res.status)
+    }
+    
+    return res.json()
+  },
 }

@@ -18,7 +18,9 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Security & Logging Middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 /**
  * The refresh-token cookie only travels on credentialed requests, and the CORS
@@ -50,6 +52,9 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 app.use(morgan('dev'));
+
+// Serve local file uploads (fallback storage)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // API Routes
 app.use('/api', apiRoutes);
