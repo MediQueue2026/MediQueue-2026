@@ -1,26 +1,54 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Building2, UserPlus, CheckCircle2 } from 'lucide-react'
+import type { ApiCenter, ApiDoctor } from '../lib/api'
 
-export default function AssignDoctorModal({ isOpen, onClose, onAssign }: {
+export default function AssignDoctorModal({
+  isOpen,
+  onClose,
+  doctors,
+  centers,
+  selectedCenter,
+  onAssign,
+}: {
   isOpen: boolean
   onClose: () => void
-  onAssign?: (data: { doctor: string; center: string; room: string; specialty: string }) => void
+  doctors: ApiDoctor[]
+  centers: ApiCenter[]
+  selectedCenter?: ApiCenter
+  onAssign?: (data: { doctorId: string; centerId: string; room: string; specialty: string }) => void
 }) {
-  const [doctor, setDoctor] = useState('Dr. Aisha Patel')
-  const [center, setCenter] = useState('MediQueue Central Clinic')
-  const [room, setRoom] = useState('Room 03 (Cardiology)')
+  const [doctorId, setDoctorId] = useState(doctors[0]?.id ?? '')
+  const [centerId, setCenterId] = useState(selectedCenter?.id ?? centers[0]?.id ?? '')
+  const [room, setRoom] = useState('Room 01')
   const [submitted, setSubmitted] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    setDoctorId(doctors[0]?.id ?? '')
+    setCenterId(selectedCenter?.id ?? centers[0]?.id ?? '')
+    setRoom('Room 01')
+  }, [isOpen, doctors, centers, selectedCenter])
 
   if (!isOpen) return null
 
+  const selectedDoctor = doctors.find(doc => doc.id === doctorId)
+  const selectedCenterName = centers.find(center => center.id === centerId)?.name ?? 'Selected Center'
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!doctorId || !centerId) return
+
     setSubmitted(true)
     setTimeout(() => {
-      onAssign?.({ doctor, center, room, specialty: 'Cardiology' })
+      onAssign?.({
+        doctorId,
+        centerId,
+        room,
+        specialty: selectedDoctor?.dept ?? 'General Medicine',
+      })
       setSubmitted(false)
       onClose()
-    }, 1000)
+    }, 300)
   }
 
   return (
@@ -34,7 +62,7 @@ export default function AssignDoctorModal({ isOpen, onClose, onAssign }: {
     }}>
       <div className="fade-in modal-card" style={{
         width: '100%', maxWidth: 540, maxHeight: '90vh',
-        background: 'rgba(255, 255, 255, 0.88)',
+        background: 'rgba(255, 255, 255, 0.92)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(18, 198, 186, 0.28)',
@@ -62,50 +90,48 @@ export default function AssignDoctorModal({ isOpen, onClose, onAssign }: {
             <Building2 size={22} />
           </div>
           <div>
-            <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Assign Doctor to Medical Center</h3>
-            <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>System Admin Doctor & Room Allocation</div>
+            <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Assign or Reassign Doctor</h3>
+            <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>Choose a doctor and connect them with a facility.</div>
           </div>
         </div>
 
         {submitted ? (
           <div style={{ textAlign: 'center', padding: '32px 0' }}>
             <CheckCircle2 size={52} color="#10B981" style={{ margin: '0 auto 14px' }} />
-            <h4 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)' }}>Assignment Saved!</h4>
+            <h4 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)' }}>Assignment Updated</h4>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
-              <strong>{doctor}</strong> assigned to {center} ({room}).
+              <strong>{selectedDoctor?.name ?? 'Doctor'}</strong> assigned to {selectedCenterName}.
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                Select Doctor
+                Doctor
               </label>
-              <select className="input" value={doctor} onChange={e => setDoctor(e.target.value)} style={{ height: 44, fontSize: 14 }}>
-                <option value="Dr. Aisha Patel">Dr. Aisha Patel (Cardiology)</option>
-                <option value="Dr. Marcus Reeves">Dr. Marcus Reeves (General Practice)</option>
-                <option value="Dr. Sofia Montoya">Dr. Sofia Montoya (Pediatrics)</option>
-                <option value="Dr. Kenji Nakamura">Dr. Kenji Nakamura (Orthopedics)</option>
-                <option value="Dr. Priya Kumari">Dr. Priya Kumari (Neurology)</option>
+              <select className="input" value={doctorId} onChange={e => setDoctorId(e.target.value)} style={{ height: 44, fontSize: 14 }}>
+                {doctors.map(doc => (
+                  <option key={doc.id} value={doc.id}>{doc.name} ({doc.dept})</option>
+                ))}
               </select>
             </div>
 
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                Target Medical Center / Facility
+                Medical Center
               </label>
-              <select className="input" value={center} onChange={e => setCenter(e.target.value)} style={{ height: 44, fontSize: 14 }}>
-                <option value="MediQueue Central Clinic">MediQueue Central Clinic (Colombo 07)</option>
-                <option value="MediQueue North Medical Center">MediQueue North Medical Center (Kandy)</option>
-                <option value="MediQueue Emergency & Urgent Care">MediQueue Emergency & Urgent Care (Galle)</option>
+              <select className="input" value={centerId} onChange={e => setCenterId(e.target.value)} style={{ height: 44, fontSize: 14 }}>
+                {centers.map(center => (
+                  <option key={center.id} value={center.id}>{center.name} ({center.city})</option>
+                ))}
               </select>
             </div>
 
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                Assigned Consultation Room
+                Consultation Room
               </label>
-              <input className="input" value={room} onChange={e => setRoom(e.target.value)} placeholder="e.g. Room 03 (Cardiology)" style={{ height: 44, fontSize: 14 }} />
+              <input className="input" value={room} onChange={e => setRoom(e.target.value)} placeholder="e.g. Room 03" style={{ height: 44, fontSize: 14 }} />
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>

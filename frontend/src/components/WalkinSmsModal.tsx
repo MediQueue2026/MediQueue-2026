@@ -1,24 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Send, Phone, User, Ticket, CheckCircle2, MessageSquare } from 'lucide-react'
+import type { ReceptionDoctor } from '../lib/receptionQueue'
 
-export default function WalkinSmsModal({ isOpen, onClose, onIssue }: {
+export default function WalkinSmsModal({
+  isOpen, onClose, onIssue, doctors = [], doctorId, nextToken = '#A-01',
+}: {
   isOpen: boolean
   onClose: () => void
-  onIssue?: (tokenData: { name: string; phone: string; token: string }) => void
+  onIssue?: (tokenData: { name: string; phone: string; nic?: string; doctorId: string; token: string }) => void
+  /** Live doctor roster — falls back to an empty list when rendered standalone. */
+  doctors?: ReceptionDoctor[]
+  /** Doctor the desk is currently issuing for. */
+  doctorId?: string
+  /** Real next token from the queue, so the slip and the SMS agree. */
+  nextToken?: string
 }) {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
-  const [doctor, setDoctor] = useState('Dr. Ethan Carr (Room 04)')
+  const [selectedDoctorId, setSelectedDoctorId] = useState(doctorId ?? doctors[0]?.id ?? '')
   const [sent, setSent] = useState(false)
-  const generatedToken = '#A-25'
+
+  // Follow the desk's doctor selection whenever the modal is (re)opened.
+  useEffect(() => {
+    if (isOpen && doctorId) setSelectedDoctorId(doctorId)
+  }, [isOpen, doctorId])
+
+  const doctor = doctors.find(d => d.id === selectedDoctorId)
+  const doctorLabel = doctor ? `${doctor.name} (${doctor.room})` : 'the assigned doctor'
+  const generatedToken = nextToken
 
   if (!isOpen) return null
 
   const handleIssueToken = (e: React.FormEvent) => {
     e.preventDefault()
+    // Commit to the queue first so the confirmation shows a token that exists.
+    onIssue?.({ name, phone, doctorId: selectedDoctorId, token: generatedToken })
     setSent(true)
     setTimeout(() => {
-      onIssue?.({ name, phone, token: generatedToken })
       setSent(false)
       setName('')
       setPhone('')
@@ -118,10 +136,15 @@ export default function WalkinSmsModal({ isOpen, onClose, onIssue }: {
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
                 Assigned Doctor & Room
               </label>
-              <select className="input" value={doctor} onChange={e => setDoctor(e.target.value)} style={{ height: 44, fontSize: 14 }}>
-                <option value="Dr. Ethan Carr (Room 04)">Dr. Ethan Carr (Room 04 - General Medicine)</option>
-                <option value="Dr. Aisha Patel (Room 03)">Dr. Aisha Patel (Room 03 - Cardiology)</option>
-                <option value="Dr. S. Montoya (Room 11)">Dr. S. Montoya (Room 11 - Pediatrics)</option>
+              <select
+                className="input"
+                value={selectedDoctorId}
+                onChange={e => setSelectedDoctorId(e.target.value)}
+                style={{ height: 44, fontSize: 14 }}
+              >
+                {doctors.map(d => (
+                  <option key={d.id} value={d.id}>{d.name} ({d.room} - {d.dept})</option>
+                ))}
               </select>
             </div>
 
@@ -133,7 +156,7 @@ export default function WalkinSmsModal({ isOpen, onClose, onIssue }: {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, color: 'var(--blue-dark)', marginBottom: 4 }}>
                 <MessageSquare size={14} /> SMS Broadcast Preview:
               </div>
-              "MediQueue: Hello {name || 'Patient'}, Token <strong>{generatedToken}</strong> issued for {doctor}. Track live queue status: mediqueue.io/t/a25"
+              "MediQueue: Hello {name || 'Patient'}, Token <strong>{generatedToken}</strong> issued for {doctorLabel}. Track live queue status: mediqueue.io/t/{generatedToken.replace(/[#-]/g, '').toLowerCase()}"
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>

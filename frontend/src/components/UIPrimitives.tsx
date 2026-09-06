@@ -22,7 +22,7 @@ export function Badge({ children, cls }: { children: React.ReactNode; cls: strin
   return <span className={`badge ${cls}`}>{children}</span>
 }
 
-export function StatusBadge({ status }: { status: 'active' | 'break' | 'delayed' | 'offline' | 'online' | 'healthy' | 'degraded' | 'down' | 'operational' | 'maintenance' | 'completed' | 'waiting' | 'next' | 'urgent' }) {
+export function StatusBadge({ status }: { status: 'active' | 'break' | 'delayed' | 'offline' | 'online' | 'healthy' | 'degraded' | 'down' | 'operational' | 'maintenance' | 'completed' | 'waiting' | 'next' | 'urgent' | 'skipped' | 'called' | 'left' | 'in_progress' | 'cancelled' }) {
   const map: Record<string, [string, string]> = {
     active:      ['badge-emerald', 'Active'],
     online:      ['badge-emerald', 'Online'],
@@ -30,17 +30,22 @@ export function StatusBadge({ status }: { status: 'active' | 'break' | 'delayed'
     healthy:     ['badge-emerald', 'Healthy'],
     completed:   ['badge-emerald', 'Completed'],
     next:        ['badge-blue',    'Next In Line'],
+    called:      ['badge-blue',    'Called'],
+    in_progress: ['badge-blue',    'In Progress'],
     waiting:     ['badge-ghost',   'Waiting'],
     break:       ['badge-amber',   'On Break'],
     delayed:     ['badge-amber',   'Delayed'],
     degraded:    ['badge-amber',   'Degraded'],
     maintenance: ['badge-amber',   'Maintenance'],
     offline:     ['badge-crimson', 'Offline'],
+    skipped:     ['badge-crimson', 'Skipped'],
+    left:        ['badge-crimson', 'Left / No Show'],
+    cancelled:   ['badge-crimson', 'Cancelled'],
     down:        ['badge-crimson', 'Down'],
     urgent:      ['badge-crimson', 'Urgent'],
   }
   const [cls, label] = map[status] ?? ['badge-ghost', status]
-  const dotColor = cls === 'badge-emerald' ? '#10B981' : cls === 'badge-blue' ? '#3B82F6' : cls === 'badge-amber' ? '#F59E0B' : cls === 'badge-crimson' ? '#EF4444' : '#64748B'
+  const dotColor = cls === 'badge-emerald' ? '#10B981' : cls === 'badge-blue' ? '#4F46E5' : cls === 'badge-amber' ? '#F59E0B' : cls === 'badge-crimson' ? '#EF4444' : '#64748B'
   return <Badge cls={cls}><Dot color={dotColor} />{label}</Badge>
 }
 

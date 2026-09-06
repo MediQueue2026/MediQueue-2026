@@ -41,7 +41,7 @@ export default function AuthModal({ isOpen, onClose, defaultTab = 'signin', onSu
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',
-        /* Top padding = page-switcher (42px) + some breathing room */
+        /* Top padding clears the fixed page-switcher (52px) */
         padding: '52px 16px 32px',
       }}
     >

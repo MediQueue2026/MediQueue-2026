@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
@@ -17,10 +18,43 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Security & Logging Middleware
-app.use(helmet());
-app.use(cors());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+/**
+ * The refresh-token cookie only travels on credentialed requests, and the CORS
+ * spec forbids pairing `credentials: true` with a wildcard origin — so the
+ * allowed origins have to be listed explicitly. Override in .env with a
+ * comma-separated ALLOWED_ORIGINS when the frontend moves off localhost.
+ */
+const ALLOWED_ORIGINS = (
+  process.env.ALLOWED_ORIGINS ||
+  'http://localhost:8443,http://localhost:5173,http://localhost:3000,http://localhost:4173'
+)
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow server-to-server calls, explicit origins, or any local dev port (localhost / 127.0.0.1)
+      if (!origin || ALLOWED_ORIGINS.includes(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+        return callback(null, true);
+      }
+      callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
+    credentials: true,
+  }),
+);
+
 app.use(express.json());
+app.use(cookieParser());
 app.use(morgan('dev'));
+
+// Serve local file uploads (fallback storage)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // API Routes
 app.use('/api', apiRoutes);

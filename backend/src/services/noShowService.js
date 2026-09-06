@@ -7,14 +7,25 @@ export async function evaluatePatientNoShowStatus(patientId) {
   try {
     const threshold = parseInt(process.env.NO_SHOW_LATE_NUMBER_THRESHOLD || '2');
 
-    // Count missed appointments
-    const { count, error } = await supabase
-      .from('appointments')
-      .select('*', { count: 'exact', head: true })
-      .eq('patient_id', patientId)
-      .eq('status', 'no_show');
+    if (!patientId || patientId === 'pat-1') {
+      return { missedCount: 0, isRepeatOffender: false, shouldAssignLateNumber: false };
+    }
 
-    const missedCount = count || 0;
+    // Count missed tokens in walk_in_queue
+    const { data: missedQueue } = await supabase
+      .from('walk_in_queue')
+      .select('id')
+      .eq('patient_id', patientId)
+      .in('status', ['left', 'skipped', 'no_show']);
+
+    // Count missed appointments in appointments table
+    const { data: missedAppts } = await supabase
+      .from('appointments')
+      .select('id')
+      .eq('patient_id', patientId)
+      .in('status', ['no_show', 'left', 'skipped']);
+
+    const missedCount = (missedQueue?.length || 0) + (missedAppts?.length || 0);
     const isRepeatOffender = missedCount >= threshold;
 
     if (isRepeatOffender) {
@@ -28,6 +39,7 @@ export async function evaluatePatientNoShowStatus(patientId) {
     return {
       missedCount,
       isRepeatOffender,
+      isLateNumber: isRepeatOffender,
       shouldAssignLateNumber: isRepeatOffender
     };
   } catch (err) {

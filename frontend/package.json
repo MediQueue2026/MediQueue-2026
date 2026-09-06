@@ -12,6 +12,8 @@
   "dependencies": {
     "@tsparticles/react": "^4.3.2",
     "@tsparticles/slim": "^4.3.2",
+    "@types/leaflet": "^1.9.22",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.27.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

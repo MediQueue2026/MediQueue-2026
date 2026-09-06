@@ -5,22 +5,76 @@ import DoctorPanel from './pages/DoctorPanel'
 import ReceptionistDesk from './pages/ReceptionistDesk'
 import AdminPanel from './pages/AdminPanel'
 import TvDisplayPage from './pages/TvDisplayPage'
+import LoginPage from './pages/auth/LoginPage'
+import RegisterPage from './pages/auth/RegisterPage'
 import { DevNavbar } from './components/DevNavbar'
+import { AuthProvider } from './context/AuthContext'
+import { ProtectedRoute } from './routes/ProtectedRoute'
+import { GlobalMaintenanceGate } from './components/GlobalMaintenanceGate'
 
 export default function App() {
   return (
-    <Router>
-      <div style={{ paddingTop: 42 }}>
-        <DevNavbar />
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/patient/*" element={<PatientDashboard />} />
-          <Route path="/doctor/*" element={<DoctorPanel />} />
-          <Route path="/receptionist/*" element={<ReceptionistDesk />} />
-          <Route path="/admin/*" element={<AdminPanel />} />
-          <Route path="/tv-display" element={<TvDisplayPage />} />
-        </Routes>
-      </div>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <div style={{ paddingTop: 52 }}>
+          <DevNavbar />
+          <GlobalMaintenanceGate>
+            <Routes>
+            <Route path="/" element={<LandingPage />} />
+
+            {/* Sign-in — one screen, four portals. Public by design. */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/login/doctor" element={<LoginPage forcedRole="doctor" />} />
+            <Route path="/login/receptionist" element={<LoginPage forcedRole="receptionist" />} />
+            <Route path="/login/admin" element={<LoginPage forcedRole="admin" />} />
+
+            {/* Patient self-registration. Staff accounts are created by an admin
+                (POST /api/auth/staff), so there is deliberately no staff variant. */}
+            <Route path="/register" element={<RegisterPage />} />
+
+            {/* Consoles — each one requires a session with a matching role. An
+                admin is allowed everywhere so support staff can reproduce an
+                issue from the desk or the doctor's panel. */}
+            <Route
+              path="/patient/*"
+              element={
+                <ProtectedRoute allowedRoles={['patient', 'admin']} loginPath="/login">
+                  <PatientDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/doctor/*"
+              element={
+                <ProtectedRoute allowedRoles={['doctor', 'admin']} loginPath="/login/doctor">
+                  <DoctorPanel />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/receptionist/*"
+              element={
+                <ProtectedRoute allowedRoles={['receptionist', 'admin']} loginPath="/login/receptionist">
+                  <ReceptionistDesk />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/*"
+              element={
+                <ProtectedRoute allowedRoles={['admin']} loginPath="/login/admin">
+                  <AdminPanel />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Waiting-room board — deliberately public so it can run on a TV
+                with no one signed in. Shows tokens only, never patient records. */}
+            <Route path="/tv-display" element={<TvDisplayPage />} />
+          </Routes>
+          </GlobalMaintenanceGate>
+        </div>
+      </Router>
+    </AuthProvider>
   )
 }

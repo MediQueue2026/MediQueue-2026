@@ -34,3 +34,8 @@ Thumbs.db
 
 # Temp / Local prototype artifacts
 MediQueue-Prototype/
+
+# Impeccable design skill — per-machine dev tooling, not project source.
+# Reinstall with: npx impeccable install
+.claude/skills/impeccable/
+.claude/agents/impeccable-*.md
