@@ -6,6 +6,7 @@ import ReceptionistDesk from './pages/ReceptionistDesk'
 import AdminPanel from './pages/AdminPanel'
 import TvDisplayPage from './pages/TvDisplayPage'
 import LoginPage from './pages/auth/LoginPage'
+import RegisterPage from './pages/auth/RegisterPage'
 import { DevNavbar } from './components/DevNavbar'
 import { AuthProvider } from './context/AuthContext'
 import { ProtectedRoute } from './routes/ProtectedRoute'
@@ -26,6 +27,10 @@ export default function App() {
             <Route path="/login/doctor" element={<LoginPage forcedRole="doctor" />} />
             <Route path="/login/receptionist" element={<LoginPage forcedRole="receptionist" />} />
             <Route path="/login/admin" element={<LoginPage forcedRole="admin" />} />
+
+            {/* Patient self-registration. Staff accounts are created by an admin
+                (POST /api/auth/staff), so there is deliberately no staff variant. */}
+            <Route path="/register" element={<RegisterPage />} />
 
             {/* Consoles — each one requires a session with a matching role. An
                 admin is allowed everywhere so support staff can reproduce an
