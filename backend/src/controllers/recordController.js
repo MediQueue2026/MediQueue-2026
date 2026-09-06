@@ -2,14 +2,97 @@ import { supabase } from '../config/supabase.js';
 
 const isUuid = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
+/**
+ * Attachment rules, enforced here as well as in the browser. The client check in
+ * lib/api.ts (`validateHealthRecordFile`) is a convenience — this is the gate,
+ * since anything can POST to this endpoint directly.
+ */
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
+const ALLOWED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg'];
+const ALLOWED_RECORD_TYPES = ['prescription', 'lab_report', 'ecg', 'xray', 'general'];
+
+/**
+ * The bytes go to Supabase Storage via POST /api/uploads, so what reaches this
+ * endpoint is the resulting URL. Checking its extension is what stops a row
+ * pointing at something that isn't a report — and it is what rejects the old
+ * placeholder `/files/<name>` strings the modal used to invent.
+ */
+function fileUrlProblem(fileUrl) {
+  let parsed;
+  try {
+    parsed = new URL(fileUrl);
+  } catch {
+    // Not absolute. uploadFileToStorage always returns an absolute URL — for the
+    // Supabase bucket and for the local-disk fallback alike — so a bare path can
+    // only be a value that never went through storage, which is exactly what the
+    // old modal invented (`/files/<name>`).
+    return 'Attachment must be uploaded to storage first.';
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return 'Attachment URL is not valid.';
+  }
+
+  const extension = parsed.pathname.split('.').pop()?.toLowerCase() ?? '';
+  if (!ALLOWED_EXTENSIONS.includes(extension)) {
+    return 'Only PDF, PNG and JPG files can be attached.';
+  }
+  return null;
+}
+
 export async function uploadHealthRecord(req, res, next) {
   try {
-    const { patientId, title, notes, fileUrl } = req.body;
-    const { data, error } = await supabase.from('health_records').insert([
-      { patient_id: patientId, title, notes, file_url: fileUrl }
-    ]).select();
+    const { patientId, title, notes, fileUrl, recordType, issuingAuthority, mimeType, fileSize } = req.body;
 
-    res.status(201).json({ message: 'Health record saved successfully', record: data ? data[0] : { patientId, title, notes } });
+    if (!patientId || !isUuid(patientId)) {
+      return res.status(400).json({ error: 'A valid patientId is required.' });
+    }
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'A report title is required.' });
+    }
+
+    // Attachment checks. A record may legitimately carry no file (a doctor's
+    // note-only entry), but one that claims a file must claim a valid one.
+    if (fileUrl) {
+      const problem = fileUrlProblem(String(fileUrl));
+      if (problem) return res.status(400).json({ error: problem });
+
+      if (mimeType && !ALLOWED_MIME_TYPES.includes(mimeType)) {
+        return res.status(400).json({ error: 'Only PDF, PNG and JPG files can be attached.' });
+      }
+      if (Number(fileSize) > MAX_FILE_BYTES) {
+        return res.status(400).json({ error: 'File size exceeds maximum limit of 10MB.' });
+      }
+    }
+
+    const type = ALLOWED_RECORD_TYPES.includes(recordType) ? recordType : 'lab_report';
+
+    const { data, error } = await supabase
+      .from('health_records')
+      .insert([{
+        patient_id: patientId,
+        title: String(title).trim(),
+        notes: notes ? String(notes).trim() : null,
+        file_url: fileUrl || null,
+        // Previously dropped on the floor: the modal collected both of these and
+        // neither was ever written, so every uploaded row read back as a
+        // 'lab_report' from 'MediQueue EHR'.
+        record_type: type,
+        issuing_authority: issuingAuthority ? String(issuingAuthority).trim() : null,
+      }])
+      .select()
+      .maybeSingle();
+
+    // The insert error used to be destructured and then ignored, so a failed
+    // write still returned 201 with an echo of the request body — the row was
+    // absent from the database but present in the UI until the next refresh.
+    if (error) {
+      console.error('Health record insert error:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(201).json({ message: 'Health record saved successfully', record: data });
   } catch (err) {
     next(err);
   }

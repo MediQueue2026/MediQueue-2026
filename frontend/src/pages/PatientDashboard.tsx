@@ -9,7 +9,7 @@ import { Avatar, StatusBadge } from '../components/UIPrimitives'
 import { PrescriptionModal } from '../components/PrescriptionModal'
 import { UploadReportModal } from '../components/UploadReportModal'
 import { BookAppointmentModal } from '../components/BookAppointmentModal'
-import { ViewReportModal } from '../components/ViewReportModal'
+import { ViewReportModal, downloadRecordFile, isRealFileUrl } from '../components/ViewReportModal'
 import { LiveClinicMap } from '../components/LiveClinicMap'
 import {
   fetchPatientProfile,
@@ -81,6 +81,8 @@ export default function PatientDashboard() {
 
   // Dynamic Records & Appointments state
   const [records, setRecords] = useState<HealthRecordItem[]>([])
+  /** Id of the record currently being fetched from storage, so only its button shows progress. */
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [recordFilter, setRecordFilter] = useState<'all' | 'prescription' | 'lab_report'>('all')
   const [myAppointments, setMyAppointments] = useState<AppointmentItem[]>([])
 
@@ -166,6 +168,18 @@ export default function PatientDashboard() {
     }
     if (docId) {
       await toggleDoctorSubscriptionAPI(activeUserId, docId)
+    }
+  }
+
+  /** Saves a record's stored file, reporting failure through the toast rather than silently. */
+  const handleDownloadRecord = async (record: HealthRecordItem) => {
+    setDownloadingId(record.id)
+    try {
+      await downloadRecordFile(record)
+    } catch {
+      showToast('Could not download the file. It may have been removed from storage.')
+    } finally {
+      setDownloadingId(null)
     }
   }
 
@@ -765,8 +779,20 @@ export default function PatientDashboard() {
                             <Eye size={14} /> View Diagnostic Report
                           </button>
                         )}
-                        <button onClick={() => alert(`Downloading PDF document for ${r.title}...`)} className="btn btn-ghost btn-sm" style={{ gap: 5 }}>
-                          <Download size={14} /> Download PDF
+                        {/* Only offered when there is a stored document; older
+                            prescription rows are text-only and have nothing to save. */}
+                        <button
+                          onClick={() => handleDownloadRecord(r)}
+                          disabled={!isRealFileUrl(r.fileUrl) || downloadingId === r.id}
+                          title={isRealFileUrl(r.fileUrl) ? undefined : 'This record has no attached file'}
+                          className="btn btn-ghost btn-sm"
+                          style={{
+                            gap: 5,
+                            opacity: isRealFileUrl(r.fileUrl) ? 1 : 0.45,
+                            cursor: !isRealFileUrl(r.fileUrl) ? 'not-allowed' : downloadingId === r.id ? 'wait' : 'pointer',
+                          }}
+                        >
+                          <Download size={14} /> {downloadingId === r.id ? 'Downloading…' : 'Download'}
                         </button>
                       </div>
                     </div>

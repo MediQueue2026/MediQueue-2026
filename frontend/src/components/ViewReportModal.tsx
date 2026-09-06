@@ -1,4 +1,5 @@
-import { FileText, X, Download, ShieldCheck, Activity } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { FileText, X, Download, ShieldCheck, Activity, AlertCircle, ExternalLink, Loader2 } from 'lucide-react'
 import { HealthRecordItem } from '../types/patient'
 
 interface ViewReportModalProps {
@@ -7,8 +8,104 @@ interface ViewReportModalProps {
   record: HealthRecordItem | null
 }
 
+/**
+ * Opens a stored health record: metadata, plus the actual document.
+ *
+ * The previous version rendered only the text fields and its "Download PDF"
+ * button called `alert()`. Now the file at `file_url` is fetched and shown —
+ * PDFs in an <object>, images inline — and downloading writes the real bytes.
+ *
+ * Rows with no `file_url` are expected, not an error: prescriptions written in
+ * the Doctor Console are text-only, and the mock rows created before uploads
+ * were real have a `/files/<name>` path that never existed. Both render the
+ * metadata with an explanatory note where the document would be.
+ */
+
+type FileKind = 'pdf' | 'image' | 'other'
+
+/**
+ * Whether a record has a document that can actually be opened.
+ *
+ * Exported because the records list on the Patient Dashboard needs the same
+ * answer before it offers a Download button. Old mock rows stored a cosmetic
+ * `/files/<name>` path that was never uploaded anywhere.
+ */
+export function isRealFileUrl(url?: string): url is string {
+  if (!url || !url.trim()) return false
+  return !url.startsWith('/files/')
+}
+
+function fileKindOf(url: string): FileKind {
+  const extension = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+  if (extension === 'pdf') return 'pdf'
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension)) return 'image'
+  return 'other'
+}
+
+/** A filename for the download, derived from the report title rather than the hashed storage key. */
+function downloadNameFor(record: HealthRecordItem, url: string): string {
+  const extension = url.split('?')[0].split('.').pop()?.toLowerCase() || 'pdf'
+  const base = record.title.replace(/[^a-zA-Z0-9 _-]/g, '').trim().replace(/\s+/g, '_') || 'health_record'
+  return `${base}.${extension}`
+}
+
+/**
+ * Saves the record's file to disk.
+ *
+ * Fetched as a blob rather than using `<a download>`: the file lives on the
+ * Supabase Storage origin, and a cross-origin `download` attribute is ignored by
+ * browsers — the link would navigate to the file instead of saving it. The
+ * bucket sends `access-control-allow-origin: *`, so the fetch is allowed.
+ *
+ * Throws on failure; callers decide how to report it.
+ */
+export async function downloadRecordFile(record: HealthRecordItem): Promise<void> {
+  const url = record.fileUrl
+  if (!isRealFileUrl(url)) throw new Error('This record has no attached file.')
+
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Storage returned ${res.status}`)
+  const blob = await res.blob()
+
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = downloadNameFor(record, url)
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
 export function ViewReportModal({ isOpen, onClose, record }: ViewReportModalProps) {
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState('')
+
+  // Clear transient download state when a different record is opened.
+  useEffect(() => {
+    setDownloadError('')
+    setDownloading(false)
+  }, [record?.id])
+
   if (!isOpen || !record) return null
+
+  const fileUrl = record.fileUrl
+  const hasFile = isRealFileUrl(fileUrl)
+  const kind = hasFile ? fileKindOf(fileUrl) : 'other'
+
+  const handleDownload = async () => {
+    if (!hasFile) return
+    setDownloading(true)
+    setDownloadError('')
+    try {
+      await downloadRecordFile(record)
+    } catch {
+      // Most likely the file was removed from the bucket, or the network failed.
+      setDownloadError('Could not download the file. It may have been removed from storage.')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <div style={{
@@ -35,7 +132,70 @@ export function ViewReportModal({ isOpen, onClose, record }: ViewReportModalProp
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-4)' }}><X size={18} /></button>
         </div>
 
-        {/* Diagnostic Document Simulation */}
+        {/* ── The document itself ── */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', marginBottom: 6 }}>
+            Attached Document
+          </div>
+
+          {!hasFile ? (
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 8,
+              padding: '12px 14px', background: '#fafafa',
+              border: '1px dashed var(--border-md)', borderRadius: 10,
+              fontSize: 12.5, color: 'var(--text-3)', lineHeight: 1.5,
+            }}>
+              <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--text-4)' }} />
+              <span>
+                No file is attached to this record. Prescriptions issued in the Doctor
+                Console are recorded as text, and records created before file uploads
+                were enabled have no stored document.
+              </span>
+            </div>
+          ) : kind === 'image' ? (
+            <a href={fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
+              <img
+                src={fileUrl}
+                alt={record.title}
+                style={{
+                  width: '100%', maxHeight: 420, objectFit: 'contain',
+                  borderRadius: 10, border: '1px solid var(--border-md)', background: '#fafafa',
+                }}
+              />
+            </a>
+          ) : kind === 'pdf' ? (
+            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border-md)', background: '#fafafa' }}>
+              {/* <object> degrades to its children when the browser has no PDF
+                  viewer, which <iframe> does not do. */}
+              <object data={fileUrl} type="application/pdf" width="100%" height="420">
+                <div style={{ padding: 20, textAlign: 'center', fontSize: 12.5, color: 'var(--text-3)' }}>
+                  This browser can't display PDFs inline.{' '}
+                  <a href={fileUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue)', fontWeight: 700 }}>
+                    Open it in a new tab
+                  </a>{' '}
+                  or use Download below.
+                </div>
+              </object>
+            </div>
+          ) : (
+            <div style={{ padding: '12px 14px', background: '#fafafa', border: '1px solid var(--border-md)', borderRadius: 10, fontSize: 12.5, color: 'var(--text-3)' }}>
+              This file type can't be previewed. Use Download to open it.
+            </div>
+          )}
+
+          {downloadError && (
+            <div role="alert" style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginTop: 8,
+              padding: '9px 11px', background: 'var(--crimson-dim)',
+              border: '1px solid var(--crimson-border)', borderRadius: 8,
+              color: 'var(--crimson)', fontSize: 12, fontWeight: 600,
+            }}>
+              <AlertCircle size={13} /> {downloadError}
+            </div>
+          )}
+        </div>
+
+        {/* ── Record metadata ── */}
         <div style={{ padding: 20, background: '#fafafa', borderRadius: 12, border: '1px solid var(--border-md)', marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, borderBottom: '1px dashed var(--border-md)', paddingBottom: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--blue-dark)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -101,13 +261,28 @@ export function ViewReportModal({ isOpen, onClose, record }: ViewReportModalProp
         {/* Action triggers */}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button type="button" onClick={onClose} className="btn btn-ghost">Close</button>
+          {hasFile && (
+            <a
+              href={fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-ghost"
+              style={{ gap: 6, textDecoration: 'none' }}
+            >
+              <ExternalLink size={14} /> Open in new tab
+            </a>
+          )}
           <button
             type="button"
-            onClick={() => alert(`Downloading PDF copy of "${record.title}"...`)}
+            onClick={handleDownload}
+            disabled={!hasFile || downloading}
+            title={hasFile ? undefined : 'This record has no attached file'}
             className="btn btn-primary"
-            style={{ gap: 6 }}
+            style={{ gap: 6, opacity: !hasFile || downloading ? 0.5 : 1, cursor: !hasFile ? 'not-allowed' : downloading ? 'wait' : 'pointer' }}
           >
-            <Download size={14} /> Download PDF
+            {downloading
+              ? <><Loader2 size={14} style={{ animation: 'spin 0.9s linear infinite' }} /> Downloading…</>
+              : <><Download size={14} /> Download</>}
           </button>
         </div>
       </div>

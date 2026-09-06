@@ -245,6 +245,53 @@ export interface ApiDoctorRequest {
   createdAt: string
 }
 
+/** A row of `health_records` as the API returns it (snake_case, straight from Postgres). */
+export interface ApiHealthRecord {
+  id: string
+  patient_id: string
+  doctor_id?: string | null
+  title: string
+  notes?: string | null
+  /** Real Supabase Storage URL. Null/blank on legacy mock rows — callers must handle that. */
+  file_url?: string | null
+  record_type?: string | null
+  issuing_authority?: string | null
+  rx_medications?: unknown[]
+  created_at?: string
+}
+
+/**
+ * Attachment rules for health records. Kept here so the modal, the viewer and
+ * the server-side check in recordController.js all state the same limits — the
+ * server enforces them again, since a client check is a convenience, not a gate.
+ */
+export const HEALTH_RECORD_MAX_BYTES = 10 * 1024 * 1024
+
+export const HEALTH_RECORD_MIME_TYPES = [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+] as const
+
+/** Accepts `.jpg` as well as `.jpeg`; matched case-insensitively. */
+export const HEALTH_RECORD_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg'] as const
+
+/** Returns an error message, or '' when the file is acceptable. */
+export function validateHealthRecordFile(file: File): string {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const typeOk =
+    (HEALTH_RECORD_MIME_TYPES as readonly string[]).includes(file.type) ||
+    // Some browsers report an empty type for a drag-dropped file; fall back to the extension.
+    (!file.type && (HEALTH_RECORD_EXTENSIONS as readonly string[]).includes(extension))
+
+  if (!typeOk) return 'Only PDF, PNG and JPG files can be attached.'
+  if (file.size > HEALTH_RECORD_MAX_BYTES) {
+    return `That file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is 10 MB.`
+  }
+  if (file.size === 0) return 'That file is empty.'
+  return ''
+}
+
 export const api = {
   // ── Auth ──
   login: (email: string, password: string) =>
@@ -480,6 +527,26 @@ export const api = {
     request<{ entry: ApiQueueEntry }>(`/queue/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    }),
+
+  /**
+   * Saves a health-record row. `fileUrl` must be a real storage URL returned by
+   * `uploadFile` — the server rejects anything that isn't a PDF/PNG/JPG URL, so
+   * the old placeholder `/files/<name>` strings can no longer be persisted.
+   */
+  createHealthRecord: (input: {
+    patientId: string
+    title: string
+    recordType?: string
+    issuingAuthority?: string
+    notes?: string
+    fileUrl?: string
+    mimeType?: string
+    fileSize?: number
+  }) =>
+    rawRequest<{ message: string; record: ApiHealthRecord }>('/records/upload', {
+      method: 'POST',
+      body: JSON.stringify(input),
     }),
 
   uploadFile: async (file: File, bucket = 'general'): Promise<{ fileUrl: string; fileName: string; storageProvider: string }> => {
