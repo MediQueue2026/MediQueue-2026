@@ -287,6 +287,26 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
             )}
           </form>
 
+          {/* Patient sign-up. Only on the patient tab: doctor, reception and
+              admin accounts are created by an admin, never self-served, so
+              offering the link there would send staff to a form that refuses
+              their role. */}
+          {role === 'patient' && (
+            <p style={{
+              marginTop: 14, textAlign: 'center', fontSize: 12.5,
+              color: 'var(--text-4)', lineHeight: 1.5,
+            }}>
+              New to MediQueue?{' '}
+              <Link
+                to="/register"
+                state={(location.state as { from?: string } | null) ?? undefined}
+                style={{ color: portal.accent, fontWeight: 700, textDecoration: 'none' }}
+              >
+                Create a patient account
+              </Link>
+            </p>
+          )}
+
           {/* Testing shortcut — deliberately quieter than the primary action. */}
           <div className="auth-demo">
             <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
