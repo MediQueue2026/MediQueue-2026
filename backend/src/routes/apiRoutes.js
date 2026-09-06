@@ -20,7 +20,14 @@ import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from 
 import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser, getSystemStats, getSettings, setMaintenanceMode } from '../controllers/adminController.js';
 import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
 import { createDoctorRequest, getDoctorRequests, approveDoctorRequest, rejectDoctorRequest } from '../controllers/doctorRequestController.js';
+import { uploadFile } from '../controllers/uploadController.js';
+import multer from 'multer';
 import { maintenanceMiddleware } from '../middleware/maintenanceMiddleware.js';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 const router = Router();
 
@@ -184,5 +191,8 @@ router.post('/doctor-requests', authMiddleware, requireRole(['receptionist', 'ad
 router.get('/doctor-requests', authMiddleware, requireRole(['admin']), getDoctorRequests);
 router.patch('/doctor-requests/:id/approve', authMiddleware, requireRole(['admin']), approveDoctorRequest);
 router.patch('/doctor-requests/:id/reject', authMiddleware, requireRole(['admin']), rejectDoctorRequest);
+
+// ── Upload Routes ────────────────────────────────────────────────────────────
+router.post('/uploads', upload.single('file'), uploadFile);
 
 export default router;
