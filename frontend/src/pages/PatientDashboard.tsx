@@ -5,6 +5,7 @@ import {
   Map, MapPin, Menu, Plus, Search, Settings, ShieldCheck, Ticket, User, X
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import AccountMenu from '../components/AccountMenu'
 import { Avatar, StatusBadge } from '../components/UIPrimitives'
 import { PrescriptionModal } from '../components/PrescriptionModal'
 import { UploadReportModal } from '../components/UploadReportModal'
@@ -347,7 +348,15 @@ export default function PatientDashboard() {
             <button onClick={() => setShowBookModal(true)} className="btn btn-primary btn-sm" style={{ gap: 6 }}>
               <Plus size={14} /> Book Doctor
             </button>
-            <Avatar name={displayName} size={30} />
+            <AccountMenu
+              compact
+              phone={profile.phone}
+              nic={profile.nic}
+              onEditProfile={() => {
+                setNav('settings')
+                setSidebarOpen(false)
+              }}
+            />
           </div>
         </div>
 
