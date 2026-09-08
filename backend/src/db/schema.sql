@@ -115,6 +115,7 @@ CREATE TABLE public.appointments (
 CREATE TABLE public.walk_in_queue (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   doctor_id UUID REFERENCES public.doctors(id) ON DELETE CASCADE,
+  center_id UUID REFERENCES public.medical_centers(id) ON DELETE SET NULL,
   patient_name TEXT NOT NULL,
   nic TEXT,
   sms_phone TEXT,
@@ -125,6 +126,29 @@ CREATE TABLE public.walk_in_queue (
   checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   called_at TIMESTAMPTZ
 );
+
+-- 7b. Doctor <-> Center postings (one doctor can work at many centers, each
+--     posting with its own room, token series, capacity and on-duty status).
+CREATE TABLE public.doctor_center_assignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  doctor_id UUID NOT NULL REFERENCES public.doctors(id) ON DELETE CASCADE,
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  room_number TEXT,
+  series VARCHAR(5),
+  max_appointments_per_hour INT DEFAULT 4,
+  current_status TEXT CHECK (current_status IN ('active', 'delayed', 'break', 'offline')) DEFAULT 'active',
+  delay_minutes INT DEFAULT 0,
+  available_hours JSONB DEFAULT '{}'::jsonb,
+  approval_status TEXT CHECK (approval_status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+  requested_by_name TEXT,
+  rejection_reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (doctor_id, center_id)
+);
+CREATE INDEX idx_dca_center ON public.doctor_center_assignments(center_id);
+CREATE INDEX idx_dca_center_approval ON public.doctor_center_assignments(center_id, approval_status);
+CREATE INDEX idx_dca_doctor ON public.doctor_center_assignments(doctor_id);
 
 -- 8. Doctor Subscriptions Table
 CREATE TABLE public.doctor_subscriptions (
@@ -218,6 +242,7 @@ ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.center_documents DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctors DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctor_requests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.doctor_center_assignments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appointments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.walk_in_queue DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctor_subscriptions DISABLE ROW LEVEL SECURITY;

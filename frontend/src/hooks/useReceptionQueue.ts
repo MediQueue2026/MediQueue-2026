@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiError, api } from '../lib/api'
-import type { ApiQueueEntry } from '../lib/api'
+import type { ApiDoctor, ApiQueueEntry } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 import {
   QueueError,
   RECEPTION_DOCTORS,
@@ -46,6 +47,19 @@ function fromApiEntry(e: ApiQueueEntry): QueueEntry {
  * desk stays fully usable either way.
  */
 export function useReceptionQueue() {
+  // A receptionist only manages one medical center — the desk roster and the
+  // queue's doctor picker are scoped to it. `centerId` is null for accounts not
+  // yet linked to a center (and for the offline demo identity).
+  const { user, loading: authLoading } = useAuth()
+  const centerId = user?.centerId ?? null
+
+  /** Doctors assigned to this receptionist's center — empty until one is linked. */
+  const fetchCenterDoctors = useCallback(
+    (): Promise<{ doctors: ApiDoctor[] }> =>
+      centerId ? api.getDoctors({ centerId }) : Promise.resolve({ doctors: [] }),
+    [centerId],
+  )
+
   const [doctors, setDoctors] = useState<ReceptionDoctor[]>(RECEPTION_DOCTORS)
   const [entries, setEntries] = useState<QueueEntry[]>(seedQueue)
   const [selectedDoctorId, setSelectedDoctorId] = useState(RECEPTION_DOCTORS[0]?.id ?? '')
@@ -59,12 +73,14 @@ export function useReceptionQueue() {
   const [completing, setCompleting] = useState(false)
   const [error, setError] = useState('')
 
-  // Load the real clinic roster + today's queue once on mount.
+  // Load the real clinic roster + today's queue once the session is known
+  // (we need the receptionist's center before we can scope the roster).
   useEffect(() => {
+    if (authLoading) return
     let cancelled = false
     ;(async () => {
       try {
-        const [doctorsRes, queueRes] = await Promise.all([api.getDoctors(), api.getQueue()])
+        const [doctorsRes, queueRes] = await Promise.all([fetchCenterDoctors(), api.getQueue({ centerId })])
         if (cancelled) return
         setDoctors(doctorsRes.doctors)
         setEntries(queueRes.entries.map(fromApiEntry))
@@ -80,19 +96,19 @@ export function useReceptionQueue() {
       }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [authLoading, fetchCenterDoctors])
 
   // Live 3-second doctor status & queue polling loop across doctor terminals
   useEffect(() => {
     if (offline) return
     const interval = setInterval(() => {
-      Promise.all([api.getDoctors(), api.getQueue()]).then(([doctorsRes, queueRes]) => {
+      Promise.all([fetchCenterDoctors(), api.getQueue({ centerId })]).then(([doctorsRes, queueRes]) => {
         setDoctors(doctorsRes.doctors)
         setEntries(queueRes.entries.map(fromApiEntry))
       }).catch(() => {})
     }, 3000)
     return () => clearInterval(interval)
-  }, [offline])
+  }, [offline, fetchCenterDoctors])
 
   const selectedDoctor = useMemo(() => doctors.find(d => d.id === selectedDoctorId), [doctors, selectedDoctorId])
 
@@ -134,6 +150,7 @@ export function useReceptionQueue() {
       try {
         const { entry } = await api.issueWalkinToken({
           doctorId,
+          centerId,
           patientName: input.patientName,
           nic: input.nic,
           phone: input.phone,
@@ -151,7 +168,7 @@ export function useReceptionQueue() {
         setIssuing(false)
       }
     },
-    [entries, offline, selectedDoctorId],
+    [entries, offline, selectedDoctorId, centerId],
   )
 
   const callNext = useCallback(async () => {
@@ -165,7 +182,7 @@ export function useReceptionQueue() {
     }
 
     try {
-      const { entries: updated } = await api.callNext(selectedDoctorId)
+      const { entries: updated } = await api.callNext(selectedDoctorId, centerId)
       const mappedUpdated = updated.map(fromApiEntry)
       setEntries(prev =>
         [...prev.filter(e => e.doctorId !== selectedDoctorId), ...mappedUpdated].sort(
@@ -177,7 +194,7 @@ export function useReceptionQueue() {
     } finally {
       setCalling(false)
     }
-  }, [offline, selectedDoctorId, waiting.length])
+  }, [offline, selectedDoctorId, waiting.length, centerId])
 
   const completeCurrent = useCallback(async () => {
     if (!current) return
@@ -230,14 +247,14 @@ export function useReceptionQueue() {
   const refresh = useCallback(async () => {
     if (offline) return
     try {
-      const [doctorsRes, queueRes] = await Promise.all([api.getDoctors(), api.getQueue()])
+      const [doctorsRes, queueRes] = await Promise.all([fetchCenterDoctors(), api.getQueue({ centerId })])
       setDoctors(doctorsRes.doctors)
       setEntries(queueRes.entries.map(fromApiEntry))
       setSelectedDoctorId(prev =>
         doctorsRes.doctors.some(d => d.id === prev) ? prev : (doctorsRes.doctors[0]?.id ?? ''),
       )
     } catch { /* silently ignore */ }
-  }, [offline])
+  }, [offline, fetchCenterDoctors])
 
   return {
     // data
@@ -256,6 +273,8 @@ export function useReceptionQueue() {
     loading,
     offline,
     migrationPending,
+    /** The medical center this desk is scoped to; null when the account isn't linked yet. */
+    centerId,
     // flags
     issuing,
     calling,

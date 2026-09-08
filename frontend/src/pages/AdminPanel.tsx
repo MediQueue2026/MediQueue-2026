@@ -86,10 +86,12 @@ const mapApiUserToStaffMember = (user: { id: string; email: string; fullName: st
 
 function AssignedDoctorsDropdown({
   doctors,
+  centerId,
   onRemoveDoctor,
 }: {
   doctors: ApiDoctor[]
-  onRemoveDoctor: (id: string) => void
+  centerId: string
+  onRemoveDoctor: (id: string, centerId: string) => void
 }) {
   const [selectedId, setSelectedId] = useState<string>(doctors[0]?.id ?? '')
 
@@ -109,7 +111,7 @@ function AssignedDoctorsDropdown({
             <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{doc.dept}{doc.room ? ` · ${doc.room}` : ''}</div>
           </div>
           <button
-            onClick={() => onRemoveDoctor(doc.id)}
+            onClick={() => onRemoveDoctor(doc.id, centerId)}
             className="btn btn-ghost btn-sm"
             style={{ minWidth: 110 }}
           >
@@ -158,7 +160,7 @@ function AssignedDoctorsDropdown({
               <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{activeDoc.dept}{activeDoc.room ? ` · ${activeDoc.room}` : ''}</div>
             </div>
             <button
-              onClick={() => onRemoveDoctor(activeDoc.id)}
+              onClick={() => onRemoveDoctor(activeDoc.id, centerId)}
               className="btn btn-ghost btn-sm"
               style={{ minWidth: 110 }}
             >
@@ -532,9 +534,9 @@ export default function AdminPanel() {
     }
   }
 
-  const handleRemoveDoctor = async (doctorId: string) => {
+  const handleRemoveDoctor = async (doctorId: string, centerId: string) => {
     try {
-      await api.updateDoctor(doctorId, { centerId: null })
+      await api.updateDoctor(doctorId, { removeCenterId: centerId })
       const r = await api.getDoctors()
       setDoctors(r.doctors)
     } catch (error) {
@@ -1259,7 +1261,8 @@ export default function AdminPanel() {
 
               <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
                 {centers.map(c => {
-                  const assignedDoctors = doctors.filter(d => d.centerId === c.id)
+                  const assignedDoctors = doctors.filter(d =>
+                    d.centerId === c.id || (d.centers ?? []).some(dc => dc.centerId === c.id))
                   return (
                     <div key={c.id} style={{ background: '#ffffff', borderRadius: 14, padding: 20, border: '1px solid var(--border-md)' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -1320,7 +1323,7 @@ export default function AdminPanel() {
                             <Trash2 size={14} /> Delete Center
                           </button>
                         </div>
-                        <AssignedDoctorsDropdown doctors={assignedDoctors} onRemoveDoctor={handleRemoveDoctor} />
+                        <AssignedDoctorsDropdown doctors={assignedDoctors} centerId={c.id} onRemoveDoctor={handleRemoveDoctor} />
                       </div>
                     </div>
                   )

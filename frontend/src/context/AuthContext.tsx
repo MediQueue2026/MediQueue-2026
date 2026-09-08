@@ -35,6 +35,8 @@ export interface User {
   name: string
   email: string
   role: UserRole
+  /** The medical center a receptionist manages — null until assigned. */
+  centerId?: string | null
   /** True when this session came from the offline demo fallback. */
   isDemo?: boolean
 }
@@ -68,7 +70,7 @@ const DEMO_USERS: Record<Exclude<UserRole, null>, { id: string; name: string; em
 }
 
 function fromApiUser(u: ApiUser): User {
-  return { id: u.id, name: u.fullName, email: u.email, role: u.role }
+  return { id: u.id, name: u.fullName, email: u.email, role: u.role, centerId: u.centerId ?? null }
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

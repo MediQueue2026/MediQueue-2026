@@ -17,7 +17,6 @@ export default function AddDoctorModal({
   centerName: _centerName,
   onCreated,
   editDoctor,
-  allDoctors = [],
 }: {
   isOpen: boolean
   onClose: () => void
@@ -26,8 +25,6 @@ export default function AddDoctorModal({
   onCreated?: (doctor?: ApiDoctor) => void
   /** Pass an existing doctor to switch to edit mode */
   editDoctor?: ApiDoctor | null
-  /** Pass list of all doctors in the system to choose from in "Assign Existing" mode */
-  allDoctors?: ApiDoctor[]
 }) {
   const isEdit = !!editDoctor
 
@@ -51,24 +48,20 @@ export default function AddDoctorModal({
   const [successMsg, setSuccessMsg] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  // System doctors list (fetched if not provided)
-  const [systemDoctors, setSystemDoctors] = useState<ApiDoctor[]>(allDoctors)
+  // Any doctor not already posted to THIS center can be requested for it —
+  // including doctors who already work at other centers.
+  const [systemDoctors, setSystemDoctors] = useState<ApiDoctor[]>([])
 
   useEffect(() => {
-    if (isOpen && !isEdit) {
-      if (allDoctors.length > 0) {
-        setSystemDoctors(allDoctors)
-        setSelectedDoctorId(allDoctors[0]?.id || '')
-      } else {
-        api.getDoctors()
-          .then(res => {
-            setSystemDoctors(res.doctors)
-            if (res.doctors.length > 0) setSelectedDoctorId(res.doctors[0].id)
-          })
-          .catch(() => {})
-      }
+    if (isOpen && !isEdit && centerId) {
+      api.getDoctors({ assignableFor: centerId })
+        .then(res => {
+          setSystemDoctors(res.doctors)
+          setSelectedDoctorId(res.doctors[0]?.id || '')
+        })
+        .catch(() => {})
     }
-  }, [isOpen, isEdit, allDoctors])
+  }, [isOpen, isEdit, centerId])
 
   useEffect(() => {
     if (editDoctor) {
@@ -100,15 +93,23 @@ export default function AddDoctorModal({
   if (!isOpen) return null
 
   const finalSpec = specialization === 'Other' ? customSpec.trim() : specialization
-  const targetCenterId = centerId || 'a1000000-0000-0000-0000-000000000001'
+  // Every request is raised against the receptionist's own medical center.
+  const targetCenterId = centerId || null
+  const noCenter = !isEdit && !targetCenterId
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     setError(null)
     try {
+      if (!isEdit && !targetCenterId) {
+        setError('Your account isn’t linked to a medical center yet. Ask an admin to assign one before requesting doctors.')
+        setSaving(false)
+        return
+      }
       if (isEdit && editDoctor) {
         const res = await api.updateDoctor(editDoctor.id, {
+          centerId: centerId ?? editDoctor.centerId ?? undefined,
           specialization: finalSpec,
           roomNumber: roomNumber.trim() || undefined,
           series: series.trim().toUpperCase() || undefined,
@@ -127,7 +128,7 @@ export default function AddDoctorModal({
 
         await api.createDoctorRequest({
           requestType: 'ASSIGN_EXISTING',
-          centerId: targetCenterId,
+          centerId: targetCenterId!,
           centerName: _centerName || undefined,
           doctorId: selectedDoc.id,
           doctorName: selectedDoc.name,
@@ -149,7 +150,7 @@ export default function AddDoctorModal({
 
         await api.createDoctorRequest({
           requestType: 'REGISTER_NEW',
-          centerId: targetCenterId,
+          centerId: targetCenterId!,
           centerName: _centerName || undefined,
           doctorName: fullName.trim(),
           email: email.trim() || undefined,
@@ -261,7 +262,7 @@ export default function AddDoctorModal({
         )}
 
         {/* Super Admin Approval Info Banner */}
-        {!isEdit && !done && (
+        {!isEdit && !done && !noCenter && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
             background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)',
@@ -269,6 +270,18 @@ export default function AddDoctorModal({
           }}>
             <ShieldAlert size={18} style={{ flexShrink: 0 }} />
             <span>Doctor data will be saved in DB with <strong>Pending Approval</strong> status until approved by the <strong>Super Admin</strong>.</span>
+          </div>
+        )}
+
+        {/* Account not linked to a center — no request can be raised */}
+        {!isEdit && !done && noCenter && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.22)',
+            borderRadius: 10, padding: '10px 14px', marginBottom: 18, fontSize: 12.5, color: '#b91c1c'
+          }}>
+            <ShieldAlert size={18} style={{ flexShrink: 0 }} />
+            <span>Your account isn’t linked to a medical center yet. Ask an admin to assign one before requesting doctors.</span>
           </div>
         )}
 
@@ -289,10 +302,10 @@ export default function AddDoctorModal({
             {/* Mode A: Select Existing Registered Doctor */}
             {!isEdit && mode === 'existing' && (
               <div>
-                <label style={labelStyle}>Select Existing Registered Doctor</label>
+                <label style={labelStyle}>Select a Doctor to Add to This Center</label>
                 {systemDoctors.length === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--text-4)', fontStyle: 'italic', padding: 8 }}>
-                    No existing registered doctors found. Switch to "Register New Doctor".
+                    Every registered doctor is already at this center. Switch to "Register New Doctor".
                   </div>
                 ) : (
                   <select
@@ -301,19 +314,23 @@ export default function AddDoctorModal({
                     onChange={e => {
                       setSelectedDoctorId(e.target.value)
                       const d = systemDoctors.find(doc => doc.id === e.target.value)
-                      if (d) {
-                        setSpecialization(d.dept || 'General Medicine')
-                        if (d.room && d.room !== '—') setRoomNumber(d.room)
-                        if (d.series && d.series !== '?') setSeries(d.series)
-                      }
+                      // Only the specialisation carries over; room + series are
+                      // set fresh for this center below.
+                      if (d) setSpecialization(d.dept || 'General Medicine')
                     }}
                     style={inputStyle}
                   >
-                    {systemDoctors.map(doc => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.name} — {doc.dept} ({doc.centerName || 'Unassigned'})
-                      </option>
-                    ))}
+                    {systemDoctors.map(doc => {
+                      const elsewhere = (doc.centers ?? [])
+                        .map(c => c.centerName)
+                        .filter(Boolean)
+                        .join(', ')
+                      return (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.name} — {doc.dept}{elsewhere ? ` (also at ${elsewhere})` : ''}
+                        </option>
+                      )
+                    })}
                   </select>
                 )}
               </div>
@@ -450,7 +467,7 @@ export default function AddDoctorModal({
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={saving || (!isEdit && mode === 'new' && !fullName.trim())}
+                disabled={saving || noCenter || (!isEdit && mode === 'new' && !fullName.trim())}
                 style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}
               >
                 {saving

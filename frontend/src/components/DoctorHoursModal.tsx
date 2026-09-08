@@ -19,11 +19,14 @@ export default function DoctorHoursModal({
   isOpen,
   onClose,
   doctor,
+  centerId,
   onSaved,
 }: {
   isOpen: boolean
   onClose: () => void
   doctor: ApiDoctor | null
+  /** Hours are per posting — the center this desk manages. */
+  centerId?: string | null
   onSaved?: () => void
 }) {
   const [hours, setHours] = useState<ApiDoctorHour[]>([])
@@ -39,7 +42,7 @@ export default function DoctorHoursModal({
     setLoading(true)
     setDone(false)
     setError(null)
-    api.getDoctorHours(doctor.id)
+    api.getDoctorHours(doctor.id, centerId)
       .then(res => {
         setHours(res.hours)
         setMaxPerHour(res.maxAppointmentsPerHour)
@@ -56,7 +59,7 @@ export default function DoctorHoursModal({
         setMaxPerHour(doctor.maxAppointmentsPerHour ?? 4)
       })
       .finally(() => setLoading(false))
-  }, [isOpen, doctor])
+  }, [isOpen, doctor, centerId])
 
   if (!isOpen || !doctor) return null
 
@@ -93,6 +96,7 @@ export default function DoctorHoursModal({
           isAvailable: h.isAvailable,
         })),
         maxPerHour,
+        centerId,
       )
       setDone(true)
       onSaved?.()

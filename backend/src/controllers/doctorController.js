@@ -4,7 +4,7 @@ import { supabase } from '../config/supabase.js';
 export async function updateDoctorStatus(req, res, next) {
   try {
     const { doctorId } = req.params;
-    const { currentStatus, delayMinutes, roomNumber, doctorName } = req.body;
+    const { currentStatus, delayMinutes, roomNumber, doctorName, centerId } = req.body;
 
     const updates = {};
     if (currentStatus) {
@@ -21,19 +21,45 @@ export async function updateDoctorStatus(req, res, next) {
     const isUuid = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
     if (Object.keys(updates).length > 0 && doctorId && doctorId !== 'undefined') {
-      let query = supabase.from('doctors').update(updates);
+      // Resolve to a real doctors.id (the param may be a user_id).
+      let realDoctorId = null;
       if (isUuid(doctorId)) {
-        query = query.or(`id.eq.${doctorId},user_id.eq.${doctorId}`);
+        const { data: docRow } = await supabase
+          .from('doctors').select('id').or(`id.eq.${doctorId},user_id.eq.${doctorId}`).maybeSingle();
+        realDoctorId = docRow?.id ?? null;
       } else {
         const { data: firstDoc } = await supabase.from('doctors').select('id').limit(1).maybeSingle();
-        if (firstDoc) {
-          query = query.eq('id', firstDoc.id);
-        }
+        realDoctorId = firstDoc?.id ?? null;
       }
 
-      const { error: dbErr } = await query;
-      if (dbErr) {
-        console.warn('Doctor status DB update warning:', dbErr.message);
+      if (realDoctorId) {
+        // Status now lives per posting. Update the assignment for `centerId`, or
+        // the doctor's sole assignment when no center is given.
+        let assignmentQuery = supabase
+          .from('doctor_center_assignments')
+          .select('id')
+          .eq('doctor_id', realDoctorId);
+        if (centerId) assignmentQuery = assignmentQuery.eq('center_id', String(centerId));
+        const { data: assignments } = await assignmentQuery;
+
+        const target = (assignments || []).length === 1 ? assignments[0]
+          : centerId ? (assignments || [])[0]
+          : null;
+
+        if (target) {
+          const { error: dbErr } = await supabase
+            .from('doctor_center_assignments')
+            .update({ ...updates, updated_at: new Date().toISOString() })
+            .eq('id', target.id);
+          if (dbErr) console.warn('Doctor status DB update warning:', dbErr.message);
+        } else if ((assignments || []).length === 0) {
+          // Pre-migration-010 fallback: status still on the doctors row.
+          const { error: dbErr } = await supabase
+            .from('doctors').update(updates).eq('id', realDoctorId);
+          if (dbErr) console.warn('Doctor status DB update warning (legacy):', dbErr.message);
+        } else {
+          console.warn('Doctor status update skipped: doctor has multiple postings but no centerId given', realDoctorId);
+        }
       }
     }
 
@@ -56,47 +82,75 @@ export async function updateDoctorStatus(req, res, next) {
   }
 }
 
+/**
+ * PUT /doctors/:doctorId
+ * `specialization` is doctor-wide; room/series/capacity/status belong to the
+ * doctor's posting at `centerId`, so those are upserted into
+ * `doctor_center_assignments`. `centerId` is required whenever a posting field
+ * is present.
+ */
 export async function updateDoctor(req, res, next) {
   try {
     const { doctorId } = req.params;
-    const updates = {};
+    const centerId = req.body.centerId ? String(req.body.centerId) : null;
 
-    if (req.body.centerId !== undefined) updates.center_id = req.body.centerId;
-    if (typeof req.body.roomNumber === 'string') updates.room_number = req.body.roomNumber;
-    if (typeof req.body.specialization === 'string') updates.specialization = req.body.specialization;
-    if (typeof req.body.currentStatus === 'string') updates.current_status = req.body.currentStatus;
-    if (typeof req.body.maxAppointmentsPerHour === 'number') updates.max_appointments_per_hour = req.body.maxAppointmentsPerHour;
-    if (typeof req.body.series === 'string') updates.series = req.body.series;
+    // Remove a doctor from one center = drop that posting.
+    if (req.body.removeCenterId) {
+      await supabase
+        .from('doctor_center_assignments')
+        .delete()
+        .eq('doctor_id', doctorId).eq('center_id', String(req.body.removeCenterId));
+      return res.json({ message: 'Doctor removed from center' });
+    }
 
-    if (Object.keys(updates).length === 0) {
+    // Doctor-wide field.
+    if (typeof req.body.specialization === 'string') {
+      await supabase.from('doctors').update({ specialization: req.body.specialization }).eq('id', doctorId);
+    }
+
+    // Per-center posting fields.
+    const posting = {};
+    if (typeof req.body.roomNumber === 'string') posting.room_number = req.body.roomNumber;
+    if (typeof req.body.series === 'string') posting.series = req.body.series;
+    if (typeof req.body.currentStatus === 'string') posting.current_status = req.body.currentStatus;
+    if (typeof req.body.maxAppointmentsPerHour === 'number') posting.max_appointments_per_hour = req.body.maxAppointmentsPerHour;
+
+    if (Object.keys(posting).length > 0) {
+      if (!centerId) {
+        return res.status(400).json({ error: 'centerId is required to update a doctor’s room, series, capacity or status.' });
+      }
+      const { data: existing } = await supabase
+        .from('doctor_center_assignments')
+        .select('id')
+        .eq('doctor_id', doctorId).eq('center_id', centerId)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase
+          .from('doctor_center_assignments')
+          .update({ ...posting, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+      } else {
+        await supabase
+          .from('doctor_center_assignments')
+          .insert([{ doctor_id: doctorId, center_id: centerId, approval_status: 'approved', ...posting }]);
+      }
+    } else if (Object.keys(posting).length === 0 && typeof req.body.specialization !== 'string') {
       return res.status(400).json({ error: 'No valid fields provided for update' });
     }
 
-    const { data, error } = await supabase
+    // Return the doctor flattened to the affected center (or first posting).
+    const { data: d } = await supabase
       .from('doctors')
-      .update(updates)
+      .select('*, users(full_name, email, phone), doctor_center_assignments(*, medical_centers(id, name))')
       .eq('id', doctorId)
-      .select('id, specialization, room_number, current_status, max_appointments_per_hour, available_hours, series, center_id, medical_centers(name), users(full_name)')
       .single();
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
+    const assignments = Array.isArray(d?.doctor_center_assignments) ? d.doctor_center_assignments : [];
+    const centersList = assignments.map(mapAssignment);
+    const postingObj = centersList.find(c => c.centerId === centerId) ?? centersList[0] ?? null;
 
-    const doctor = {
-      id: data.id,
-      name: data.users?.full_name ?? 'Unknown Doctor',
-      dept: data.specialization,
-      room: data.room_number ?? '—',
-      series: data.series ?? '?',
-      status: data.current_status ?? 'active',
-      avgConsultMinutes: Math.max(1, Math.round(60 / (data.max_appointments_per_hour || 4))),
-      maxAppointmentsPerHour: data.max_appointments_per_hour ?? 4,
-      centerId: data.center_id ?? null,
-      centerName: data.medical_centers?.name ?? null,
-    };
-
-    res.json({ message: 'Doctor updated successfully', doctor });
+    res.json({ message: 'Doctor updated successfully', doctor: mapDoctor(d, postingObj, centersList) });
   } catch (err) {
     next(err);
   }
@@ -576,22 +630,45 @@ export async function rejectDoctor(req, res, next) {
 /**
  * GET /doctors/:doctorId/hours
  */
+/** Resolves the posting to read/write hours against: the one for `centerId`, or
+ *  the doctor's sole assignment. Returns null when it can't be pinned down. */
+async function resolveHoursAssignment(doctorId, centerId) {
+  let q = supabase
+    .from('doctor_center_assignments')
+    .select('id, available_hours, max_appointments_per_hour, center_id')
+    .eq('doctor_id', doctorId);
+  if (centerId) q = q.eq('center_id', String(centerId));
+  const { data } = await q;
+  if (!data || data.length === 0) return null;
+  if (data.length === 1) return data[0];
+  return centerId ? data[0] : null;
+}
+
 export async function getDoctorHours(req, res, next) {
   try {
     const { doctorId } = req.params;
+    const centerId = req.query.centerId ? String(req.query.centerId) : null;
 
-    const { data, error } = await supabase
-      .from('doctors')
-      .select('available_hours, max_appointments_per_hour')
-      .eq('id', doctorId)
-      .single();
+    const assignment = await resolveHoursAssignment(doctorId, centerId);
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    let maxPerHour = 4;
+    let stored = {};
+    if (assignment) {
+      maxPerHour = assignment.max_appointments_per_hour ?? 4;
+      stored = assignment.available_hours ?? {};
+    } else {
+      // Legacy fallback: hours still on the doctors row (pre multi-center split).
+      const { data, error } = await supabase
+        .from('doctors')
+        .select('available_hours, max_appointments_per_hour')
+        .eq('id', doctorId)
+        .single();
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+      maxPerHour = data?.max_appointments_per_hour ?? 4;
+      stored = data?.available_hours ?? {};
     }
-
-    const maxPerHour = data?.max_appointments_per_hour ?? 4;
-    const stored = data?.available_hours ?? {};
 
     const allDays = Array.from({ length: 7 }, (_, dow) => {
       const key = String(dow);
@@ -630,7 +707,7 @@ export async function getDoctorHours(req, res, next) {
 export async function upsertDoctorHours(req, res, next) {
   try {
     const { doctorId } = req.params;
-    const { hours, maxAppointmentsPerHour } = req.body;
+    const { hours, maxAppointmentsPerHour, centerId } = req.body;
 
     if (!Array.isArray(hours) || hours.length === 0) {
       return res.status(400).json({ error: 'hours array is required' });
@@ -650,6 +727,20 @@ export async function upsertDoctorHours(req, res, next) {
       updates.max_appointments_per_hour = maxAppointmentsPerHour;
     }
 
+    const assignment = await resolveHoursAssignment(doctorId, centerId);
+
+    if (assignment) {
+      const { data, error } = await supabase
+        .from('doctor_center_assignments')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', assignment.id)
+        .select('available_hours, max_appointments_per_hour')
+        .single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ message: 'Doctor hours updated successfully', available_hours: data?.available_hours });
+    }
+
+    // Legacy fallback: write back to the doctors row.
     const { data, error } = await supabase
       .from('doctors')
       .update(updates)
@@ -679,68 +770,146 @@ const FALLBACK_DOCTORS = [
   { id: 'doc-3', name: 'Dr. Sofia Montoya', dept: 'Pediatrics', room: 'Room 11', series: 'C', status: 'delayed', avgConsultMinutes: 15, maxAppointmentsPerHour: 4 },
 ];
 
+/**
+ * Shapes one `doctor_center_assignments` row into the per-center object the
+ * frontend `ApiDoctor.centers[]` expects.
+ */
+function mapAssignment(a) {
+  return {
+    assignmentId: a.id,
+    centerId: a.center_id,
+    centerName: a.medical_centers?.name ?? null,
+    room: a.room_number ?? '—',
+    series: a.series ?? '?',
+    status: a.current_status ?? 'active',
+    delayMinutes: a.delay_minutes ?? 0,
+    maxAppointmentsPerHour: a.max_appointments_per_hour ?? 4,
+    approvalStatus: a.approval_status ?? 'approved',
+  };
+}
+
+/**
+ * Builds the flat `ApiDoctor` object. `posting` is the assignment whose
+ * room/series/status get hoisted to the top level (the one for the center the
+ * caller scoped to, or the doctor's first assignment). Legacy `doctors.*`
+ * columns are the fallback for rows created before the multi-center split.
+ */
+function mapDoctor(d, posting, centersList) {
+  const u = d.users;
+  const maxPerHour = posting?.maxAppointmentsPerHour ?? d.max_appointments_per_hour ?? 4;
+  return {
+    id: d.id,
+    userId: d.user_id,
+    name: u?.full_name ?? 'Unknown Doctor',
+    email: u?.email ?? null,
+    phone: u?.phone ?? null,
+    dept: d.specialization || 'General Medicine',
+    specialization: d.specialization || 'General Medicine',
+    room: posting?.room ?? d.room_number ?? '—',
+    series: posting?.series ?? d.series ?? '?',
+    status: posting?.status ?? d.current_status ?? 'active',
+    currentStatus: posting?.status ?? d.current_status ?? 'active',
+    approvalStatus: d.approval_status ?? 'approved',
+    requestedByName: d.requested_by_name ?? null,
+    rejectionReason: d.rejection_reason ?? null,
+    delayMinutes: posting?.delayMinutes ?? d.delay_minutes ?? 0,
+    avgConsultMinutes: Math.max(1, Math.round(60 / (maxPerHour || 4))),
+    maxAppointmentsPerHour: maxPerHour,
+    centerId: posting?.centerId ?? null,
+    centerName: posting?.centerName ?? null,
+    centers: centersList,
+  };
+}
+
 export async function getDoctors(req, res, next) {
   try {
     const includePending = req.query.includePending === 'true' || req.query.all === 'true';
 
-    let query = supabase
+    // Reception Desk scoping (all optional; none = full public roster):
+    //   ?centerId=<uuid>       → doctors with an assignment at that center,
+    //                            flattened to THAT center's room/series/status.
+    //   ?assignableFor=<uuid>  → doctors NOT yet assigned to that center
+    //                            (may work elsewhere) — the "Add Existing" pool.
+    //   ?unassigned=true       → doctors with no center assignment anywhere.
+    const centerFilter = req.query.centerId ? String(req.query.centerId) : null;
+    const assignableFor = req.query.assignableFor ? String(req.query.assignableFor) : null;
+    const unassignedOnly = req.query.unassigned === 'true';
+    const isScoped = !!centerFilter || !!assignableFor || unassignedOnly;
+
+    let { data: doctorsData, error: dErr } = await supabase
       .from('doctors')
-      .select('*, medical_centers(id, name), users(full_name, email, phone)');
+      .select('*, users(full_name, email, phone), medical_centers(id, name), doctor_center_assignments(*, medical_centers(id, name))');
 
-    if (!includePending) {
-      // By default, show approved doctors or those with null approval_status (legacy seed data)
-      query = query.or('approval_status.eq.approved,approval_status.is.null');
-    }
-
-    let { data: doctorsData, error: dErr } = await query;
-
-    if (dErr && (dErr.message.includes('approval_status') || dErr.code === 'PGRST204')) {
-      const fallbackQuery = await supabase
-        .from('doctors')
-        .select('*, medical_centers(id, name), users(full_name, email, phone)');
-      doctorsData = fallbackQuery.data;
-      dErr = fallbackQuery.error;
-    }
-
+    // Migration 010 not applied yet: retry without the assignments embed so the
+    // roster still loads off the legacy `doctors.center_id` column.
     if (dErr) {
       console.warn('Doctors fetch warning:', dErr.message);
+      const legacy = await supabase
+        .from('doctors')
+        .select('*, users(full_name, email, phone), medical_centers(id, name)');
+      doctorsData = (legacy.data || []).map(d => ({ ...d, doctor_center_assignments: [] }));
+    }
+
+    // A doctor assigned the old way (doctors.center_id, no assignment row) is
+    // treated as one implicit approved posting, so both models work at once.
+    const legacyPosting = (d) => (d.center_id ? {
+      assignmentId: null,
+      centerId: d.center_id,
+      centerName: d.medical_centers?.name ?? null,
+      room: d.room_number ?? '—',
+      series: d.series ?? '?',
+      status: d.current_status ?? 'active',
+      delayMinutes: d.delay_minutes ?? 0,
+      maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
+      approvalStatus: d.approval_status ?? 'approved',
+    } : null);
+
+    if (doctorsData && doctorsData.length > 0) {
+      const out = [];
+
+      for (const d of doctorsData) {
+        const doctorApproved = !d.approval_status || d.approval_status === 'approved';
+        if (!includePending && !doctorApproved) continue;
+
+        const allAssignments = Array.isArray(d.doctor_center_assignments) ? d.doctor_center_assignments : [];
+        const visibleAssignments = includePending
+          ? allAssignments
+          : allAssignments.filter(a => !a.approval_status || a.approval_status === 'approved');
+        let centersList = visibleAssignments.map(mapAssignment);
+        if (centersList.length === 0 && legacyPosting(d)) centersList = [legacyPosting(d)];
+
+        const postedCenterIds = new Set([
+          ...allAssignments.map(a => a.center_id),
+          ...(d.center_id ? [d.center_id] : []),
+        ]);
+
+        if (centerFilter) {
+          const posting = centersList.find(c => c.centerId === centerFilter);
+          if (!posting) continue;
+          out.push(mapDoctor(d, posting, centersList));
+        } else if (assignableFor) {
+          if (postedCenterIds.has(assignableFor) || !doctorApproved) continue;
+          out.push(mapDoctor(d, null, centersList));
+        } else if (unassignedOnly) {
+          if (postedCenterIds.size > 0) continue;
+          out.push(mapDoctor(d, null, centersList));
+        } else {
+          out.push(mapDoctor(d, centersList[0] ?? null, centersList));
+        }
+      }
+
+      return res.json({ doctors: out });
+    }
+
+    // Scoped queries must not fall back to an unfiltered roster.
+    if (isScoped) {
+      return res.json({ doctors: [] });
     }
 
     const { data: usersData } = await supabase
       .from('users')
       .select('id, full_name, email, phone')
       .eq('role', 'doctor');
-
-    const userMap = new Map((usersData || []).map(u => [u.id, u]));
-
-    if (doctorsData && doctorsData.length > 0) {
-      const mapped = doctorsData.map(d => {
-        const u = userMap.get(d.user_id) || d.users;
-        return {
-          id: d.id,
-          userId: d.user_id,
-          name: u?.full_name ?? d.users?.full_name ?? 'Unknown Doctor',
-          email: u?.email ?? d.users?.email ?? null,
-          phone: u?.phone ?? d.users?.phone ?? null,
-          dept: d.specialization || 'General Medicine',
-          specialization: d.specialization || 'General Medicine',
-          room: d.room_number ?? '—',
-          series: d.series ?? '?',
-          status: d.current_status ?? 'active',
-          currentStatus: d.current_status ?? 'active',
-          approvalStatus: d.approval_status ?? 'approved',
-          requestedByName: d.requested_by_name ?? null,
-          rejectionReason: d.rejection_reason ?? null,
-          delayMinutes: d.delay_minutes ?? 0,
-          avgConsultMinutes: Math.max(1, Math.round(60 / (d.max_appointments_per_hour || 4))),
-          maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
-          centerId: d.center_id ?? d.medical_centers?.id ?? 'a1000000-0000-0000-0000-000000000001',
-          centerName: d.medical_centers?.name ?? 'MediQueue Central Clinic'
-        };
-      });
-
-      return res.json({ doctors: mapped });
-    }
 
     if (usersData && usersData.length > 0) {
       const mappedFromUsers = usersData.map((u, i) => ({
@@ -757,14 +926,15 @@ export async function getDoctors(req, res, next) {
         approvalStatus: 'approved',
         avgConsultMinutes: 15,
         maxAppointmentsPerHour: 4,
-        centerId: 'a1000000-0000-0000-0000-000000000001',
-        centerName: 'MediQueue Central Clinic'
+        centerId: null,
+        centerName: null,
+        centers: [],
       }));
 
       return res.json({ doctors: mappedFromUsers });
     }
 
-    res.json({ doctors: FALLBACK_DOCTORS.map(d => ({ ...d, approvalStatus: 'approved' })) });
+    res.json({ doctors: FALLBACK_DOCTORS.map(d => ({ ...d, approvalStatus: 'approved', centerId: null, centerName: null, centers: [] })) });
   } catch (err) {
     next(err);
   }
