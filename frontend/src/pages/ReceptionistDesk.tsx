@@ -15,7 +15,6 @@ import {
   averageWaitMinutes, waitingFor
 } from '../lib/receptionQueue'
 import type { TokenSource } from '../lib/receptionQueue'
-import { api } from '../lib/api'
 import type { ApiDoctor } from '../lib/api'
 
 
@@ -249,8 +248,45 @@ export default function ReceptionistDesk() {
             </div>
           )}
 
-          {/* CHECK-IN & COUNTER QUEUE TAB */}
-          {activeTab === 'checkin' && (
+          {!queue.offline && !queue.loading && !queue.centerId && (
+            <div style={{ padding: '14px 24px 0' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600,
+                color: 'var(--crimson)', background: 'var(--crimson-dim)', border: '1px solid var(--crimson-border)',
+                borderRadius: 9, padding: '9px 14px',
+              }}>
+                <AlertCircle size={14} />
+                Your account isn't linked to a medical center yet, so no doctors are shown. Ask an admin to assign your desk to a center.
+              </div>
+            </div>
+          )}
+
+          {/* CHECK-IN & COUNTER QUEUE TAB — nothing to issue against until a
+              doctor is assigned to this receptionist's medical center. */}
+          {activeTab === 'checkin' && !queue.loading && queue.doctors.length === 0 && (
+            <div style={{ padding: '24px 24px 36px' }}>
+              <div style={{
+                textAlign: 'center', padding: '64px 24px',
+                background: 'rgba(255,255,255,0.5)', borderRadius: 16,
+                border: '1.5px dashed var(--border-md)',
+              }}>
+                <Stethoscope size={40} style={{ margin: '0 auto 16px', color: 'var(--text-4)' }} />
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-2)' }}>No doctors assigned to your center</div>
+                <div style={{ fontSize: 13, color: 'var(--text-4)', marginTop: 4, maxWidth: 380, marginInline: 'auto' }}>
+                  Tokens are issued per doctor. Request a doctor from the Doctors tab and issue tokens once an admin approves the assignment.
+                </div>
+                <button
+                  onClick={() => setActiveTab('doctors')}
+                  className="btn btn-primary"
+                  style={{ gap: 7, padding: '0 16px', height: 38, fontSize: 13, marginTop: 18 }}
+                >
+                  <Stethoscope size={14} /> Go to Doctors
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'checkin' && queue.doctors.length > 0 && (
             <>
               {/* QUEUE HEADER — switch doctors here without leaving the tab */}
               <div style={{ padding: '24px 24px 0', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -676,16 +712,16 @@ export default function ReceptionistDesk() {
                 <AddDoctorModal
                   isOpen={showAddDoctor || !!editingDoctor}
                   onClose={() => { setShowAddDoctor(false); setEditingDoctor(null) }}
-                  centerId={queue.doctors[0]?.centerId ?? null}
-                  centerName={queue.doctors[0]?.centerName ?? 'Central Clinic'}
+                  centerId={queue.centerId}
+                  centerName={queue.doctors[0]?.centerName ?? undefined}
                   editDoctor={editingDoctor}
-                  allDoctors={queue.doctors}
                   onCreated={() => queue.refresh()}
                 />
                 <DoctorHoursModal
                   isOpen={!!hoursDoctor}
                   onClose={() => setHoursDoctor(null)}
                   doctor={hoursDoctor}
+                  centerId={queue.centerId}
                   onSaved={() => queue.refresh()}
                 />
 

@@ -138,100 +138,89 @@ export async function approveDoctorRequest(req, res, next) {
       return res.status(400).json({ error: 'Request is already approved' });
     }
 
-    let createdDoctor = null;
+    // The person: an existing doctors row for ASSIGN_EXISTING, or a fresh
+    // identity row for REGISTER_NEW. The posting (room / series / capacity for
+    // THIS center) always goes into doctor_center_assignments below.
+    let doctorId = null;
+    let doctorRow = null;
 
     if (reqRecord.request_type === 'ASSIGN_EXISTING' && reqRecord.doctor_id) {
-      // Update existing doctor profile
-      const updates = {
-        center_id: reqRecord.center_id,
-        room_number: reqRecord.room_number,
-        series: reqRecord.series,
-        specialization: reqRecord.specialization,
-        max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
-        approval_status: 'approved',
-      };
-
-      let { data: updatedDoc, error: updateErr } = await supabase
-        .from('doctors')
-        .update(updates)
-        .eq('id', reqRecord.doctor_id)
-        .select('*, medical_centers(name), users(full_name)')
-        .maybeSingle();
-
-      if (updateErr && (updateErr.message.includes('approval_status') || updateErr.code === 'PGRST204')) {
-        delete updates.approval_status;
-        const fb = await supabase
-          .from('doctors')
-          .update(updates)
-          .eq('id', reqRecord.doctor_id)
-          .select('*, medical_centers(name), users(full_name)')
-          .maybeSingle();
-        updatedDoc = fb.data;
+      doctorId = reqRecord.doctor_id;
+      // Keep specialization on the identity row current.
+      if (reqRecord.specialization) {
+        await supabase.from('doctors').update({ specialization: reqRecord.specialization }).eq('id', doctorId);
       }
-
-      createdDoctor = updatedDoc;
+      const { data } = await supabase
+        .from('doctors').select('*, users(full_name)').eq('id', doctorId).maybeSingle();
+      doctorRow = data;
     } else {
       // REGISTER_NEW doctor
       const emailToUse = reqRecord.email || `dr.${reqRecord.doctor_name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
 
-      // 1. Create or find user stub
       let userId = null;
       const { data: existingUser } = await supabase
-        .from('users')
-        .select('id')
-        .eq('email', emailToUse)
-        .maybeSingle();
+        .from('users').select('id').eq('email', emailToUse).maybeSingle();
 
       if (existingUser) {
         userId = existingUser.id;
       } else {
         const { data: newUser, error: userErr } = await supabase
           .from('users')
-          .insert([{
-            email: emailToUse,
-            full_name: reqRecord.doctor_name,
-            phone: reqRecord.phone || null,
-            role: 'doctor',
-          }])
+          .insert([{ email: emailToUse, full_name: reqRecord.doctor_name, phone: reqRecord.phone || null, role: 'doctor' }])
           .select('id')
           .single();
-
-        if (!userErr && newUser) {
-          userId = newUser.id;
-        }
+        if (!userErr && newUser) userId = newUser.id;
       }
 
       if (userId) {
-        const insertPayload = {
-          user_id: userId,
-          center_id: reqRecord.center_id,
-          specialization: reqRecord.specialization,
-          room_number: reqRecord.room_number || null,
-          series: reqRecord.series || null,
-          max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
-          current_status: 'active',
-          approval_status: 'approved',
-        };
-
-        let { data: newDocProfile, error: docErr } = await supabase
+        // Identity row only — no center/room/series on doctors anymore.
+        const { data: newDocProfile } = await supabase
           .from('doctors')
-          .insert([insertPayload])
-          .select('*, medical_centers(name), users(full_name)')
+          .insert([{ user_id: userId, specialization: reqRecord.specialization, approval_status: 'approved' }])
+          .select('*, users(full_name)')
           .single();
-
-        if (docErr && (docErr.message.includes('approval_status') || docErr.code === 'PGRST204')) {
-          delete insertPayload.approval_status;
-          const fb = await supabase
-            .from('doctors')
-            .insert([insertPayload])
-            .select('*, medical_centers(name), users(full_name)')
-            .single();
-          newDocProfile = fb.data;
-        }
-
-        createdDoctor = newDocProfile;
+        doctorRow = newDocProfile;
+        doctorId = newDocProfile?.id ?? null;
       }
     }
+
+    // Upsert the per-center posting.
+    let assignmentRow = null;
+    if (doctorId && reqRecord.center_id) {
+      const postingFields = {
+        room_number: reqRecord.room_number || null,
+        series: reqRecord.series || null,
+        max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
+        current_status: 'active',
+        approval_status: 'approved',
+        requested_by_name: reqRecord.receptionist_name || null,
+        updated_at: new Date().toISOString(),
+      };
+      const { data: existingAssignment } = await supabase
+        .from('doctor_center_assignments')
+        .select('id')
+        .eq('doctor_id', doctorId).eq('center_id', reqRecord.center_id)
+        .maybeSingle();
+
+      if (existingAssignment) {
+        const { data } = await supabase
+          .from('doctor_center_assignments')
+          .update(postingFields)
+          .eq('id', existingAssignment.id)
+          .select('*, medical_centers(name)')
+          .maybeSingle();
+        assignmentRow = data;
+      } else {
+        const { data } = await supabase
+          .from('doctor_center_assignments')
+          .insert([{ doctor_id: doctorId, center_id: reqRecord.center_id, ...postingFields }])
+          .select('*, medical_centers(name)')
+          .maybeSingle();
+        assignmentRow = data;
+      }
+    }
+
+    const createdDoctor = doctorRow ? { ...doctorRow, __assignment: assignmentRow } : null;
 
     // Update status in DB / memory
     if (dbReq) {
@@ -265,19 +254,23 @@ export async function approveDoctorRequest(req, res, next) {
       message: 'Doctor request approved successfully',
       requestId: id,
       status: 'approved',
-      doctor: createdDoctor ? {
-        id: createdDoctor.id,
-        name: createdDoctor.users?.full_name ?? reqRecord.doctor_name,
-        dept: createdDoctor.specialization,
-        room: createdDoctor.room_number ?? '—',
-        series: createdDoctor.series ?? '?',
-        status: createdDoctor.current_status ?? 'active',
-        approvalStatus: 'approved',
-        avgConsultMinutes: Math.max(1, Math.round(60 / (createdDoctor.max_appointments_per_hour || 4))),
-        maxAppointmentsPerHour: createdDoctor.max_appointments_per_hour ?? 4,
-        centerId: createdDoctor.center_id,
-        centerName: createdDoctor.medical_centers?.name ?? reqRecord.center_name,
-      } : null,
+      doctor: createdDoctor ? (() => {
+        const a = createdDoctor.__assignment;
+        const maxPerHour = a?.max_appointments_per_hour ?? reqRecord.max_appointments_per_hour ?? 4;
+        return {
+          id: createdDoctor.id,
+          name: createdDoctor.users?.full_name ?? reqRecord.doctor_name,
+          dept: createdDoctor.specialization,
+          room: a?.room_number ?? reqRecord.room_number ?? '—',
+          series: a?.series ?? reqRecord.series ?? '?',
+          status: a?.current_status ?? 'active',
+          approvalStatus: 'approved',
+          avgConsultMinutes: Math.max(1, Math.round(60 / (maxPerHour || 4))),
+          maxAppointmentsPerHour: maxPerHour,
+          centerId: a?.center_id ?? reqRecord.center_id,
+          centerName: a?.medical_centers?.name ?? reqRecord.center_name,
+        };
+      })() : null,
     });
   } catch (err) {
     next(err);

@@ -8,12 +8,15 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Maps a `walk_in_queue` row (joined to its doctor's series letter) onto the shape the Reception Desk expects. */
-function mapEntry(row) {
+/** Maps a `walk_in_queue` row onto the shape the Reception Desk expects.
+ *  `seriesOverride` is the per-(doctor, center) token letter; falls back to the
+ *  legacy `doctors.series` for rows/doctors created before the multi-center split. */
+function mapEntry(row, seriesOverride) {
   return {
     id: row.id,
     doctorId: row.doctor_id,
-    series: row.doctors?.series ?? '?',
+    centerId: row.center_id ?? undefined,
+    series: seriesOverride ?? row.doctors?.series ?? '?',
     tokenNumber: row.queue_number,
     patientName: row.patient_name,
     nic: row.nic ?? undefined,
@@ -23,6 +26,35 @@ function mapEntry(row) {
     issuedAt: row.checked_in_at,
     calledAt: row.called_at ?? undefined,
   };
+}
+
+/** series letter for a (doctor, center) posting, or null. */
+async function seriesForDoctorCenter(doctorId, centerId) {
+  if (!doctorId || !centerId) return null;
+  const { data } = await supabase
+    .from('doctor_center_assignments')
+    .select('series')
+    .eq('doctor_id', doctorId).eq('center_id', centerId)
+    .maybeSingle();
+  return data?.series ?? null;
+}
+
+/** Map of `${doctorId}_${centerId}` → series, for a batch of queue rows. */
+async function seriesMapFor(rows) {
+  const pairs = [...new Set(
+    (rows || [])
+      .filter(r => r.doctor_id && r.center_id)
+      .map(r => `${r.doctor_id}::${r.center_id}`),
+  )];
+  if (pairs.length === 0) return new Map();
+  const doctorIds = [...new Set(pairs.map(p => p.split('::')[0]))];
+  const { data } = await supabase
+    .from('doctor_center_assignments')
+    .select('doctor_id, center_id, series')
+    .in('doctor_id', doctorIds);
+  const m = new Map();
+  for (const a of data || []) m.set(`${a.doctor_id}_${a.center_id}`, a.series);
+  return m;
 }
 
 /**
@@ -178,27 +210,37 @@ export async function getPublicBoard(req, res, next) {
 export async function getQueue(req, res, next) {
   try {
     const date = req.query.date || todayDate();
+    // Reception Desk passes its center so a doctor working at several centers
+    // shows an independent queue per desk.
+    const centerFilter = req.query.centerId ? String(req.query.centerId) : null;
 
     // Query walk-in tokens for today OR active/cancelled/left tokens
-    const { data: queueData, error } = await supabase
+    let walkinQuery = supabase
       .from('walk_in_queue')
       .select('*, doctors(series, user_id)')
       .or(`queue_date.eq.${date},status.in.(waiting,called,in_progress,cancelled,left)`)
       .order('queue_number', { ascending: true });
+    if (centerFilter) walkinQuery = walkinQuery.eq('center_id', centerFilter);
+    const { data: queueData, error } = await walkinQuery;
 
     if (error && error.code === TABLE_MISSING) {
       return res.json({ entries: [], migrationPending: true });
     }
 
     // Query online appointments for today OR active/cancelled appointments
-    const { data: aptData } = await supabase
+    let aptQuery = supabase
       .from('appointments')
       .select('*, doctors(series, user_id), users:patient_id(full_name, phone, nic)')
       .or(`appointment_date.eq.${date},status.in.(booked,cancelled)`);
+    if (centerFilter) aptQuery = aptQuery.eq('center_id', centerFilter);
+    const { data: aptData } = await aptQuery;
+
+    const seriesMap = await seriesMapFor([...(queueData || []), ...(aptData || [])]);
+    const seriesFor = (row) => seriesMap.get(`${row.doctor_id}_${row.center_id}`) ?? row.doctors?.series ?? '?';
 
     const combinedMap = new Map();
     (queueData || []).forEach(r => {
-      const entry = mapEntry(r);
+      const entry = mapEntry(r, seriesFor(r));
       if (entry.status === 'left') {
         entry.status = 'cancelled';
       }
@@ -218,7 +260,8 @@ export async function getQueue(req, res, next) {
         combinedMap.set(key, {
           id: a.id,
           doctorId: a.doctor_id,
-          series: a.doctors?.series ?? '?',
+          centerId: a.center_id ?? undefined,
+          series: seriesFor(a),
           tokenNumber: a.queue_number,
           patientName: a.users?.full_name || 'Online Patient',
           nic: a.users?.nic || undefined,
@@ -245,7 +288,7 @@ export async function getQueue(req, res, next) {
  */
 export async function issueWalkinToken(req, res, next) {
   try {
-    const { doctorId, patientName, nic, phone, source, tokenNumber } = req.body;
+    const { doctorId, centerId, patientName, nic, phone, source, tokenNumber } = req.body;
     const name = (patientName || '').trim();
 
     if (!name) { res.status(400); throw new Error('Patient name is required.'); }
@@ -253,6 +296,9 @@ export async function issueWalkinToken(req, res, next) {
 
     const today = todayDate();
     const isPhysical = source === 'physical';
+    // A doctor can work at several centers with independent number runs; scope
+    // dup-check and auto-numbering to this center when one is given.
+    const centerScope = centerId ? String(centerId) : null;
     let queueNumber;
 
     if (isPhysical) {
@@ -260,19 +306,22 @@ export async function issueWalkinToken(req, res, next) {
       if (!Number.isInteger(queueNumber) || queueNumber < 1) {
         res.status(400); throw new Error('Enter the number printed on the paper token.');
       }
-      const { data: existing } = await supabase
+      let existingQuery = supabase
         .from('walk_in_queue')
         .select('id')
-        .eq('doctor_id', doctorId).eq('queue_date', today).eq('queue_number', queueNumber)
-        .maybeSingle();
+        .eq('doctor_id', doctorId).eq('queue_date', today).eq('queue_number', queueNumber);
+      if (centerScope) existingQuery = existingQuery.eq('center_id', centerScope);
+      const { data: existing } = await existingQuery.maybeSingle();
       if (existing) {
         res.status(409); throw new Error(`Token number ${queueNumber} has already been issued today.`);
       }
     } else {
-      const { data: maxRow } = await supabase
+      let maxQuery = supabase
         .from('walk_in_queue')
         .select('queue_number')
-        .eq('doctor_id', doctorId).eq('queue_date', today)
+        .eq('doctor_id', doctorId).eq('queue_date', today);
+      if (centerScope) maxQuery = maxQuery.eq('center_id', centerScope);
+      const { data: maxRow } = await maxQuery
         .order('queue_number', { ascending: false })
         .limit(1).maybeSingle();
       queueNumber = (maxRow?.queue_number ?? 0) + 1;
@@ -282,6 +331,7 @@ export async function issueWalkinToken(req, res, next) {
       .from('walk_in_queue')
       .insert([{
         doctor_id: doctorId,
+        center_id: centerScope,
         patient_name: name,
         nic: nic?.trim() || null,
         sms_phone: phone?.trim() || null,
@@ -300,19 +350,20 @@ export async function issueWalkinToken(req, res, next) {
       throw insertErr;
     }
 
+    const seriesLetter = (await seriesForDoctorCenter(doctorId, centerScope)) || inserted?.doctors?.series || 'A';
+
     const targetPhone = phone?.trim() || null;
     if (targetPhone) {
-      const seriesLetter = inserted?.doctors?.series || 'A';
       const formattedToken = `#${seriesLetter}-${String(queueNumber).padStart(2, '0')}`;
       const smsMessage = `MediQueue: Token ${formattedToken} issued for ${name}. Track live queue status in your dashboard. Thank you!`;
-      
+
       // Send Text.lk SMS non-blocking
       notificationProvider.sendSMS(targetPhone, smsMessage).catch(e => {
         console.warn('[TOKEN SMS DISPATCH ERROR]', e);
       });
     }
 
-    res.status(201).json({ entry: mapEntry(inserted) });
+    res.status(201).json({ entry: mapEntry(inserted, seriesLetter) });
   } catch (err) {
     next(err);
   }
@@ -323,22 +374,24 @@ export async function issueWalkinToken(req, res, next) {
  */
 export async function callNextPatient(req, res, next) {
   try {
-    const { doctorId } = req.body;
+    const { doctorId, centerId } = req.body;
     if (!doctorId) { res.status(400); throw new Error('doctorId is required.'); }
     const today = todayDate();
+    const centerScope = centerId ? String(centerId) : null;
+    const scoped = (q) => (centerScope ? q.eq('center_id', centerScope) : q);
 
-    const { data: live } = await supabase
+    const { data: live } = await scoped(supabase
       .from('walk_in_queue').select('id')
       .eq('doctor_id', doctorId).eq('queue_date', today)
-      .in('status', ['called', 'in_progress']);
+      .in('status', ['called', 'in_progress']));
 
     if (live && live.length > 0) {
       await supabase.from('walk_in_queue').update({ status: 'completed' }).in('id', live.map(r => r.id));
     }
 
-    const { data: nextWaiting } = await supabase
+    const { data: nextWaiting } = await scoped(supabase
       .from('walk_in_queue').select('id')
-      .eq('doctor_id', doctorId).eq('queue_date', today).eq('status', 'waiting')
+      .eq('doctor_id', doctorId).eq('queue_date', today).eq('status', 'waiting'))
       .order('queue_number', { ascending: true })
       .limit(1).maybeSingle();
 
@@ -351,8 +404,18 @@ export async function callNextPatient(req, res, next) {
 
       if (calledRow && calledRow.sms_phone) {
         const docName = calledRow.doctors?.users?.full_name || 'your doctor';
-        const roomStr = calledRow.doctors?.room_number ? ` (Room ${calledRow.doctors.room_number})` : '';
-        const seriesLetter = calledRow.doctors?.series || 'A';
+        const postingCenter = calledRow.center_id || centerScope || null;
+        let posting = { data: null };
+        if (postingCenter) {
+          posting = await supabase
+            .from('doctor_center_assignments')
+            .select('series, room_number')
+            .eq('doctor_id', doctorId).eq('center_id', postingCenter)
+            .maybeSingle();
+        }
+        const roomStr = (posting.data?.room_number ?? calledRow.doctors?.room_number)
+          ? ` (Room ${posting.data?.room_number ?? calledRow.doctors.room_number})` : '';
+        const seriesLetter = posting.data?.series || calledRow.doctors?.series || 'A';
         const tokenStr = `#${seriesLetter}-${String(calledRow.queue_number).padStart(2, '0')}`;
 
         const callMsg = `MediQueue Alert: Token ${tokenStr} is NOW CALLED for ${docName}${roomStr}. Please proceed to consultation room immediately.`;
@@ -360,13 +423,17 @@ export async function callNextPatient(req, res, next) {
       }
     }
 
-    const { data: updated, error } = await supabase
+    const { data: updated, error } = await scoped(supabase
       .from('walk_in_queue').select('*, doctors(series)')
-      .eq('doctor_id', doctorId).eq('queue_date', today)
+      .eq('doctor_id', doctorId).eq('queue_date', today))
       .order('queue_number', { ascending: true });
     if (error) throw error;
 
-    res.json({ entries: (updated || []).map(mapEntry) });
+    const seriesMap = await seriesMapFor(updated || []);
+    res.json({
+      entries: (updated || []).map(r =>
+        mapEntry(r, seriesMap.get(`${r.doctor_id}_${r.center_id}`) ?? r.doctors?.series ?? '?')),
+    });
   } catch (err) {
     next(err);
   }

@@ -132,6 +132,19 @@ export interface AuthSessionResponse {
   expiresIn: number
 }
 
+/** One posting of a doctor at a medical center (see doctor_center_assignments). */
+export interface ApiDoctorCenter {
+  assignmentId?: string
+  centerId: string
+  centerName: string | null
+  room: string
+  series: string
+  status: 'active' | 'delayed' | 'break' | 'offline'
+  delayMinutes?: number
+  maxAppointmentsPerHour?: number
+  approvalStatus?: 'pending' | 'approved' | 'rejected'
+}
+
 export interface ApiDoctor {
   id: string
   name: string
@@ -146,8 +159,11 @@ export interface ApiDoctor {
   phone?: string | null
   avgConsultMinutes: number
   maxAppointmentsPerHour?: number
+  /** Flattened from the posting for the scoped center, or the first posting. */
   centerId?: string | null
   centerName?: string | null
+  /** Every center this doctor is posted to. */
+  centers?: ApiDoctorCenter[]
 }
 
 export interface ApiDoctorHour {
@@ -190,6 +206,8 @@ export interface ApiBoardEntry {
 
 export interface IssueWalkinInput {
   doctorId: string
+  /** The medical center the token is issued at (scopes numbering + series). */
+  centerId?: string | null
   patientName: string
   nic?: string
   phone?: string
@@ -338,13 +356,29 @@ export const api = {
   }),
 
   // ── Clinic data ──
-  getDoctors: () => request<{ doctors: ApiDoctor[] }>('/doctors'),
+  /**
+   * No args → the full public roster (TV board, patient booking, admin).
+   * `{ centerId }` → doctors posted to that center, flattened to that posting's
+   *   room/series/status (Reception Desk roster).
+   * `{ assignableFor: centerId }` → doctors NOT yet posted to that center
+   *   (may work elsewhere) — the "Add Existing Doctor" pool.
+   * `{ unassigned: true }` → doctors with no center posting anywhere.
+   */
+  getDoctors: (params?: { centerId?: string | null; unassigned?: boolean; assignableFor?: string | null }) => {
+    const q = new URLSearchParams()
+    if (params?.centerId) q.set('centerId', params.centerId)
+    if (params?.assignableFor) q.set('assignableFor', params.assignableFor)
+    if (params?.unassigned) q.set('unassigned', 'true')
+    const qs = q.toString()
+    return request<{ doctors: ApiDoctor[] }>(`/doctors${qs ? `?${qs}` : ''}`)
+  },
 
-  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; roomNumber?: string; specialization?: string; currentStatus?: string; maxAppointmentsPerHour?: number; series?: string }>) =>
-    request<{ doctor: ApiDoctor }>(`/doctors/${id}`, {
+  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; removeCenterId?: string; roomNumber?: string; specialization?: string; currentStatus?: string; maxAppointmentsPerHour?: number; series?: string }>) =>
+    request<{ doctor?: ApiDoctor; message?: string }>(`/doctors/${id}`, {
       method: 'PUT',
       body: JSON.stringify({
         centerId: updates.centerId,
+        removeCenterId: updates.removeCenterId,
         roomNumber: updates.roomNumber,
         specialization: updates.specialization,
         currentStatus: updates.currentStatus,
@@ -418,13 +452,15 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
-  getDoctorHours: (doctorId: string) =>
-    request<{ hours: ApiDoctorHour[]; maxAppointmentsPerHour: number }>(`/doctors/${doctorId}/hours`),
+  getDoctorHours: (doctorId: string, centerId?: string | null) =>
+    request<{ hours: ApiDoctorHour[]; maxAppointmentsPerHour: number }>(
+      `/doctors/${doctorId}/hours${centerId ? `?centerId=${encodeURIComponent(centerId)}` : ''}`,
+    ),
 
-  upsertDoctorHours: (doctorId: string, hours: Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'>[], maxAppointmentsPerHour?: number) =>
+  upsertDoctorHours: (doctorId: string, hours: Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'>[], maxAppointmentsPerHour?: number, centerId?: string | null) =>
     request<{ message: string; hours: ApiDoctorHour[] }>(`/doctors/${doctorId}/hours`, {
       method: 'PUT',
-      body: JSON.stringify({ hours, maxAppointmentsPerHour }),
+      body: JSON.stringify({ hours, maxAppointmentsPerHour, centerId }),
     }),
 
   getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
@@ -506,10 +542,15 @@ export const api = {
     body: JSON.stringify({ maintenanceMode })
   }),
 
-  getQueue: (date?: string) =>
-    request<{ entries: ApiQueueEntry[]; migrationPending?: boolean }>(
-      `/queue${date ? `?date=${date}` : ''}`,
-    ),
+  getQueue: (opts?: { date?: string; centerId?: string | null }) => {
+    const q = new URLSearchParams()
+    if (opts?.date) q.set('date', opts.date)
+    if (opts?.centerId) q.set('centerId', opts.centerId)
+    const qs = q.toString()
+    return request<{ entries: ApiQueueEntry[]; migrationPending?: boolean }>(
+      `/queue${qs ? `?${qs}` : ''}`,
+    )
+  },
 
   issueWalkinToken: (input: IssueWalkinInput) =>
     request<{ entry: ApiQueueEntry }>('/queue/walkin', {
@@ -517,10 +558,10 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  callNext: (doctorId: string) =>
+  callNext: (doctorId: string, centerId?: string | null) =>
     request<{ entries: ApiQueueEntry[] }>('/queue/call-next', {
       method: 'POST',
-      body: JSON.stringify({ doctorId }),
+      body: JSON.stringify({ doctorId, centerId }),
     }),
 
   setQueueEntryStatus: (id: string, status: SettableQueueStatus) =>
