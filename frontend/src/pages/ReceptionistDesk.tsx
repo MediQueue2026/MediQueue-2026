@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Activity, AlertCircle, Bell, BellRing, CheckCircle2, Clock, Hash, Plus, Radio,
+  Activity, AlertCircle, Bell, BellRing, Building2, CheckCircle2, Clock, Hash, Plus, Radio,
   Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil, Menu, X
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
 import PublicTvDisplay from '../components/PublicTvDisplay'
 import AddDoctorModal from '../components/AddDoctorModal'
+import AddCenterModal from '../components/AddCenterModal'
 import DoctorHoursModal from '../components/DoctorHoursModal'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
@@ -39,11 +41,15 @@ function StatPill({ icon, label, value, accent = 'var(--text-2)' }: {
 
 export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
+  const { user } = useAuth()
 
   const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
+  const [showRequestCenter, setShowRequestCenter] = useState(false)
+  const [centerRequestStatus, setCenterRequestStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [centerRequestMsg, setCenterRequestMsg] = useState('')
   const [patientSearch, setPatientSearch] = useState('')
   const [doctorSearch, setDoctorSearch] = useState('')
 
@@ -145,6 +151,17 @@ export default function ReceptionistDesk() {
         onCallNext={queue.callNext}
       />
 
+      <AddCenterModal
+        isOpen={showRequestCenter}
+        onClose={() => { setShowRequestCenter(false); setCenterRequestStatus('idle'); setCenterRequestMsg('') }}
+        mode="request"
+        onAdd={async (centerData) => {
+          const res = await api.createCenter(centerData)
+          setCenterRequestStatus('success')
+          setCenterRequestMsg(res?.message || 'Request submitted for Super Admin approval!')
+        }}
+      />
+
       {/* ── MOBILE BACKDROP OVERLAY ── */}
       {showMobileSidebar && (
         <div
@@ -191,6 +208,26 @@ export default function ReceptionistDesk() {
           <button onClick={() => { setShowTvDisplay(true); setShowMobileSidebar(false) }} className="btn btn-ghost" style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <Radio size={16} /> TV Display Board
           </button>
+
+          {/* Center request — only if this receptionist has no center yet */}
+          {!user?.centerId && (
+            <button
+              onClick={() => setShowRequestCenter(true)}
+              className="btn btn-ghost"
+              style={{ justifyContent: 'flex-start', padding: '12px 14px', color: 'var(--blue)' }}
+            >
+              <Building2 size={16} /> Request Medical Center
+            </button>
+          )}
+
+          {centerRequestStatus === 'success' && (
+            <div style={{
+              fontSize: 11.5, color: '#10B981', background: 'rgba(16,185,129,0.1)',
+              border: '1px solid rgba(16,185,129,0.3)', borderRadius: 8, padding: '8px 12px',
+            }}>
+              ✓ {centerRequestMsg}
+            </div>
+          )}
         </div>
       </div>
 

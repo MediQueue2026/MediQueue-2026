@@ -120,17 +120,19 @@ router.get('/subscriptions/patient/:patientId', getDoctorSubscriptions);
 router.post('/subscriptions/toggle', toggleDoctorSubscription);
 
 // ── Public Routes ───────────────────────────────────────────────────────────
+// NOTE: Specific sub-paths MUST be declared before generic param routes.
+router.get('/centers/pending', authMiddleware, requireRole(['admin']), getPendingCenters);
 router.get('/centers', getCenters);
+router.get('/doctors/pending', authMiddleware, requireRole(['admin']), getPendingDoctors);
 router.get('/doctors', getDoctors);
 router.get('/queue/board', getPublicBoard);
 
 // ── Center Routes ────────────────────────────────────────────────────────────
 // A receptionist may submit a new center (goes in 'pending'); only an admin
-// creates one that's immediately 'approved'. See centerController.createCenter.
-router.post('/centers', authMiddleware, requireRole(['receptionist', 'admin']), createCenter);
+// creates one that's immediately 'approved'. Unauthenticated clinic signups are also allowed.
+router.post('/centers', optionalAuth, createCenter);
 router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);
 router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
-router.get('/centers/pending', authMiddleware, requireRole(['admin']), getPendingCenters);
 router.patch('/centers/:id/approve', authMiddleware, requireRole(['admin']), approveCenter);
 router.patch('/centers/:id/reject', authMiddleware, requireRole(['admin']), rejectCenter);
 
@@ -182,7 +184,6 @@ router.get('/admin/settings', authMiddleware, requireRole(['admin']), getSetting
 router.put('/admin/settings/maintenance', authMiddleware, requireRole(['admin']), setMaintenanceMode);
 
 // ── Doctor Approval Routes ────────────────────────────────────────────────
-router.get('/doctors/pending', authMiddleware, requireRole(['admin']), getPendingDoctors);
 router.patch('/doctors/:doctorId/approve', authMiddleware, requireRole(['admin']), approveDoctor);
 router.patch('/doctors/:doctorId/reject', authMiddleware, requireRole(['admin']), rejectDoctor);
 
