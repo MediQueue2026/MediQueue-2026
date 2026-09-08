@@ -16,11 +16,17 @@ export async function fetchCentersList(): Promise<any[]> {
     if (res.ok) {
       const data = await res.json();
       if (data.centers && data.centers.length > 0) {
-        return data.centers.map((c: any) => ({
-          ...c,
-          latitude: Number(c.latitude) || (c.city?.includes('Kandy') || c.name?.includes('North') ? 7.2906 : 6.9147),
-          longitude: Number(c.longitude) || (c.city?.includes('Kandy') || c.name?.includes('North') ? 80.6337 : 79.8732),
-        }));
+        return data.centers.map((c: any) => {
+          const rawLat = c.latitude ?? c.lat;
+          const rawLng = c.longitude ?? c.lng;
+          const numLat = rawLat !== null && rawLat !== undefined && !isNaN(Number(rawLat)) ? Number(rawLat) : null;
+          const numLng = rawLng !== null && rawLng !== undefined && !isNaN(Number(rawLng)) ? Number(rawLng) : null;
+          return {
+            ...c,
+            latitude: numLat,
+            longitude: numLng,
+          };
+        });
       }
     }
   } catch (e) {

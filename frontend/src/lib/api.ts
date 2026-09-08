@@ -510,7 +510,7 @@ export const api = {
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
 
-  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; status?: 'operational' | 'maintenance' | 'closed'; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
+  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; status?: 'operational' | 'maintenance' | 'closed'; latitude?: number; longitude?: number; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
     request<{ message: string; center: ApiCenter }>('/centers', {
       method: 'POST',
       body: JSON.stringify(input),

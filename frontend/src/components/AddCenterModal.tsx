@@ -1,8 +1,78 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { X, Building2, Plus, CheckCircle2, ShieldAlert } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiCenter } from '../lib/api'
 import ServiceMultiSelect from './ServiceMultiSelect'
+
+function LocationPickerMap({ lat, lng, onChange }: { lat: number; lng: number; onChange: (lat: number, lng: number) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<L.Map | null>(null)
+  const markerRef = useRef<L.Marker | null>(null)
+
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    if (!mapRef.current) {
+      const initialLat = lat || 6.9271
+      const initialLng = lng || 79.8612
+
+      const map = L.map(containerRef.current, {
+        center: [initialLat, initialLng],
+        zoom: 12,
+        zoomControl: true,
+      })
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 19,
+      }).addTo(map)
+
+      const marker = L.marker([initialLat, initialLng], { draggable: true }).addTo(map)
+
+      marker.on('dragend', () => {
+        const p = marker.getLatLng()
+        onChange(Number(p.lat.toFixed(4)), Number(p.lng.toFixed(4)))
+      })
+
+      map.on('click', (e: L.LeafletMouseEvent) => {
+        marker.setLatLng(e.latlng)
+        onChange(Number(e.latlng.lat.toFixed(4)), Number(e.latlng.lng.toFixed(4)))
+      })
+
+      mapRef.current = map
+      markerRef.current = marker
+    }
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove()
+        mapRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (mapRef.current && markerRef.current) {
+      const cur = markerRef.current.getLatLng()
+      if (Math.abs(cur.lat - lat) > 0.0001 || Math.abs(cur.lng - lng) > 0.0001) {
+        markerRef.current.setLatLng([lat, lng])
+        mapRef.current.panTo([lat, lng])
+      }
+    }
+  }, [lat, lng])
+
+  return (
+    <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-md)', marginTop: 8 }}>
+      <div ref={containerRef} style={{ height: 160, width: '100%', zIndex: 1 }} />
+      <div style={{ background: '#f8fafc', padding: '6px 12px', fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>📍 <strong>Click map or drag pin</strong> to pick clinic location</span>
+        <span style={{ fontWeight: 700, color: '#0ea5e9' }}>{lat}, {lng}</span>
+      </div>
+    </div>
+  )
+}
 
 export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create' }: {
   isOpen: boolean
@@ -18,6 +88,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
     phone?: string
     email?: string
     status?: ApiCenter['status']
+    latitude?: number
+    longitude?: number
     requestComment?: string
     registrationDocument?: { fileUrl: string; fileName: string; fileType: string }
   }) => void
@@ -32,11 +104,37 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<ApiCenter['status']>('operational')
+  const [latitude, setLatitude] = useState<string>('6.9271')
+  const [longitude, setLongitude] = useState<string>('79.8612')
   const [requestComment, setRequestComment] = useState('')
   const [documentFile, setDocumentFile] = useState<File | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const cityCoordsMap: Record<string, { lat: number; lng: number }> = {
+    'colombo': { lat: 6.9271, lng: 79.8612 },
+    'kandy': { lat: 7.2906, lng: 80.6337 },
+    'galle': { lat: 6.0535, lng: 80.2210 },
+    'jaffna': { lat: 9.6615, lng: 80.0255 },
+    'negombo': { lat: 7.2008, lng: 79.8737 },
+    'kurunegala': { lat: 7.4863, lng: 80.3647 },
+    'matara': { lat: 5.9549, lng: 80.5550 },
+    'gampaha': { lat: 7.0840, lng: 79.9925 },
+    'batticaloa': { lat: 7.7310, lng: 81.6747 },
+    'trincomalee': { lat: 8.5874, lng: 81.2152 },
+    'anuradhapura': { lat: 8.3114, lng: 80.4037 },
+    'ratnapura': { lat: 6.6828, lng: 80.4016 },
+  }
+
+  const handleCityChange = (val: string) => {
+    setCity(val)
+    const matchedKey = Object.keys(cityCoordsMap).find(k => val.toLowerCase().includes(k))
+    if (matchedKey) {
+      setLatitude(cityCoordsMap[matchedKey].lat.toString())
+      setLongitude(cityCoordsMap[matchedKey].lng.toString())
+    }
+  }
 
   if (!isOpen) return null
 
@@ -74,6 +172,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         phone: phone || undefined,
         email: email || undefined,
         status,
+        latitude: latitude ? Number(latitude) : undefined,
+        longitude: longitude ? Number(longitude) : undefined,
         requestComment: requestComment || undefined,
         registrationDocument,
       })
@@ -197,7 +297,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                   className="input"
                   placeholder="e.g. Colombo 07"
                   value={city}
-                  onChange={e => setCity(e.target.value)}
+                  onChange={e => handleCityChange(e.target.value)}
                   style={{ height: 44, fontSize: 14 }}
                 />
               </div>
@@ -215,6 +315,46 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                 />
               </div>
             </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Latitude (GPS)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  className="input"
+                  placeholder="e.g. 6.9271"
+                  value={latitude}
+                  onChange={e => setLatitude(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Longitude (GPS)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  className="input"
+                  placeholder="e.g. 79.8612"
+                  value={longitude}
+                  onChange={e => setLongitude(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
+            </div>
+
+            <LocationPickerMap
+              lat={Number(latitude) || 6.9271}
+              lng={Number(longitude) || 79.8612}
+              onChange={(nLat, nLng) => {
+                setLatitude(nLat.toString())
+                setLongitude(nLng.toString())
+              }}
+            />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
