@@ -16,6 +16,8 @@ function mapDbCenterToPublic(row) {
     name: row.name,
     city: row.city,
     address: row.address,
+    latitude: row.latitude !== null && row.latitude !== undefined ? Number(row.latitude) : null,
+    longitude: row.longitude !== null && row.longitude !== undefined ? Number(row.longitude) : null,
     opening_hours: row.opening_hours ?? row.hours ?? '08:00 - 18:00',
     services: row.services ?? [],
     phone: row.phone ?? null,
@@ -37,8 +39,8 @@ function mapDbCenterToPublic(row) {
 }
 
 const DEFAULT_CENTERS = [
-  { id: 'a1000000-0000-0000-0000-000000000001', name: 'MediQueue Central Clinic', city: 'Colombo 07', address: '124 Medical Plaza', opening_hours: '08:00 - 20:00', services: ['Cardiology', 'General Medicine', 'Pediatrics'], phone: '0112345678', email: 'central@mediqueue.io', status: 'operational', approval_status: 'approved' },
-  { id: 'a1000000-0000-0000-0000-000000000002', name: 'MediQueue North Branch', city: 'Kandy', address: '45 Station Road', opening_hours: '09:00 - 18:00', services: ['Orthopedics', 'General Medicine'], phone: '0812345678', email: 'north@mediqueue.io', status: 'operational', approval_status: 'approved' }
+  { id: 'a1000000-0000-0000-0000-000000000001', name: 'MediQueue Central Clinic', city: 'Colombo 07', address: '124 Medical Plaza', latitude: 6.9147, longitude: 79.8732, opening_hours: '08:00 - 20:00', services: ['Cardiology', 'General Medicine', 'Pediatrics'], phone: '0112345678', email: 'central@mediqueue.io', status: 'operational', approval_status: 'approved' },
+  { id: 'a1000000-0000-0000-0000-000000000002', name: 'MediQueue North Branch', city: 'Kandy', address: '45 Station Road', latitude: 7.2906, longitude: 80.6337, opening_hours: '09:00 - 18:00', services: ['Orthopedics', 'General Medicine'], phone: '0812345678', email: 'north@mediqueue.io', status: 'operational', approval_status: 'approved' }
 ];
 
 /**
@@ -111,7 +113,7 @@ export async function getCenters(req, res, next) {
  */
 export async function createCenter(req, res, next) {
   try {
-    const { name, city, address, openingHours, services, phone, email, status, requestComment, registrationDocument } = req.body;
+    const { name, city, address, openingHours, services, phone, email, status, latitude, longitude, requestComment, registrationDocument } = req.body;
 
     if (!name || !city) {
       return res.status(400).json({ error: 'Facility Name and City are required.' });
@@ -150,10 +152,32 @@ export async function createCenter(req, res, next) {
       }
     }
 
+    const cityCoordsMap = {
+      'colombo': { lat: 6.9271, lng: 79.8612 },
+      'kandy': { lat: 7.2906, lng: 80.6337 },
+      'galle': { lat: 6.0535, lng: 80.2210 },
+      'jaffna': { lat: 9.6615, lng: 80.0255 },
+      'negombo': { lat: 7.2008, lng: 79.8737 },
+      'kurunegala': { lat: 7.4863, lng: 80.3647 },
+      'matara': { lat: 5.9549, lng: 80.5550 },
+      'gampaha': { lat: 7.0840, lng: 79.9925 },
+      'batticaloa': { lat: 7.7310, lng: 81.6747 },
+      'trincomalee': { lat: 8.5874, lng: 81.2152 },
+      'anuradhapura': { lat: 8.3114, lng: 80.4037 },
+      'ratnapura': { lat: 6.6828, lng: 80.4016 },
+    };
+    const matchedCityKey = Object.keys(cityCoordsMap).find(k => (city || '').toLowerCase().includes(k));
+    const fallbackCoords = matchedCityKey ? cityCoordsMap[matchedCityKey] : { lat: 6.9271, lng: 79.8612 };
+
+    const parsedLat = latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : fallbackCoords.lat;
+    const parsedLng = longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : fallbackCoords.lng;
+
     const payload = {
       name,
       city,
       address: address || city,
+      latitude: parsedLat,
+      longitude: parsedLng,
       opening_hours: openingHours || '08:00 - 18:00',
       services: Array.isArray(services) ? services : (services ? [services] : []),
       phone: phone || null,

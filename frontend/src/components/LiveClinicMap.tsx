@@ -51,15 +51,16 @@ export function LiveClinicMap({
   const [geoLocating, setGeoLocating] = useState(false)
   const [geoError, setGeoError] = useState<string | null>(null)
 
-  const selectedCenter = centers.find(c => c.id === selectedCenterId) || centers[0]
+  const approvedCenters = (centers || []).filter(c => (!c.approval_status || c.approval_status === 'approved') && c.approval_status !== 'pending' && c.approval_status !== 'rejected')
+  const selectedCenter = approvedCenters.find(c => c.id === selectedCenterId) || approvedCenters[0]
 
   // Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current) return
 
     if (!mapInstanceRef.current) {
-      const initialLat = selectedCenter?.latitude || 6.9147
-      const initialLng = selectedCenter?.longitude || 79.8732
+      const initialLat = Number(selectedCenter?.latitude) || 6.9147
+      const initialLng = Number(selectedCenter?.longitude) || 79.8732
 
       const map = L.map(mapContainerRef.current, {
         center: [initialLat, initialLng],
@@ -86,37 +87,76 @@ export function LiveClinicMap({
   // Sync Markers & Center View
   useEffect(() => {
     const map = mapInstanceRef.current
-    if (!map || !centers || centers.length === 0) return
+    if (!map || !approvedCenters || approvedCenters.length === 0) return
 
     // Clear existing clinic markers
     Object.values(markersRef.current).forEach(m => m.remove())
     markersRef.current = {}
 
-    centers.forEach(c => {
-      const lat = Number(c.latitude) || 6.9147
-      const lng = Number(c.longitude) || 79.8732
+    const cityFallbacks: Record<string, { lat: number; lng: number }> = {
+      'kandy': { lat: 7.2906, lng: 80.6337 },
+      'galle': { lat: 6.0535, lng: 80.2210 },
+      'jaffna': { lat: 9.6615, lng: 80.0255 },
+      'negombo': { lat: 7.2008, lng: 79.8737 },
+      'kurunegala': { lat: 7.4863, lng: 80.3647 },
+      'matara': { lat: 5.9549, lng: 80.5550 },
+      'gampaha': { lat: 7.0840, lng: 79.9925 },
+      'batticaloa': { lat: 7.7310, lng: 81.6747 },
+      'trincomalee': { lat: 8.5874, lng: 81.2152 },
+      'anuradhapura': { lat: 8.3114, lng: 80.4037 },
+      'ratnapura': { lat: 6.6828, lng: 80.4016 },
+      'colombo': { lat: 6.9271, lng: 79.8612 }
+    }
+
+    approvedCenters.forEach(c => {
+      const cityKey = Object.keys(cityFallbacks).find(k => (c.city || c.name || '').toLowerCase().includes(k)) || 'colombo'
+      const cityDefault = cityFallbacks[cityKey]
+
+      const rawLat = c.latitude ?? c.lat
+      const rawLng = c.longitude ?? c.lng
+
+      const lat = rawLat !== null && rawLat !== undefined && !isNaN(Number(rawLat)) ? Number(rawLat) : cityDefault.lat
+      const lng = rawLng !== null && rawLng !== undefined && !isNaN(Number(rawLng)) ? Number(rawLng) : cityDefault.lng
 
       const centerDocs = doctors.filter(d => !d.centerId || d.centerId === c.id || d.center_id === c.id || doctors.length <= 2)
       const docListHtml = centerDocs.map(d => `<li style="font-size:11px; margin-top:2px; color:#10b981; font-weight:700;">👨‍⚕️ ${d.name} (${d.spec})</li>`).join('')
 
+      const statusBadge = c.status === 'maintenance'
+        ? '<span style="font-size:10px; font-weight:700; background:#fef3c7; color:#d97706; padding:2px 6px; border-radius:4px;">🟡 Maintenance</span>'
+        : c.status === 'closed'
+          ? '<span style="font-size:10px; font-weight:700; background:#fee2e2; color:#dc2626; padding:2px 6px; border-radius:4px;">🔴 Closed</span>'
+          : '<span style="font-size:10px; font-weight:700; background:#dcfce7; color:#16a34a; padding:2px 6px; border-radius:4px;">🟢 Operational</span>';
+
       const popupHtml = `
-        <div style="font-family: sans-serif; padding: 4px; min-width: 200px;">
-          <strong style="font-size:13px; color:#0f172a; display:block; margin-bottom:2px;">🏥 ${c.name}</strong>
+        <div style="font-family: sans-serif; padding: 4px; min-width: 220px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <strong style="font-size:13px; color:#0f172a;">🏥 ${c.name}</strong>
+            ${statusBadge}
+          </div>
           <span style="font-size:11px; color:#64748b; display:block;">📍 ${c.address}, ${c.city}</span>
           <span style="font-size:11px; color:#64748b; display:block; margin-top:2px;">📞 ${c.phone || '0112345678'}</span>
           <hr style="margin: 6px 0; border: none; border-top: 1px solid #e2e8f0;" />
           <span style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;">Consulting Doctors:</span>
           <ul style="margin:2px 0 8px 0; padding-left:14px;">${docListHtml || '<li style="font-size:11px; color:#64748b;">General Consultation Desk</li>'}</ul>
           <div style="display:flex; gap:6px; margin-top:6px;">
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank" rel="noreferrer" style="flex:1; background:#0ea5e9; color:#fff; text-decoration:none; padding:5px 8px; border-radius:6px; font-size:11px; font-weight:700; text-align:center;">
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank" rel="noreferrer" style="flex:1; background:#0ea5e9; color:#fff; text-decoration:none; padding:6px 8px; border-radius:6px; font-size:11px; font-weight:700; text-align:center;">
               🗺️ Route
             </a>
+            <button id="book-btn-${c.id}" style="flex:1; background:#10b981; color:#fff; border:none; padding:6px 8px; border-radius:6px; font-size:11px; font-weight:700; cursor:pointer;">
+              📅 Book Here
+            </button>
           </div>
         </div>
       `
 
       const marker = L.marker([lat, lng]).addTo(map).bindPopup(popupHtml)
       marker.on('click', () => onSelectCenter(c.id))
+      marker.on('popupopen', () => {
+        const btn = document.getElementById(`book-btn-${c.id}`)
+        if (btn) {
+          btn.onclick = () => onBookCenter(c.id)
+        }
+      })
       markersRef.current[c.id] = marker
     })
 
@@ -186,7 +226,7 @@ export function LiveClinicMap({
       {/* Map Header & Controls */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {centers.map(c => (
+          {approvedCenters.map(c => (
             <button
               key={c.id}
               type="button"
