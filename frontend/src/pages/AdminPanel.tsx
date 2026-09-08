@@ -15,6 +15,7 @@ import AccountMenu from '../components/AccountMenu'
 import AssignDoctorModal from '../components/AssignDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
+import { ViewReportModal } from '../components/ViewReportModal'
 import { api } from '../lib/api'
 import type { ApiCenter, ApiDoctor, ApiDoctorRequest, AuditLog } from '../lib/api'
 
@@ -181,6 +182,7 @@ export default function AdminPanel() {
   const [showAssignDoctorModal, setShowAssignDoctorModal] = useState(false)
   const [showBroadcastModal, setShowBroadcastModal] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  const [viewingDocument, setViewingDocument] = useState<any>(null)
 
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([])
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null)
@@ -1077,7 +1079,6 @@ export default function AdminPanel() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
                     <thead>
                       <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
-                        <th style={{ padding: '10px 14px' }}>Staff ID</th>
                         <th style={{ padding: '10px 14px' }}>Name</th>
                         <th style={{ padding: '10px 14px' }}>Assigned Role</th>
                         <th style={{ padding: '10px 14px' }}>Department</th>
@@ -1089,7 +1090,6 @@ export default function AdminPanel() {
                     <tbody>
                       {filteredStaff.map(s => (
                         <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 700, fontFamily: 'monospace' }}>{s.id}</td>
                           <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-1)' }}>{s.name}</td>
                           <td style={{ padding: '12px 14px', color: 'var(--blue-dark)', fontWeight: 600 }}>{s.role}</td>
                           <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.dept}</td>
@@ -1146,7 +1146,7 @@ export default function AdminPanel() {
               </div>
 
               {/* PENDING MEDICAL CENTER REQUESTS (Receptionist -> Super Admin) */}
-              {!centerRequestsLoading && pendingCenterRequests.length > 0 && (
+              {!centerRequestsLoading && (
                 <div style={{ marginBottom: 24 }}>
                   <h4 style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', marginBottom: 4 }}>
                     Pending Medical Center Requests ({pendingCenterRequests.length})
@@ -1154,8 +1154,16 @@ export default function AdminPanel() {
                   <div style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 14 }}>
                     Requested by receptionists. The center stays hidden from booking and reception use until approved here.
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 8 }}>
-                    {pendingCenterRequests.map(req => (
+                  {pendingCenterRequests.length === 0 ? (
+                    <div style={{
+                      padding: 24, textAlign: 'center', background: 'rgba(245, 158, 11, 0.04)',
+                      border: '1px dashed rgba(245, 158, 11, 0.28)', borderRadius: 14, color: 'var(--text-4)', fontSize: 13
+                    }}>
+                      No pending medical center requests at this time.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 8 }}>
+                      {pendingCenterRequests.map(req => (
                       <div key={req.id} style={{
                         background: 'rgba(245, 158, 11, 0.04)', border: '1px solid rgba(245, 158, 11, 0.28)',
                         borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12
@@ -1189,6 +1197,36 @@ export default function AdminPanel() {
                           {req.services && req.services.length > 0 && (
                             <div>Services: <span style={{ color: 'var(--text-3)' }}>{req.services.join(', ')}</span></div>
                           )}
+                          {req.requestComment && (
+                            <div style={{ marginTop: 8, padding: '10px 14px', background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--border-md)' }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', marginBottom: 4 }}>REQUEST COMMENT:</div>
+                              <div style={{ fontSize: 13, color: 'var(--text-2)' }}>{req.requestComment}</div>
+                            </div>
+                          )}
+                          {req.documents && req.documents.length > 0 && (
+                            <div style={{ marginTop: 8 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>ATTACHED DOCUMENTS:</div>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                                {req.documents.map((doc: any) => (
+                                  <button
+                                    key={doc.id}
+                                    className="btn btn-sm"
+                                    onClick={() => setViewingDocument({
+                                      id: doc.id,
+                                      title: doc.title,
+                                      date: new Date(doc.createdAt).toLocaleDateString(),
+                                      issuingAuthority: req.name,
+                                      recordType: 'general',
+                                      fileUrl: doc.fileUrl,
+                                    })}
+                                    style={{ background: 'rgba(59, 130, 246, 0.1)', color: 'var(--blue)' }}
+                                  >
+                                    <FileText size={12} /> {doc.title}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ display: 'flex', gap: 10 }}>
@@ -1210,6 +1248,7 @@ export default function AdminPanel() {
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
               )}
 
@@ -1284,6 +1323,30 @@ export default function AdminPanel() {
                             {c.services.map(s => (
                               <span key={s} style={{ fontSize: 10.5, background: 'rgba(18,198,186,0.15)', color: 'var(--blue-dark)', borderRadius: 5, padding: '2px 7px', marginRight: 4, fontWeight: 600 }}>{s}</span>
                             ))}
+                          </div>
+                        )}
+                        {c.documents && c.documents.length > 0 && (
+                          <div style={{ gridColumn: '1/-1', marginTop: 4 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>ATTACHED DOCUMENTS:</div>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                              {c.documents.map((doc: any) => (
+                                <button
+                                  key={doc.id}
+                                  className="btn btn-sm"
+                                  onClick={() => setViewingDocument({
+                                    id: doc.id,
+                                    title: doc.title,
+                                    date: new Date(doc.createdAt).toLocaleDateString(),
+                                    issuingAuthority: c.name,
+                                    recordType: 'general',
+                                    fileUrl: doc.fileUrl,
+                                  })}
+                                  style={{ background: 'rgba(59, 130, 246, 0.1)', color: 'var(--blue)' }}
+                                >
+                                  <FileText size={12} /> {doc.title}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1822,6 +1885,12 @@ export default function AdminPanel() {
 
         </div>
       </div>
+
+      <ViewReportModal
+        isOpen={!!viewingDocument}
+        onClose={() => setViewingDocument(null)}
+        record={viewingDocument}
+      />
     </div>
   )
 }

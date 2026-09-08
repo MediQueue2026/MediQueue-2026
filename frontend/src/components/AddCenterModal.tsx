@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { X, Building2, Plus, CheckCircle2, ShieldAlert } from 'lucide-react'
+import { api } from '../lib/api'
 import type { ApiCenter } from '../lib/api'
 
 export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create' }: {
@@ -16,6 +17,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
     phone?: string
     email?: string
     status?: ApiCenter['status']
+    requestComment?: string
+    registrationDocument?: { fileUrl: string; fileName: string; fileType: string }
   }) => void
 }) {
   const isRequest = mode === 'request'
@@ -27,6 +30,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<ApiCenter['status']>('operational')
+  const [requestComment, setRequestComment] = useState('')
+  const [documentFile, setDocumentFile] = useState<File | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -43,6 +48,21 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
     setSubmitting(true)
     setError(null)
     try {
+      let registrationDocument = undefined
+      if (isRequest && !documentFile) {
+        setError('Please attach a registration document before submitting.')
+        setSubmitting(false)
+        return
+      }
+      if (documentFile) {
+        const uploaded = await api.uploadFile(documentFile, 'center-documents')
+        registrationDocument = {
+          fileUrl: uploaded.fileUrl,
+          fileName: documentFile.name,
+          fileType: documentFile.type || 'application/pdf',
+        }
+      }
+
       await onAdd?.({
         name,
         city,
@@ -52,6 +72,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         phone: phone || undefined,
         email: email || undefined,
         status,
+        requestComment: requestComment || undefined,
+        registrationDocument,
       })
       setSubmitted(true)
       setSubmitting(false)
@@ -65,6 +87,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         setPhone('')
         setEmail('')
         setStatus('operational')
+        setRequestComment('')
+        setDocumentFile(null)
         onClose()
       }, 800)
     } catch (err) {
@@ -258,6 +282,39 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                   <option value="maintenance">Maintenance</option>
                   <option value="closed">Closed</option>
                 </select>
+              </div>
+            )}
+
+            {isRequest && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                    Registration Document (Required)
+                  </label>
+                  <input
+                    required
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    className="input"
+                    onChange={e => setDocumentFile(e.target.files?.[0] || null)}
+                    style={{ fontSize: 14, paddingTop: 10, paddingBottom: 10 }}
+                  />
+                  <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>
+                    Please attach proof of clinic registration or licensing.
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                    Special Request Comment
+                  </label>
+                  <textarea
+                    className="input"
+                    placeholder="Any notes for the Super Admin..."
+                    value={requestComment}
+                    onChange={e => setRequestComment(e.target.value)}
+                    style={{ height: 80, fontSize: 14, padding: 12, resize: 'vertical' }}
+                  />
+                </div>
               </div>
             )}
 

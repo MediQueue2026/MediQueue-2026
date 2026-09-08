@@ -76,6 +76,39 @@ async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 /**
+ * Like rawRequest but deliberately omits the Authorization header.
+ * Used for public-facing submissions (e.g. clinic registration from the
+ * Login Page) where the caller might be logged in as an admin but we
+ * want the backend to treat the request as an unauthenticated public form.
+ */
+async function requestAnonymous<T>(path: string, options?: RequestInit): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      credentials: 'include',
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        // Explicitly NO Authorization header — backend will see req.user = undefined
+        ...options?.headers,
+      },
+    })
+  } catch {
+    throw new ApiOfflineError()
+  }
+
+  const body = await res.json().catch(() => ({} as Record<string, unknown>))
+  if (!res.ok) {
+    throw new ApiError(
+      (body as { error?: string })?.error || `Request failed (${res.status})`,
+      res.status,
+      (body as { code?: string })?.code,
+    )
+  }
+  return body as T
+}
+
+/**
  * Same as `rawRequest`, but on an expired access token it silently refreshes
  * once and replays the call. Concurrent 401s share a single refresh so a page
  * with four parallel requests doesn't rotate the refresh token four times —
@@ -197,6 +230,14 @@ export interface IssueWalkinInput {
   tokenNumber?: number
 }
 
+export interface ApiCenterDocument {
+  id: string
+  title: string
+  type: string
+  fileUrl: string
+  createdAt: string
+}
+
 export interface ApiCenter {
   id: string
   name: string
@@ -211,7 +252,9 @@ export interface ApiCenter {
   approvalStatus?: 'pending' | 'approved' | 'rejected'
   requestedByName?: string | null
   rejectionReason?: string | null
+  requestComment?: string | null
   created_at?: string
+  documents?: ApiCenterDocument[]
 }
 
 export interface AuditLog {
@@ -431,8 +474,20 @@ export const api = {
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
 
-  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; status?: 'operational' | 'maintenance' | 'closed' }) =>
+  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; status?: 'operational' | 'maintenance' | 'closed'; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
     request<{ message: string; center: ApiCenter }>('/centers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /**
+   * Public clinic registration — always creates a 'pending' center for Super
+   * Admin approval regardless of the caller's login state. Uses an anonymous
+   * (no-auth-header) request so the backend never mistakes an admin browsing
+   * the login page for an admin directly creating a live center.
+   */
+  registerCenterPublic: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
+    requestAnonymous<{ message: string; center: ApiCenter }>('/centers', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

@@ -25,6 +25,14 @@ function mapDbCenterToPublic(row) {
     requestedByName: row.requested_by_name ?? null,
     rejectionReason: row.rejection_reason ?? null,
     created_at: row.created_at ?? null,
+    documents: Array.isArray(row.center_documents) ? row.center_documents.filter(d => d.document_type !== 'request_comment').map(d => ({
+      id: d.id,
+      title: d.document_name,
+      type: d.document_type,
+      fileUrl: d.file_url,
+      createdAt: d.created_at,
+    })) : [],
+    requestComment: Array.isArray(row.center_documents) ? row.center_documents.find(d => d.document_type === 'request_comment')?.document_name : null,
   };
 }
 
@@ -46,7 +54,7 @@ export async function getCenters(req, res, next) {
 
     const { data, error } = await supabase
       .from('medical_centers')
-      .select('*')
+      .select('*, center_documents(*)')
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -75,11 +83,18 @@ export async function getCenters(req, res, next) {
       return res.json({ centers: DEFAULT_CENTERS.map(mapDbCenterToPublic) });
     }
 
-    // Filtered client-side, not with `.eq()`, so this keeps working on a DB
-    // that hasn't had the approval_status column added yet.
+    // IMPORTANT: Only show 'approved' centers (not pending/rejected).
+    // We check c.approval_status explicitly — if the column doesn't exist
+    // on the DB yet, c.approval_status will be undefined, which we treat as
+    // NOT approved (rather than assuming approved) to prevent pending centers
+    // from leaking into the public/operational list.
+    console.log('[getCenters] All centers approval_status values:', data.map(c => ({ name: c.name, approval_status: c.approval_status })));
+
     const visible = includePending
       ? data
-      : data.filter(c => !c.approval_status || c.approval_status === 'approved');
+      : data.filter(c => c.approval_status === 'approved');
+
+    console.log('[getCenters] Visible (approved only) count:', visible.length);
 
     res.json({ centers: visible.map(mapDbCenterToPublic) });
   } catch (err) {
@@ -96,7 +111,7 @@ export async function getCenters(req, res, next) {
  */
 export async function createCenter(req, res, next) {
   try {
-    const { name, city, address, openingHours, services, phone, email, status } = req.body;
+    const { name, city, address, openingHours, services, phone, email, status, requestComment, registrationDocument } = req.body;
 
     if (!name || !city) {
       return res.status(400).json({ error: 'Facility Name and City are required.' });
@@ -148,6 +163,8 @@ export async function createCenter(req, res, next) {
       requested_by_name: requesterName,
     };
 
+    console.log('[createCenter] Inserting with approval_status:', approvalStatus, '| user role:', requesterRole, '| user:', req.user?.email ?? 'unauthenticated');
+
     let { data, error } = await supabase
       .from('medical_centers')
       .insert([payload])
@@ -163,10 +180,13 @@ export async function createCenter(req, res, next) {
       error = emailRetry.error;
 
       if (error && isMissingColumnError(error)) {
-        const { status: _s, approval_status: _a, requested_by_name: _r, ...minimalPayload } = withoutEmail;
+        const { status: _s, requested_by_name: _r, ...minimalPayload } = withoutEmail;
         const retry = await supabase.from('medical_centers').insert([minimalPayload]).select();
         data = retry.data;
         error = retry.error;
+        if (error && isMissingColumnError(error)) {
+          return res.status(500).json({ error: "Missing 'approval_status' column in 'medical_centers'. Please run backend/src/db/patch_missing_migrations.sql in Supabase SQL Editor." });
+        }
       }
     }
 
@@ -175,7 +195,27 @@ export async function createCenter(req, res, next) {
       return res.status(500).json({ error: error.message });
     }
 
-    const createdCenter = data && data[0] ? mapDbCenterToPublic(data[0]) : { ...payload, approvalStatus };
+    const createdCenter = data && data[0] ? data[0] : null;
+
+    if (registrationDocument && createdCenter?.id) {
+      await supabase.from('center_documents').insert({
+        center_id: createdCenter.id,
+        document_type: registrationDocument.fileType || 'Registration Form',
+        document_name: registrationDocument.fileName,
+        file_url: registrationDocument.fileUrl
+      });
+    }
+
+    if (requestComment && createdCenter?.id) {
+      await supabase.from('center_documents').insert({
+        center_id: createdCenter.id,
+        document_type: 'request_comment',
+        document_name: requestComment,
+        file_url: 'none'
+      });
+    }
+
+    const finalCenter = createdCenter ? mapDbCenterToPublic({ ...createdCenter }) : { ...payload, approvalStatus };
 
     // Link the requesting receptionist to the center they're setting up, as
     // its manager (already confirmed above that they don't manage one yet).
@@ -202,7 +242,7 @@ export async function createCenter(req, res, next) {
       message: isAdmin
         ? 'Center created successfully'
         : 'Medical center request submitted to Super Admin for approval',
-      center: createdCenter,
+      center: finalCenter,
     });
   } catch (err) {
     next(err);
@@ -306,14 +346,22 @@ export async function deleteCenter(req, res, next) {
  */
 export async function getPendingCenters(req, res, next) {
   try {
+    console.log('[getPendingCenters] Called by user:', req.user?.email, 'role:', req.user?.role);
+
     const { data, error } = await supabase
       .from('medical_centers')
-      .select('*')
+      .select('*, center_documents(*)')
       .eq('approval_status', 'pending')
       .order('created_at', { ascending: false });
 
+    console.log('[getPendingCenters] Query result — count:', data?.length ?? 0, 'error:', error?.message ?? 'none');
+    if (data && data.length > 0) {
+      console.log('[getPendingCenters] Rows:', data.map(c => ({ id: c.id, name: c.name, approval_status: c.approval_status })));
+    }
+
     if (error) {
       if (isMissingColumnError(error)) {
+        console.warn('[getPendingCenters] approval_status column MISSING — run patch_missing_migrations.sql!');
         return res.json({ pendingCenters: [] });
       }
       return res.status(500).json({ error: error.message });
@@ -336,7 +384,7 @@ export async function approveCenter(req, res, next) {
 
     const { data: updated, error } = await supabase
       .from('medical_centers')
-      .update({ approval_status: 'approved', rejection_reason: null })
+      .update({ approval_status: 'approved' })
       .eq('id', id)
       .select()
       .maybeSingle();

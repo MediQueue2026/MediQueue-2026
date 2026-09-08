@@ -144,7 +144,7 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
         isOpen={showRequestCenter}
         onClose={() => setShowRequestCenter(false)}
         mode="request"
-        onAdd={async (centerData) => { await api.createCenter(centerData) }}
+        onAdd={async (centerData) => { await api.registerCenterPublic(centerData) }}
       />
       <div className="auth-card">
 
@@ -332,7 +332,7 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
           }}>
             <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4 }}>
-              <strong style={{ color: 'var(--text-2)' }}>Are you a clinic?</strong> Request to register your medical center.
+              <strong style={{ color: 'var(--text-2)' }}>Are you a clinic?</strong> Sign in as a receptionist to register your medical center.
             </div>
             <button
               type="button"
