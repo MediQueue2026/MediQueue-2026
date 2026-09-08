@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Building2, Plus, CheckCircle2, ShieldAlert } from 'lucide-react'
 import type { ApiCenter } from '../lib/api'
+import ServiceMultiSelect from './ServiceMultiSelect'
 
 export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create' }: {
   isOpen: boolean
@@ -23,7 +24,8 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
   const [city, setCity] = useState('')
   const [address, setAddress] = useState('')
   const [openingHours, setOpeningHours] = useState('08:00 - 18:00')
-  const [services, setServices] = useState('General Medicine, Cardiology')
+  /** Chosen from a list rather than typed as comma-separated text — see ServiceMultiSelect. */
+  const [services, setServices] = useState<string[]>(['General Medicine'])
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<ApiCenter['status']>('operational')
@@ -48,7 +50,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         city,
         address: address || city,
         openingHours,
-        services: services.split(',').map(service => service.trim()).filter(Boolean),
+        services,
         phone: phone || undefined,
         email: email || undefined,
         status,
@@ -61,7 +63,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         setCity('')
         setAddress('')
         setOpeningHours('08:00 - 18:00')
-        setServices('General Medicine, Cardiology')
+        setServices(['General Medicine'])
         setPhone('')
         setEmail('')
         setStatus('operational')
@@ -232,14 +234,17 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
             </div>
 
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                Services (comma separated)
+              <label
+                htmlFor="center-services"
+                style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}
+              >
+                Services Provided
               </label>
-              <input
-                className="input"
+              <ServiceMultiSelect
+                id="center-services"
                 value={services}
-                onChange={e => setServices(e.target.value)}
-                style={{ height: 44, fontSize: 14 }}
+                onChange={setServices}
+                disabled={submitting}
               />
             </div>
 
