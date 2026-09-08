@@ -244,6 +244,7 @@ export async function getDoctorSummary(req, res, next) {
         roomNumber: doctorRow?.room_number || 'Room 01',
         currentStatus: doctorRow?.current_status || 'active',
         delayMinutes: doctorRow?.delay_minutes || 0,
+        series: doctorRow?.series || 'A',
         centerName: doctorRow?.medical_centers?.name || 'MediQueue Central Clinic'
       },
       stats: {

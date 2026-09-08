@@ -43,7 +43,8 @@ export default function DoctorPanel() {
     name: (user as any)?.full_name || user?.name || 'Dr. Medical Specialist',
     dept: 'General Medicine',
     room: 'Room 01',
-    centerName: 'MediQueue Healthcare Network'
+    centerName: 'MediQueue Healthcare Network',
+    series: 'A'
   })
 
   // Dynamic Backend Queue Statistics
@@ -84,7 +85,8 @@ export default function DoctorPanel() {
             name: data.doctor.name || (user as any)?.full_name || user?.name || 'Dr. Medical Specialist',
             dept: data.doctor.specialization || 'General Medicine',
             room: data.doctor.roomNumber || 'Room 01',
-            centerName: data.doctor.centerName || 'MediQueue Central Clinic'
+            centerName: data.doctor.centerName || 'MediQueue Central Clinic',
+            series: data.doctor.series || 'A'
           })
           if (data.doctor.currentStatus) {
             setShift(data.doctor.currentStatus as Shift)
@@ -282,7 +284,7 @@ export default function DoctorPanel() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <div style={{ position: 'relative', cursor: 'pointer' }}><Bell size={16} color="var(--text-3)" /><span style={{ position: 'absolute', top: -3, right: -3, width: 7, height: 7, background: 'var(--crimson)', borderRadius: '50%', border: '2px solid var(--bg)' }} /></div>
           <button className="btn btn-danger desktop-only" style={{ gap: 6, padding: '4px 10px', fontSize: 11 }}><AlertTriangle size={13} />Emergency Alert</button>
-          <AccountMenu />
+          <AccountMenu specialization={doctorInfo.dept} series={doctorInfo.series} />
         </div>
       </div>
 
