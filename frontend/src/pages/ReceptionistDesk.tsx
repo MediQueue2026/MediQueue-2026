@@ -17,7 +17,7 @@ import {
   averageWaitMinutes, waitingFor
 } from '../lib/receptionQueue'
 import type { TokenSource } from '../lib/receptionQueue'
-import type { ApiDoctor } from '../lib/api'
+import { api, type ApiDoctor } from '../lib/api'
 
 
 /** Compact metric — one line, no card chrome, so the strip stays out of the receptionist's way. */

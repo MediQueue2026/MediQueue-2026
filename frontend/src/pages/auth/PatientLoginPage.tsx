@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { Activity, AlertCircle, ArrowLeft, ArrowRight, CloudOff, UserCheck } from 'lucide-react'
+import { Activity, AlertCircle, ArrowLeft, ArrowRight, CloudOff } from 'lucide-react'
 import { ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'
 import type { UserRole } from '../../context/AuthContext'

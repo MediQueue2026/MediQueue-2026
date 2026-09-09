@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, Database, Home, MonitorPlay, ShieldCheck, Stethoscope, User, LogIn, UserPlus } from 'lucide-react'
+import { Activity, Database, Home, MonitorPlay, ShieldCheck, Stethoscope, LogIn, UserPlus } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import type { UserRole } from '../context/AuthContext'
 import { ApiOfflineError } from '../lib/api'
