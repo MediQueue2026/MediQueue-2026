@@ -1,5 +1,7 @@
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from '../services/auditService.js';
+import bcrypt from 'bcryptjs';
+import { notificationProvider } from '../config/notification.js';
 
 /** Postgres/PostgREST codes meaning "that column doesn't exist on this DB yet". */
 const MISSING_COLUMN_CODES = new Set(['PGRST204', '42703']);
@@ -416,8 +418,51 @@ export async function approveCenter(req, res, next) {
     if (error) {
       return res.status(500).json({ error: error.message });
     }
-    if (!updated) {
-      return res.status(404).json({ error: 'Medical center not found' });
+    let provisionedCredentials = null;
+    // Auto-provision Receptionist User account for this center if email is provided
+    if (updated.email) {
+      try {
+        const { data: existingUser } = await supabase
+          .from('users')
+          .select('id, role')
+          .eq('email', updated.email)
+          .maybeSingle();
+
+        if (!existingUser) {
+          const initialPassword = `ClinicPass${Math.floor(1000 + Math.random() * 9000)}!`;
+          const passwordHash = await bcrypt.hash(initialPassword, 12);
+          const { data: newUser } = await supabase
+            .from('users')
+            .insert([{
+              email: updated.email,
+              full_name: updated.requested_by_name || `${updated.name} Receptionist`,
+              phone: updated.phone || null,
+              role: 'receptionist',
+              center_id: updated.id,
+              password_hash: passwordHash
+            }])
+            .select('id')
+            .single();
+
+          if (newUser) {
+            provisionedCredentials = {
+              email: updated.email,
+              password: initialPassword,
+              phone: updated.phone || null,
+            };
+            if (updated.phone) {
+              await notificationProvider.sendSMS(
+                updated.phone,
+                `Medical Center "${updated.name}" approved! Receptionist Login Email: ${updated.email} | Password: ${initialPassword}. Sign in at Staff Portal.`
+              );
+            }
+          }
+        } else if (existingUser.role === 'receptionist') {
+          await supabase.from('users').update({ center_id: updated.id }).eq('id', existingUser.id);
+        }
+      } catch (userProvisionErr) {
+        console.warn('Receptionist provisioning notice:', userProvisionErr.message);
+      }
     }
 
     const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
@@ -432,7 +477,11 @@ export async function approveCenter(req, res, next) {
       }]);
     } catch (_) {}
 
-    res.json({ message: 'Medical center approved successfully', center: mapDbCenterToPublic(updated) });
+    res.json({
+      message: 'Medical center approved successfully',
+      center: mapDbCenterToPublic(updated),
+      credentials: provisionedCredentials || null,
+    });
   } catch (err) {
     next(err);
   }

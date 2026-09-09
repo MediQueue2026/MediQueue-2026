@@ -362,7 +362,16 @@ export const api = {
     }),
 
   register: (input: {
-    email: string; password: string; fullName: string; phone?: string; role?: ApiUserRole
+    email: string;
+    password: string;
+    fullName: string;
+    phone?: string;
+    role?: ApiUserRole;
+    nic?: string;
+    emergencyContactName?: string;
+    emergencyContactPhone?: string;
+    bloodGroup?: string;
+    allergies?: string;
   }) =>
     rawRequest<AuthSessionResponse>('/auth/register', {
       method: 'POST',

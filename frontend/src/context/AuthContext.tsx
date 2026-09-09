@@ -133,7 +133,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = useCallback(
     async (input: {
-      email: string; password: string; fullName: string; phone?: string; role?: Exclude<UserRole, null>
+      email: string;
+      password: string;
+      fullName: string;
+      phone?: string;
+      role?: Exclude<UserRole, null>;
+      nic?: string;
+      emergencyContactName?: string;
+      emergencyContactPhone?: string;
+      bloodGroup?: string;
+      allergies?: string;
     }): Promise<User> => {
       try {
         const res = await api.register(input)

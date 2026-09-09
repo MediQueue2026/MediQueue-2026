@@ -289,7 +289,7 @@ export async function login({ email, password }, req) {
   return { user, ...tokens };
 }
 
-export async function register({ email, password, fullName, phone, role }, req) {
+export async function register({ email, password, fullName, phone, role, nic, emergencyContactName, emergencyContactPhone, bloodGroup, allergies }, req) {
   if (!email || !password || !fullName) {
     throw new AuthError('Full name, email and password are required.', 400);
   }
@@ -329,7 +329,7 @@ export async function register({ email, password, fullName, phone, role }, req) 
 
   const user = toPublicUser(data);
   await ensureDoctorProfile(user);
-  await ensurePatientProfile(user);
+  await ensurePatientProfile(user, { nic, emergencyContactName, emergencyContactPhone, bloodGroup, allergies });
 
   await writeAuditLog({
     actorName: user.fullName,
@@ -345,7 +345,7 @@ export async function register({ email, password, fullName, phone, role }, req) 
   return { user, ...tokens };
 }
 
-async function ensurePatientProfile(user) {
+async function ensurePatientProfile(user, profileExtra = {}) {
   if (user.role !== 'patient') return;
 
   const { data: existing } = await supabase
@@ -357,11 +357,11 @@ async function ensurePatientProfile(user) {
   if (!existing) {
     const { error } = await supabase.from('patient_profiles').insert([{
       user_id: user.id,
-      nic: '',
-      emergency_contact_name: '',
-      emergency_contact_phone: '',
-      blood_group: 'O+',
-      allergies: '',
+      nic: profileExtra.nic || '',
+      emergency_contact_name: profileExtra.emergencyContactName || '',
+      emergency_contact_phone: profileExtra.emergencyContactPhone || '',
+      blood_group: profileExtra.bloodGroup || 'O+',
+      allergies: profileExtra.allergies || '',
       chronic_conditions: '',
       sms_alerts_enabled: true,
       delay_alerts_enabled: true,
