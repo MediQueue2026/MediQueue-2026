@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, CloudOff, CreditCard, LogOut, Mail, Phone, Settings, ShieldCheck, Stethoscope, Tag, User } from 'lucide-react'
+import { ChevronDown, CloudOff, CreditCard, LogOut, Mail, Phone, Settings, Stethoscope, Tag, User } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AnchoredMenu from './AnchoredMenu'
 import { Avatar } from './UIPrimitives'

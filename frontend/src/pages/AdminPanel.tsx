@@ -5,12 +5,9 @@ import {
   Activity, Building2, FileText, LogOut, Menu, Plus,
   Search, Settings, Ticket, Users, X, RefreshCw, CheckCircle2,
   AlertCircle, UserCheck, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
-  Pencil, Pause, Play, Trash2, ChevronLeft, ChevronRight
+  Pencil, Pause, Play, Trash2
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from 'recharts'
 import AccountMenu from '../components/AccountMenu'
 import AssignDoctorModal from '../components/AssignDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
@@ -26,15 +23,6 @@ const NAV_ADMIN = [
   { id: 'clinics', icon: <Building2 size={15} />, label: 'Medical Centers' },
   { id: 'api', icon: <MessageSquare size={15} />, label: 'Message Center' },
   { id: 'logs', icon: <FileText size={15} />, label: 'Audit Logs' },
-]
-
-const SERVICES = [
-  { name: 'PostgreSQL Primary DB', latency: '2.3ms', uptime: '99.98%', conns: 142, status: 'healthy' as const },
-  { name: 'Redis Cache Adapter', latency: '0.8ms', uptime: '100%', conns: 0, status: 'healthy' as const },
-  { name: 'WebSocket (Socket.IO)', latency: '14ms', uptime: '99.91%', conns: 1284, status: 'healthy' as const },
-  { name: 'HL7 FHIR Endpoint', latency: '88ms', uptime: '99.5%', conns: 0, status: 'degraded' as const },
-  { name: 'SMS / OTP Gateway', latency: '220ms', uptime: '97.2%', conns: 0, status: 'degraded' as const },
-  { name: 'Backup DB Replica', latency: '5.1ms', uptime: '99.95%', conns: 18, status: 'healthy' as const },
 ]
 
 type StaffMember = {
@@ -179,7 +167,6 @@ export default function AdminPanel() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [staffSearch, setStaffSearch] = useState('')
   const [staffRoleFilter, setStaffRoleFilter] = useState('all')
-  const [chartRange, setChartRange] = useState('Today')
   const [showAddCenterModal, setShowAddCenterModal] = useState(false)
   const [showAssignDoctorModal, setShowAssignDoctorModal] = useState(false)
   const [showBroadcastModal, setShowBroadcastModal] = useState(false)
@@ -241,7 +228,7 @@ export default function AdminPanel() {
   // Live data from Supabase via backend
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
-  const [logsSource, setLogsSource] = useState<'database' | 'dummy' | null>(null)
+  const [_logsSource, setLogsSource] = useState<'database' | 'dummy' | null>(null)
   const [auditLogFilter, setAuditLogFilter] = useState('All Events')
   const [auditLogStartDate, setAuditLogStartDate] = useState('')
   const [auditLogEndDate, setAuditLogEndDate] = useState('')

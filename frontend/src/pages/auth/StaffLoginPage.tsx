@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { Activity, AlertCircle, ArrowLeft, ArrowRight, Building2, CloudOff, Stethoscope, UserCheck, Shield } from 'lucide-react'
+import { Activity, AlertCircle, ArrowLeft, ArrowRight, Building2, CloudOff, Stethoscope } from 'lucide-react'
 import AddCenterModal from '../../components/AddCenterModal'
 import { api, ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'

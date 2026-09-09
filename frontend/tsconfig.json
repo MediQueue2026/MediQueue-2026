@@ -6,7 +6,6 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
-    "ignoreDeprecations": "6.0",
     "paths": {
       "@/*": ["./src/*"]
     },
