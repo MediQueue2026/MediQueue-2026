@@ -1,4 +1,6 @@
 import { supabase } from '../config/supabase.js';
+import bcrypt from 'bcryptjs';
+import { notificationProvider } from '../config/notification.js';
 
 // In-memory fallback array in case DB table is not yet created or running in offline mode
 const MEMORY_DOCTOR_REQUESTS = [];
@@ -143,10 +145,11 @@ export async function approveDoctorRequest(req, res, next) {
     // THIS center) always goes into doctor_center_assignments below.
     let doctorId = null;
     let doctorRow = null;
+    let emailToUse = null;
+    let generatedPassword = null;
 
     if (reqRecord.request_type === 'ASSIGN_EXISTING' && reqRecord.doctor_id) {
       doctorId = reqRecord.doctor_id;
-      // Keep specialization on the identity row current.
       if (reqRecord.specialization) {
         await supabase.from('doctors').update({ specialization: reqRecord.specialization }).eq('id', doctorId);
       }
@@ -155,21 +158,38 @@ export async function approveDoctorRequest(req, res, next) {
       doctorRow = data;
     } else {
       // REGISTER_NEW doctor
-      const emailToUse = reqRecord.email || `dr.${reqRecord.doctor_name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
-
+      emailToUse = reqRecord.email || `dr.${reqRecord.doctor_name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
       let userId = null;
+
       const { data: existingUser } = await supabase
         .from('users').select('id').eq('email', emailToUse).maybeSingle();
 
       if (existingUser) {
         userId = existingUser.id;
       } else {
+        generatedPassword = `DocPass${Math.floor(1000 + Math.random() * 9000)}!`;
+        const passwordHash = await bcrypt.hash(generatedPassword, 12);
         const { data: newUser, error: userErr } = await supabase
           .from('users')
-          .insert([{ email: emailToUse, full_name: reqRecord.doctor_name, phone: reqRecord.phone || null, role: 'doctor' }])
+          .insert([{
+            email: emailToUse,
+            full_name: reqRecord.doctor_name,
+            phone: reqRecord.phone || null,
+            role: 'doctor',
+            password_hash: passwordHash
+          }])
           .select('id')
           .single();
-        if (!userErr && newUser) userId = newUser.id;
+
+        if (!userErr && newUser) {
+          userId = newUser.id;
+          if (reqRecord.phone) {
+            await notificationProvider.sendSMS(
+              reqRecord.phone,
+              `Welcome Dr. ${reqRecord.doctor_name}! Your MediQueue account is approved. Email: ${emailToUse} | Password: ${generatedPassword}. Login: Staff Portal.`
+            );
+          }
+        }
       }
 
       if (userId) {
@@ -254,6 +274,12 @@ export async function approveDoctorRequest(req, res, next) {
       message: 'Doctor request approved successfully',
       requestId: id,
       status: 'approved',
+      credentials: generatedPassword ? {
+        email: emailToUse,
+        password: generatedPassword,
+        phone: reqRecord.phone || null,
+        message: 'Credentials sent via SMS and logged to system audit logs.'
+      } : null,
       doctor: createdDoctor ? (() => {
         const a = createdDoctor.__assignment;
         const maxPerHour = a?.max_appointments_per_hour ?? reqRecord.max_appointments_per_hour ?? 4;

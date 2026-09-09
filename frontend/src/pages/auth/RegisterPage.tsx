@@ -5,31 +5,12 @@ import { ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'
 
 /**
- * Patient self-registration — the missing half of the auth flow.
- *
- * `POST /api/auth/register` and `AuthContext.register()` have both existed since
- * the auth port; nothing in the UI called them, so a new patient had no way to
- * create an account and the login page's only sign-up CTA was the clinic
- * request. This is that front door.
- *
- * Patients only, deliberately. The backend still accepts a staff `role` while
- * ALLOW_STAFF_SELF_REGISTER is on (a prototype convenience), but a public form
- * that hands out `admin` accounts is not something to build a UI for — staff are
- * created by an admin through POST /api/auth/staff. Omitting `role` here means
- * this form keeps working unchanged once that flag is turned off.
- *
- * On success the backend returns a live session (access token + refresh cookie)
- * and auto-creates the `patient_profiles` row the dashboard reads, so we land
- * the user straight on /patient rather than bouncing them back to sign in.
+ * Minimal & High-UX Patient Self-Registration.
+ * Fast, lightweight registration with essential credentials only.
  */
 
-/** The Patient portal's accent, since this is that portal's front door. */
 const ACCENT = '#4F46E5'
-
-/** Mirrors the server-side rule in authService.register — fail before the round trip. */
 const MIN_PASSWORD_LENGTH = 8
-
-/** Forgiving on purpose: local `0771234567` and `+94 77 123 4567` both pass. */
 const PHONE_PATTERN = /^\+?[\d\s-]{9,15}$/
 
 export default function RegisterPage() {
@@ -45,11 +26,9 @@ export default function RegisterPage() {
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  /** 409 from the backend — the error box then offers a way forward, not just a refusal. */
   const [emailTaken, setEmailTaken] = useState(false)
   const [offline, setOffline] = useState(backendOffline)
 
-  /** Everything the server would reject, checked here first so the form answers instantly. */
   const validate = (): string => {
     if (!fullName.trim()) return 'Please enter your full name.'
     if (!email.trim()) return 'Please enter your email address.'
@@ -79,9 +58,7 @@ export default function RegisterPage() {
         email: email.trim(),
         password,
         phone: phone.trim() || undefined,
-        // `role` omitted — the backend defaults to 'patient'.
       })
-      // Registration signs them in, so honour the page they were originally after.
       const from = (location.state as { from?: string } | null)?.from
       navigate(from ?? HOME_PATH[(user.role ?? 'patient') as 'patient'], { replace: true })
     } catch (err) {
@@ -105,7 +82,7 @@ export default function RegisterPage() {
     <div className="auth-screen">
       <div className="auth-card">
 
-        {/* ── Context ── */}
+        {/* ── Context Panel ── */}
         <aside className="auth-aside">
           <div
             className="auth-aside-glow"
@@ -135,8 +112,7 @@ export default function RegisterPage() {
             fontSize: 13.5, lineHeight: 1.6, color: 'rgba(255,255,255,0.62)',
             marginTop: 10, maxWidth: '34ch',
           }}>
-            Book appointments, track your token live, and get SMS alerts when the
-            queue moves.
+            Book appointments, track your token live, and receive instant SMS alerts when your turn approaches.
           </p>
 
           <div className="auth-aside-spacer" style={{ flex: 1, minHeight: 28 }} />
@@ -153,18 +129,18 @@ export default function RegisterPage() {
           </Link>
         </aside>
 
-        {/* ── Task ── */}
+        {/* ── Minimal Sign-up Form Pane ── */}
         <div className="auth-form-pane">
           <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
-            Patient sign-up
+            Patient Sign-up
           </h2>
-          <p style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 6, lineHeight: 1.5 }}>
-            Staff accounts are created by an administrator — this form is for patients.
+          <p style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 4, lineHeight: 1.5 }}>
+            Fast & secure registration. Healthcare staff accounts are created by clinic administrators.
           </p>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 18 }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 13, marginTop: 18 }}>
             <div>
-              <label className="auth-field-label" htmlFor="reg-name">Full name</label>
+              <label className="auth-field-label" htmlFor="reg-name">Full Name</label>
               <input
                 id="reg-name" className="input" type="text" required autoComplete="name"
                 placeholder="Rajan Mehta"
@@ -175,7 +151,7 @@ export default function RegisterPage() {
             </div>
 
             <div>
-              <label className="auth-field-label" htmlFor="reg-email">Email</label>
+              <label className="auth-field-label" htmlFor="reg-email">Email Address</label>
               <input
                 id="reg-email" className="input" type="email" required autoComplete="email"
                 placeholder="you@example.com"
@@ -187,7 +163,7 @@ export default function RegisterPage() {
 
             <div>
               <label className="auth-field-label" htmlFor="reg-phone">
-                Mobile <span style={{ fontWeight: 500, color: 'var(--text-4)' }}>· optional, for SMS queue alerts</span>
+                Mobile Number <span style={{ fontWeight: 400, color: 'var(--text-4)' }}>· for SMS queue alerts</span>
               </label>
               <input
                 id="reg-phone" className="input" type="tel" autoComplete="tel"
@@ -211,7 +187,7 @@ export default function RegisterPage() {
             </div>
 
             <div>
-              <label className="auth-field-label" htmlFor="reg-confirm">Confirm password</label>
+              <label className="auth-field-label" htmlFor="reg-confirm">Confirm Password</label>
               <input
                 id="reg-confirm" className="input" type="password" required autoComplete="new-password"
                 placeholder="Re-enter your password"
@@ -247,11 +223,11 @@ export default function RegisterPage() {
               className="btn"
               style={{
                 width: '100%', height: 44, fontSize: 14.5, fontWeight: 700, borderRadius: 9,
-                background: ACCENT, color: '#fff', gap: 7, marginTop: 3,
+                background: ACCENT, color: '#fff', gap: 7, marginTop: 4,
                 opacity: submitting ? 0.6 : 1, cursor: submitting ? 'wait' : 'pointer',
               }}
             >
-              {submitting ? 'Creating account…' : <><span>Create account</span> <ArrowRight size={15} /></>}
+              {submitting ? 'Creating account…' : <><span>Create Account</span> <ArrowRight size={15} /></>}
             </button>
 
             {offline && (
@@ -263,17 +239,16 @@ export default function RegisterPage() {
               }}>
                 <CloudOff size={13} style={{ flexShrink: 0, marginTop: 2, color: 'var(--amber)' }} />
                 <span>
-                  An account can only be created while the backend is running — demo
-                  mode has no database to save it to.
+                  An account can only be created while the backend is running.
                 </span>
               </div>
             )}
           </form>
 
-          <div className="auth-demo" style={{ justifyContent: 'space-between' }}>
+          <div className="auth-demo" style={{ justifyContent: 'space-between', marginTop: 18 }}>
             <span>Already registered?</span>
             <Link to="/login" className="btn btn-ghost btn-sm" style={{ gap: 5, flexShrink: 0, textDecoration: 'none' }}>
-              Sign in
+              Sign in to Patient Portal
             </Link>
           </div>
         </div>

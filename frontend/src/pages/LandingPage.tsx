@@ -43,25 +43,18 @@ const SAMPLE_BOARD: ApiBoardEntry[] = [
 
 const STAFF_PORTALS = [
   {
-    to: '/login/receptionist',
+    to: '/staff/login',
     label: 'Reception Desk',
-    detail: 'Issue tokens, run the counter queue, send SMS alerts',
+    detail: 'Issue tokens, run counter queue, register medical center',
     icon: <Ticket size={17} />,
     accent: '#E28A00',
   },
   {
-    to: '/login/doctor',
+    to: '/staff/login',
     label: 'Doctor Console',
     detail: 'Call patients, record consultations, publish delay notices',
     icon: <Stethoscope size={17} />,
     accent: '#10B981',
-  },
-  {
-    to: '/login/admin',
-    label: 'System Admin',
-    detail: 'Staff accounts, slot limits, centres, and audit logs',
-    icon: <Shield size={17} />,
-    accent: '#DC2626',
   },
 ]
 
@@ -218,7 +211,7 @@ export default function LandingPage() {
             >
               {STAFF_PORTALS.map(p => (
                 <Link
-                  key={p.to}
+                  key={p.label}
                   to={p.to}
                   role="menuitem"
                   onClick={() => setStaffMenuOpen(false)}
@@ -235,10 +228,10 @@ export default function LandingPage() {
           </>
 
           <Link to="/login" className="btn btn-ghost btn-sm" style={{ padding: '5px 10px', fontSize: 12, textDecoration: 'none' }}>
-            Patient login
+            Patient Sign In
           </Link>
-          <Link to="/login?new=1" className="btn btn-primary btn-sm" style={{ padding: '5px 12px', fontSize: 12, textDecoration: 'none' }}>
-            Create account
+          <Link to="/register" className="btn btn-primary btn-sm" style={{ padding: '5px 12px', fontSize: 12, textDecoration: 'none' }}>
+            Register Account
           </Link>
           <button className="btn btn-danger btn-sm desktop-only" style={{ borderColor: 'var(--crimson-border)' }}>
             <Phone size={13} />Emergency
@@ -549,7 +542,7 @@ export default function LandingPage() {
 
           <div className="staff-band-links">
             {STAFF_PORTALS.map(p => (
-              <Link key={p.to} to={p.to} className="staff-portal-card">
+              <Link key={p.label} to={p.to} className="staff-portal-card">
                 <span style={{ color: p.accent, display: 'flex' }}>{p.icon}</span>
                 <span style={{ minWidth: 0, flex: 1 }}>
                   <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{p.label}</span>
@@ -578,8 +571,8 @@ export default function LandingPage() {
             </div>
 
             {([
-              ['For patients', [['Track a token', '#live-board'], ['Patient login', '/login'], ['Create account', '/login?new=1']]],
-              ['For clinics', [['Reception Desk', '/login/receptionist'], ['Doctor Console', '/login/doctor'], ['System Admin', '/login/admin']]],
+              ['For patients', [['Track a token', '#live-board'], ['Patient Portal', '/login'], ['Register Account', '/register']]],
+              ['For clinics', [['Healthcare Staff Portal', '/staff/login'], ['Register Medical Center', '/staff/login']]],
               ['Displays', [['Waiting-room board', '/tv-display']]],
             ] as const).map(([title, links]) => (
               <div key={title}>
@@ -593,15 +586,20 @@ export default function LandingPage() {
             ))}
           </div>
 
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>© 2026 MediQueue Systems Pvt. Ltd.</span>
-            <button
-              onClick={() => navigate('/tv-display')}
-              className="btn btn-ghost btn-sm"
-              style={{ gap: 6, fontSize: 11.5 }}
-            >
-              <Bell size={12} /> Open waiting-room display
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <Link to="/admin/login" style={{ fontSize: 11.5, color: 'var(--text-4)', textDecoration: 'none' }}>
+                System Admin
+              </Link>
+              <button
+                onClick={() => navigate('/tv-display')}
+                className="btn btn-ghost btn-sm"
+                style={{ gap: 6, fontSize: 11.5 }}
+              >
+                <Bell size={12} /> Open waiting-room display
+              </button>
+            </div>
           </div>
         </div>
       </footer>
