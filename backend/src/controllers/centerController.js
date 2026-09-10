@@ -40,17 +40,25 @@ function mapDbCenterToPublic(row) {
   };
 }
 
-const DEFAULT_CENTERS = [
-  { id: 'a1000000-0000-0000-0000-000000000001', name: 'MediQueue Central Clinic', city: 'Colombo 07', address: '124 Medical Plaza', latitude: 6.9147, longitude: 79.8732, opening_hours: '08:00 - 20:00', services: ['Cardiology', 'General Medicine', 'Pediatrics'], phone: '0112345678', email: 'central@mediqueue.io', status: 'operational', approval_status: 'approved' },
-  { id: 'a1000000-0000-0000-0000-000000000002', name: 'MediQueue North Branch', city: 'Kandy', address: '45 Station Road', latitude: 7.2906, longitude: 80.6337, opening_hours: '09:00 - 18:00', services: ['Orthopedics', 'General Medicine'], phone: '0812345678', email: 'north@mediqueue.io', status: 'operational', approval_status: 'approved' }
-];
-
 /**
  * GET /centers
  * Public/receptionist-facing list — hides centers still pending (or rejected)
  * Super Admin approval so a newly requested facility can't be selected or
  * booked into before it's live. Pass ?includePending=true (Admin Panel) to see
  * everything, mirroring how GET /doctors exposes ?includePending.
+ *
+ * There is no fallback roster and no auto-seeding.
+ *
+ * This handler used to carry a `DEFAULT_CENTERS` pair — "MediQueue Central
+ * Clinic, Colombo 07" and "MediQueue North Branch, Kandy", with plausible
+ * addresses, phone numbers and coordinates. On any Supabase error it returned
+ * them, and on an empty table it *inserted them into the live database* and
+ * returned whatever came back; if that insert failed it returned them anyway,
+ * unpersisted. So a fresh deployment silently acquired two clinics nobody
+ * created, they showed as bookable pins on the patient map, and the
+ * unpersisted variant appeared on first load and vanished on the next.
+ * Creating a center is an admin action behind an approval flow — the read
+ * endpoint must not invent one.
  */
 export async function getCenters(req, res, next) {
   try {
@@ -63,42 +71,19 @@ export async function getCenters(req, res, next) {
 
     if (error) {
       console.warn('Supabase query error on medical_centers:', error.message);
-      return res.json({ centers: DEFAULT_CENTERS.map(mapDbCenterToPublic) });
+      return res.status(500).json({
+        error: `Could not load medical centers: ${error.message}`,
+        centers: [],
+      });
     }
 
-    if (!data || data.length === 0) {
-      // Auto-seed default centers into Supabase medical_centers table
-      let { data: seeded, error: seedErr } = await supabase
-        .from('medical_centers')
-        .insert(DEFAULT_CENTERS)
-        .select();
-
-      if (seedErr && isMissingColumnError(seedErr)) {
-        const noExtraDefaults = DEFAULT_CENTERS.map(({ status, approval_status, email, ...r }) => r);
-        const retry = await supabase.from('medical_centers').insert(noExtraDefaults).select();
-        seeded = retry.data;
-        seedErr = retry.error;
-      }
-
-      if (!seedErr && seeded && seeded.length > 0) {
-        return res.json({ centers: seeded.map(mapDbCenterToPublic) });
-      }
-
-      return res.json({ centers: DEFAULT_CENTERS.map(mapDbCenterToPublic) });
-    }
-
-    // IMPORTANT: Only show 'approved' centers (not pending/rejected).
-    // We check c.approval_status explicitly — if the column doesn't exist
-    // on the DB yet, c.approval_status will be undefined, which we treat as
-    // NOT approved (rather than assuming approved) to prevent pending centers
-    // from leaking into the public/operational list.
-    console.log('[getCenters] All centers approval_status values:', data.map(c => ({ name: c.name, approval_status: c.approval_status })));
-
+    // Only 'approved' centers are public. `approval_status` is checked
+    // explicitly: on a database that predates the column it reads as
+    // undefined, which is treated as NOT approved rather than assumed
+    // approved, so a pending center can't leak into the bookable list.
     const visible = includePending
-      ? data
-      : data.filter(c => c.approval_status === 'approved');
-
-    console.log('[getCenters] Visible (approved only) count:', visible.length);
+      ? (data ?? [])
+      : (data ?? []).filter(c => c.approval_status === 'approved');
 
     res.json({ centers: visible.map(mapDbCenterToPublic) });
   } catch (err) {

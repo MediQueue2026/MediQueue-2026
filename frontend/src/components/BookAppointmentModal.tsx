@@ -159,8 +159,13 @@ export function BookAppointmentModal({
     !selectedCenterId || d.centerId === selectedCenterId || d.center_id === selectedCenterId || allDoctors.length <= 2
   )
 
-  const selectedCenter = centers.find(c => c.id === selectedCenterId) || centers[0] || { name: 'MediQueue Central Clinic', city: 'Colombo 07' }
-  const selectedDoc = assignedDoctors.find(d => d.id === selectedDoctorId) || assignedDoctors[0] || { id: 'd1', name: 'Dr. Aisha Patel', spec: 'Cardiology', room: 'Room 03' }
+  // No placeholder objects here. These used to fall back to a fictional
+  // "MediQueue Central Clinic" with no id and a fictional "Dr. Aisha Patel"
+  // with id 'd1', so with an empty roster the form looked ready and Confirm
+  // posted a booking for a doctor and center that don't exist. `null` instead,
+  // and the Confirm button stays disabled until there is a real selection.
+  const selectedCenter = centers.find(c => c.id === selectedCenterId) ?? centers[0] ?? null
+  const selectedDoc = assignedDoctors.find(d => d.id === selectedDoctorId) ?? assignedDoctors[0] ?? null
 
   const handleCenterChange = (cId: string) => {
     setSelectedCenterId(cId)
@@ -171,6 +176,10 @@ export function BookAppointmentModal({
   }
 
   const handleConfirm = async () => {
+    if (!selectedDoc || !selectedCenter) {
+      setError('Pick a medical center and a doctor before confirming.')
+      return
+    }
     if (doctorOffDuty) {
       setError('Doctor is off-duty on the selected date. Please select another date.')
       return
@@ -185,18 +194,25 @@ export function BookAppointmentModal({
     setError('')
     setBooking(true)
 
-    const result = await bookAppointment({
-      doctorId: selectedDoc.id,
-      doctorName: selectedDoc.name,
-      centerId: selectedCenter.id,
-      appointmentDate,
-      slotHour,
-      patientId,
-    })
-
-    setBooking(false)
-    onBookingSuccess(result.appointment)
-    onClose()
+    // bookAppointment throws when the booking didn't happen. It used to swallow
+    // every failure and hand back an invented appointment, so this modal closed
+    // with a success toast for a booking that was never saved.
+    try {
+      const result = await bookAppointment({
+        doctorId: selectedDoc.id,
+        doctorName: selectedDoc.name,
+        centerId: selectedCenter.id,
+        appointmentDate,
+        slotHour,
+        patientId,
+      })
+      onBookingSuccess(result.appointment)
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not book this slot. Please try again.')
+    } finally {
+      setBooking(false)
+    }
   }
 
   return (
@@ -253,7 +269,7 @@ export function BookAppointmentModal({
           {/* STEP 2: SELECT DOCTOR ASSIGNED TO THIS CENTER */}
           <div>
             <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
-              <Stethoscope size={13} color="var(--blue)" /> Step 2: Select Doctor (Assigned to {selectedCenter.name})
+              <Stethoscope size={13} color="var(--blue)" /> Step 2: Select Doctor{selectedCenter ? ` (Assigned to ${selectedCenter.name})` : ''}
             </label>
             <select
               className="input"
@@ -273,14 +289,23 @@ export function BookAppointmentModal({
             </select>
           </div>
 
-          {/* Selected Doctor Summary Card */}
-          <div style={{ padding: 12, borderRadius: 10, background: 'var(--blue-dim)', border: '1px solid var(--blue-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Stethoscope size={20} color="var(--blue)" />
-            <div>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)' }}>{selectedDoc.name}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>{selectedDoc.spec} · {selectedDoc.room || 'Room 01'} · {selectedCenter.name}</div>
+          {/* Selected Doctor Summary Card — only once there is a real doctor to
+              summarise. Unknown room/specialisation shows a dash, not "Room 01". */}
+          {selectedDoc ? (
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--blue-dim)', border: '1px solid var(--blue-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Stethoscope size={20} color="var(--blue)" />
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)' }}>{selectedDoc.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>
+                  {[selectedDoc.spec, selectedDoc.room, selectedCenter?.name].filter(Boolean).join(' · ') || '—'}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--amber-dim)', border: '1px solid var(--amber-border)', fontSize: 12, color: 'var(--text-2)' }}>
+              No doctors are assigned to this center yet, so there is nothing to book. Pick another center.
+            </div>
+          )}
 
           {/* Appointment Date */}
           <div>
@@ -354,7 +379,7 @@ export function BookAppointmentModal({
             <button
               type="button"
               onClick={handleConfirm}
-              disabled={booking || !selectedDoc.id || doctorOffDuty}
+              disabled={booking || !selectedDoc?.id || !selectedCenter?.id || doctorOffDuty}
               className="btn btn-primary"
               style={{ gap: 6 }}
             >

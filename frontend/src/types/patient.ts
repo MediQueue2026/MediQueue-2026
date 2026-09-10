@@ -34,16 +34,25 @@ export interface HealthRecordItem {
   fileUrl?: string;
 }
 
+/**
+ * `specialization`, `centerName`, `roomNumber` and `queueToken` are nullable
+ * because the underlying rows genuinely can be missing them. They used to be
+ * typed non-null and backfilled server-side with "General Medicine" /
+ * "MediQueue Clinic" / a made-up token, which meant the dashboard confidently
+ * displayed details nobody had entered. Render a dash when these are null.
+ */
 export interface AppointmentItem {
   id: string;
   doctorId: string;
   doctorName: string;
-  specialization: string;
-  centerName: string;
+  specialization: string | null;
+  centerId?: string | null;
+  centerName: string | null;
+  roomNumber?: string | null;
   appointmentDate: string;
   slotHour: number;
   timeLabel: string;
-  queueToken: string;
+  queueToken: string | null;
   status: 'booked' | 'waiting' | 'in_consultation' | 'completed' | 'cancelled';
   isLateNumber: boolean;
 }

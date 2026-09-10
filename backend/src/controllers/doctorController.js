@@ -1,81 +1,93 @@
-import { notifySubscribedPatients } from '../services/notificationService.js';
 import { supabase } from '../config/supabase.js';
+import { resolveDoctor } from '../services/doctorLookup.js';
+import { publishDelayAlert } from '../services/delayAlertService.js';
+import { genderInitial, parseNic } from '../services/nicService.js';
 
+/**
+ * PUT|PATCH /doctors/:doctorId/status
+ *
+ * Shift changes (active / break / offline) and room moves. Asking for
+ * `delayed` (or any positive `delayMinutes`) routes through the same
+ * publishDelayAlert path as POST /doctors/:id/delay-alerts, so a delay always
+ * leaves a persisted alert for the dashboards — it used to fire SMS and record
+ * nothing, which is why patients saw an alert that vanished on reload.
+ */
 export async function updateDoctorStatus(req, res, next) {
   try {
     const { doctorId } = req.params;
-    const { currentStatus, delayMinutes, roomNumber, doctorName, centerId } = req.body;
+    const { currentStatus, delayMinutes, roomNumber, centerId } = req.body;
 
-    const updates = {};
-    if (currentStatus) {
-      // Map 'online' to 'active' for consistent DB status representation
-      const normStatus = currentStatus === 'online' ? 'active' : currentStatus;
-      updates.current_status = normStatus;
-      if (normStatus !== 'delayed' && (!delayMinutes || delayMinutes === 0)) {
-        updates.delay_minutes = 0;
-      }
+    const resolved = await resolveDoctor(doctorId, centerId);
+    if (!resolved) {
+      // Previously this fell back to "the first doctor in the table", so a bad
+      // id silently changed an unrelated doctor's status.
+      return res.status(404).json({ error: 'No doctor found for that id.' });
     }
-    if (typeof delayMinutes === 'number') updates.delay_minutes = delayMinutes;
+    if (resolved.ambiguous) {
+      return res.status(400).json({
+        error: 'This doctor works at more than one center — send centerId so the status applies to the right posting.',
+      });
+    }
+
+    const wantsDelay = currentStatus === 'delayed' || Number(delayMinutes) > 0;
+
+    if (wantsDelay) {
+      const minutes = Number.isFinite(Number(delayMinutes)) && Number(delayMinutes) > 0
+        ? Math.min(Math.round(Number(delayMinutes)), 480)
+        : 15;
+
+      const result = await publishDelayAlert({
+        resolved,
+        centerId,
+        minutes,
+        reason: req.body.reason,
+        actor: {
+          name: req.user?.fullName || req.user?.email || resolved.name,
+          role: req.user?.role || 'doctor',
+        },
+      });
+
+      if (!result.ok) {
+        return res.status(result.status).json({ error: result.error, code: result.code });
+      }
+
+      return res.json({
+        message: 'Doctor marked as delayed and patients notified.',
+        status: { doctorId: resolved.doctor.id, currentStatus: 'delayed', delayMinutes: minutes, roomNumber: resolved.roomNumber },
+        alert: result.alert,
+        alertsSent: { notifiedCount: result.notifiedCount, skippedCount: result.skippedCount },
+      });
+    }
+
+    // Plain shift change — clearing the delay counter along with it.
+    const updates = { delay_minutes: 0 };
+    if (currentStatus) {
+      // The Doctor Console calls the on-duty state 'online'; the DB CHECK
+      // constraint calls it 'active'.
+      updates.current_status = currentStatus === 'online' ? 'active' : currentStatus;
+    }
     if (roomNumber) updates.room_number = roomNumber;
 
-    const isUuid = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-
-    if (Object.keys(updates).length > 0 && doctorId && doctorId !== 'undefined') {
-      // Resolve to a real doctors.id (the param may be a user_id).
-      let realDoctorId = null;
-      if (isUuid(doctorId)) {
-        const { data: docRow } = await supabase
-          .from('doctors').select('id').or(`id.eq.${doctorId},user_id.eq.${doctorId}`).maybeSingle();
-        realDoctorId = docRow?.id ?? null;
-      } else {
-        const { data: firstDoc } = await supabase.from('doctors').select('id').limit(1).maybeSingle();
-        realDoctorId = firstDoc?.id ?? null;
-      }
-
-      if (realDoctorId) {
-        // Status now lives per posting. Update the assignment for `centerId`, or
-        // the doctor's sole assignment when no center is given.
-        let assignmentQuery = supabase
-          .from('doctor_center_assignments')
-          .select('id')
-          .eq('doctor_id', realDoctorId);
-        if (centerId) assignmentQuery = assignmentQuery.eq('center_id', String(centerId));
-        const { data: assignments } = await assignmentQuery;
-
-        const target = (assignments || []).length === 1 ? assignments[0]
-          : centerId ? (assignments || [])[0]
-          : null;
-
-        if (target) {
-          const { error: dbErr } = await supabase
-            .from('doctor_center_assignments')
-            .update({ ...updates, updated_at: new Date().toISOString() })
-            .eq('id', target.id);
-          if (dbErr) console.warn('Doctor status DB update warning:', dbErr.message);
-        } else if ((assignments || []).length === 0) {
-          // Pre-migration-010 fallback: status still on the doctors row.
-          const { error: dbErr } = await supabase
-            .from('doctors').update(updates).eq('id', realDoctorId);
-          if (dbErr) console.warn('Doctor status DB update warning (legacy):', dbErr.message);
-        } else {
-          console.warn('Doctor status update skipped: doctor has multiple postings but no centerId given', realDoctorId);
-        }
-      }
-    }
-
-    // Send SMS / In-App alerts to subscribers if delayed (BR-05, FR-07)
-    let alertResult = null;
-    if (currentStatus === 'delayed' || delayMinutes > 0) {
-      alertResult = await notifySubscribedPatients(doctorId, {
-        doctorName: doctorName || 'Your Doctor',
-        delayMinutes: delayMinutes || 15
-      });
+    if (resolved.posting) {
+      const { error } = await supabase
+        .from('doctor_center_assignments')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', resolved.posting.id);
+      if (error) console.warn('Doctor status DB update warning:', error.message);
+    } else {
+      // Pre-migration-010 doctor: status still on the doctors row.
+      const { error } = await supabase.from('doctors').update(updates).eq('id', resolved.doctor.id);
+      if (error) console.warn('Doctor status DB update warning (legacy):', error.message);
     }
 
     res.json({
       message: 'Doctor status updated successfully',
-      status: { doctorId, currentStatus, delayMinutes, roomNumber },
-      alertsSent: alertResult
+      status: {
+        doctorId: resolved.doctor.id,
+        currentStatus: updates.current_status ?? null,
+        delayMinutes: 0,
+        roomNumber: updates.room_number ?? resolved.roomNumber,
+      },
     });
   } catch (err) {
     next(err);
@@ -156,60 +168,111 @@ export async function updateDoctor(req, res, next) {
   }
 }
 
+/**
+ * Mean minutes between consecutive consultations actually starting, measured
+ * from `called_at`. There is no `completed_at` column, so the gap between one
+ * token being called and the next is the best real signal for how long a
+ * consultation is taking. Falls back to the posting's scheduled rate
+ * (60 / max_appointments_per_hour) until there are two data points.
+ */
+function averageConsultMinutes(rows, maxPerHour) {
+  const calls = (rows || [])
+    .filter(r => r.called_at)
+    .map(r => new Date(r.called_at).getTime())
+    .filter(t => Number.isFinite(t))
+    .sort((a, b) => a - b);
+
+  if (calls.length >= 2) {
+    const gaps = [];
+    for (let i = 1; i < calls.length; i++) {
+      const mins = (calls[i] - calls[i - 1]) / 60_000;
+      // Drop absurd gaps — an overnight break between sessions isn't a consult.
+      if (mins > 0 && mins <= 180) gaps.push(mins);
+    }
+    if (gaps.length > 0) {
+      return gaps.reduce((s, g) => s + g, 0) / gaps.length;
+    }
+  }
+
+  return 60 / (maxPerHour || 4);
+}
+
+/**
+ * GET /doctors/:doctorId/summary — everything the Doctor Console renders.
+ *
+ * Only today's rows are counted. The previous version queried the doctor's
+ * entire history, so "Total Today" grew forever and never reset overnight.
+ */
 export async function getDoctorSummary(req, res, next) {
   try {
     const doctorId = req.params.doctorId || req.query.doctorId;
+    const centerId = req.query.centerId ? String(req.query.centerId) : null;
     const today = new Date().toISOString().slice(0, 10);
 
-    let doctorRow = null;
-    if (doctorId && doctorId !== 'null' && doctorId !== 'undefined') {
-      const { data: dData } = await supabase
-        .from('doctors')
-        .select('*, medical_centers(name), users(full_name, email)')
-        .or(`id.eq.${doctorId},user_id.eq.${doctorId}`)
-        .maybeSingle();
-      doctorRow = dData;
+    const resolved = await resolveDoctor(doctorId, centerId);
+    if (!resolved) {
+      // No "first doctor in the table" fallback: showing one doctor another
+      // doctor's live queue is worse than an explicit 404.
+      return res.status(404).json({ error: 'No doctor found for that id.' });
     }
 
-    if (!doctorRow) {
-      const { data: dFirst } = await supabase
-        .from('doctors')
-        .select('*, medical_centers(name), users(full_name, email)')
-        .limit(1)
-        .maybeSingle();
-      doctorRow = dFirst;
-    }
+    const doctorRow = resolved.doctor;
+    const posting = resolved.posting;
+    const docIdToUse = doctorRow.id;
+    const series = posting?.series ?? doctorRow.series ?? '?';
+    const maxPerHour = posting?.max_appointments_per_hour ?? doctorRow.max_appointments_per_hour ?? 4;
+    const token = (n) => `#${series}-${String(n).padStart(2, '0')}`;
 
-    const docIdToUse = doctorRow?.id || doctorId;
-
-    const { data: queueRows } = await supabase
+    let walkinQuery = supabase
       .from('walk_in_queue')
-      .select('*, doctors(series)')
+      .select('*')
       .eq('doctor_id', docIdToUse)
+      .eq('queue_date', today)
       .order('queue_number', { ascending: true });
+    if (centerId) walkinQuery = walkinQuery.eq('center_id', centerId);
+    const { data: queueRows } = await walkinQuery;
 
-    const { data: aptRows } = await supabase
+    let aptQuery = supabase
       .from('appointments')
-      .select('*, doctors(series), users:patient_id(full_name)')
-      .eq('doctor_id', docIdToUse);
+      .select('*, users:patient_id(full_name, phone)')
+      .eq('doctor_id', docIdToUse)
+      .eq('appointment_date', today);
+    if (centerId) aptQuery = aptQuery.eq('center_id', centerId);
+    const { data: aptRows } = await aptQuery;
 
+    // patient_profiles has no FK from appointments (both point at users), so it
+    // can't be embedded — one batched lookup keyed by user id instead.
+    const profileByUser = new Map();
+    const patientIds = [...new Set((aptRows || []).map(a => a.patient_id).filter(Boolean))];
+    if (patientIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('patient_profiles')
+        .select('user_id, nic, allergies')
+        .in('user_id', patientIds);
+      for (const p of profiles || []) profileByUser.set(p.user_id, p);
+    }
+
+    // Merge the two sources of a token. A walk-in row wins over an appointment
+    // with the same number, because the walk-in row is what reception updates.
     const existingKeys = new Set((queueRows || []).map(r => `${r.doctor_id}_${r.queue_number}`));
-    const combinedQueue = [...(queueRows || [])];
+    const combinedQueue = (queueRows || []).map(r => ({ ...r, _nic: r.nic, _allergies: null }));
 
     for (const a of aptRows || []) {
-      const key = `${a.doctor_id}_${a.queue_number}`;
-      if (!existingKeys.has(key)) {
-        combinedQueue.push({
-          id: a.id,
-          patient_id: a.patient_id,
-          doctor_id: a.doctor_id,
-          queue_number: a.queue_number,
-          patient_name: a.users?.full_name || 'Online Patient',
-          source: 'online',
-          status: a.status === 'booked' ? 'waiting' : a.status,
-          is_urgent: false
-        });
-      }
+      if (existingKeys.has(`${a.doctor_id}_${a.queue_number}`)) continue;
+      const profile = profileByUser.get(a.patient_id);
+      combinedQueue.push({
+        id: a.id,
+        patient_id: a.patient_id,
+        doctor_id: a.doctor_id,
+        queue_number: a.queue_number,
+        patient_name: a.users?.full_name || 'Online Patient',
+        source: 'online',
+        status: a.status === 'booked' ? 'waiting' : a.status,
+        called_at: null,
+        checked_in_at: a.created_at,
+        _nic: profile?.nic ?? null,
+        _allergies: profile?.allergies || null,
+      });
     }
 
     combinedQueue.sort((a, b) => a.queue_number - b.queue_number);
@@ -217,58 +280,79 @@ export async function getDoctorSummary(req, res, next) {
     const allQueue = combinedQueue;
     const totalToday = allQueue.length;
     const patientsSeen = allQueue.filter(q => q.status === 'completed').length;
-    const remainingTokens = allQueue.filter(q => q.status === 'waiting' || q.status === 'called' || q.status === 'in_progress').length;
-    const skippedNoShow = allQueue.filter(q => q.status === 'skipped' || q.status === 'left' || q.status === 'cancelled').length;
-    const urgentCases = allQueue.filter(q => q.is_urgent).length;
-    const avgConsultTime = patientsSeen > 0 ? `${(15 / patientsSeen).toFixed(1)} min` : '0.0 min';
+    const remainingTokens = allQueue.filter(q => ['waiting', 'called', 'in_progress'].includes(q.status)).length;
+    const skippedNoShow = allQueue.filter(q => ['skipped', 'left', 'cancelled', 'no_show'].includes(q.status)).length;
+    const avgMinutes = averageConsultMinutes(allQueue, maxPerHour);
 
-    const activeRow = allQueue.find(q => q.status === 'called' || q.status === 'in_progress') || allQueue.find(q => q.status === 'waiting') || null;
+    const activeRow =
+      allQueue.find(q => q.status === 'called' || q.status === 'in_progress') ?? null;
 
-    const mappedQueueList = allQueue.map(q => ({
-      id: q.id,
-      patientId: q.patient_id || null,
-      token: `#${doctorRow?.series || 'A'}-${String(q.queue_number).padStart(2, '0')}`,
-      name: q.patient_name || 'Walk-in Patient',
-      age: 35,
-      g: 'M',
-      complaint: q.source === 'physical' ? 'Physical Walk-in Consultation' : 'Online Booked Appointment',
-      status: q.status,
-      isUrgent: q.is_urgent || false
-    }));
+    /** Age/gender come from the NIC when there is one; otherwise they stay null. */
+    const identity = (row) => {
+      const { age, gender } = parseNic(row._nic);
+      return { age, gender, g: genderInitial(gender) };
+    };
+
+    const mappedQueueList = allQueue.map(q => {
+      const { age, g } = identity(q);
+      return {
+        id: q.id,
+        patientId: q.patient_id || null,
+        token: token(q.queue_number),
+        name: q.patient_name || 'Walk-in Patient',
+        age,
+        g,
+        nic: q._nic || null,
+        // No chief-complaint column exists yet, so this states how the patient
+        // reached the queue and nothing more — it is not clinical information.
+        visitType: q.source === 'physical' ? 'Walk-in' : 'Online',
+        allergy: q._allergies || null,
+        checkedInAt: q.checked_in_at || null,
+        calledAt: q.called_at || null,
+        status: q.status,
+      };
+    });
+
+    const activeIdentity = activeRow ? identity(activeRow) : null;
 
     res.json({
       doctor: {
         id: docIdToUse,
-        name: doctorRow?.users?.full_name || 'Dr. Medical Specialist',
-        specialization: doctorRow?.specialization || 'General Medicine',
-        roomNumber: doctorRow?.room_number || 'Room 01',
-        currentStatus: doctorRow?.current_status || 'active',
-        delayMinutes: doctorRow?.delay_minutes || 0,
-        series: doctorRow?.series || 'A',
-        centerName: doctorRow?.medical_centers?.name || 'MediQueue Central Clinic'
+        userId: doctorRow.user_id,
+        name: resolved.name,
+        specialization: resolved.specialization,
+        roomNumber: resolved.roomNumber,
+        currentStatus: posting?.current_status ?? doctorRow.current_status ?? 'active',
+        delayMinutes: posting?.delay_minutes ?? doctorRow.delay_minutes ?? 0,
+        series,
+        centerId: resolved.centerId,
+        centerName: resolved.centerName,
+        maxAppointmentsPerHour: maxPerHour,
       },
       stats: {
         totalToday,
-        avgConsultTime,
+        avgConsultTime: `${avgMinutes.toFixed(1)} min`,
+        avgConsultMinutes: Number(avgMinutes.toFixed(1)),
+        /** True while avgConsultTime is the scheduled rate, not a measurement. */
+        avgConsultIsEstimate: allQueue.filter(q => q.called_at).length < 2,
         remainingTokens,
         skippedNoShow,
         patientsSeen,
-        urgentCases
       },
       activePatient: activeRow ? {
         id: activeRow.id,
         patientId: activeRow.patient_id || null,
-        token: `#${doctorRow?.series || 'A'}-${String(activeRow.queue_number).padStart(2, '0')}`,
+        token: token(activeRow.queue_number),
         name: activeRow.patient_name || 'Patient',
-        age: 35,
-        gender: 'Male',
+        nic: activeRow._nic || null,
+        age: activeIdentity.age,
+        gender: activeIdentity.gender,
         visitType: activeRow.source === 'physical' ? 'Walk-in' : 'Online',
-        complaint: 'Consultation & Clinical Assessment',
-        allergy: null,
-        isFirstVisit: true
+        allergy: activeRow._allergies || null,
+        checkedInAt: activeRow.checked_in_at || null,
+        calledAt: activeRow.called_at || null,
       } : null,
       queueList: mappedQueueList,
-      queue: allQueue
     });
   } catch (err) {
     next(err);
@@ -765,12 +849,6 @@ function parseTimeToMinutes(timeStr) {
   return h * 60 + (m || 0);
 }
 
-const FALLBACK_DOCTORS = [
-  { id: 'doc-1', name: 'Dr. Aisha Patel', dept: 'Cardiology', room: 'Room 03', series: 'A', status: 'active', avgConsultMinutes: 12, maxAppointmentsPerHour: 5 },
-  { id: 'doc-2', name: 'Dr. Marcus Reeves', dept: 'General Medicine', room: 'Room 07', series: 'B', status: 'active', avgConsultMinutes: 10, maxAppointmentsPerHour: 6 },
-  { id: 'doc-3', name: 'Dr. Sofia Montoya', dept: 'Pediatrics', room: 'Room 11', series: 'C', status: 'delayed', avgConsultMinutes: 15, maxAppointmentsPerHour: 4 },
-];
-
 /**
  * Shapes one `doctor_center_assignments` row into the per-center object the
  * frontend `ApiDoctor.centers[]` expects.
@@ -835,7 +913,6 @@ export async function getDoctors(req, res, next) {
     const centerFilter = req.query.centerId ? String(req.query.centerId) : null;
     const assignableFor = req.query.assignableFor ? String(req.query.assignableFor) : null;
     const unassignedOnly = req.query.unassigned === 'true';
-    const isScoped = !!centerFilter || !!assignableFor || unassignedOnly;
 
     let { data: doctorsData, error: dErr } = await supabase
       .from('doctors')
@@ -902,40 +979,16 @@ export async function getDoctors(req, res, next) {
       return res.json({ doctors: out });
     }
 
-    // Scoped queries must not fall back to an unfiltered roster.
-    if (isScoped) {
-      return res.json({ doctors: [] });
-    }
-
-    const { data: usersData } = await supabase
-      .from('users')
-      .select('id, full_name, email, phone')
-      .eq('role', 'doctor');
-
-    if (usersData && usersData.length > 0) {
-      const mappedFromUsers = usersData.map((u, i) => ({
-        id: u.id,
-        userId: u.id,
-        name: u.full_name,
-        email: u.email,
-        phone: u.phone,
-        dept: 'General Medicine',
-        specialization: 'General Medicine',
-        room: `Room 0${i + 1}`,
-        series: String.fromCharCode(65 + i),
-        status: 'active',
-        approvalStatus: 'approved',
-        avgConsultMinutes: 15,
-        maxAppointmentsPerHour: 4,
-        centerId: null,
-        centerName: null,
-        centers: [],
-      }));
-
-      return res.json({ doctors: mappedFromUsers });
-    }
-
-    res.json({ doctors: FALLBACK_DOCTORS.map(d => ({ ...d, approvalStatus: 'approved', centerId: null, centerName: null, centers: [] })) });
+    // An empty `doctors` table means no doctors — nothing else.
+    //
+    // This used to invent a roster: first by synthesising one from every user
+    // with role='doctor' (handing each a made-up "Room 0N", series letter and
+    // "General Medicine" specialisation), and failing that from a hardcoded
+    // trio of fictional doctors. Both showed up on the patient booking screen
+    // and the public TV board as though they were real staff, then disappeared
+    // the moment an actual doctor was registered. Callers get an honest empty
+    // list now and render their own empty state.
+    res.json({ doctors: [] });
   } catch (err) {
     next(err);
   }

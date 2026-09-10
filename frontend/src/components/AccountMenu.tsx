@@ -35,8 +35,11 @@ export default function AccountMenu({ compact = false, phone, nic, specializatio
   const displayName = (user as any)?.full_name || user.name || 'User Profile'
   const displayPhone = phone || (user as any)?.phone || ''
   const displayNic = nic || ''
-  const displaySpec = specialization || (user as any)?.specialization || (user as any)?.dept || 'General Medicine'
-  const displaySeries = series || (user as any)?.series || 'A'
+  // Empty rather than a guess. These defaulted to 'General Medicine' and 'A',
+  // so a doctor with no specialisation or token series on record saw confident
+  // values in their own profile card that nobody had entered.
+  const displaySpec = specialization || (user as any)?.specialization || (user as any)?.dept || ''
+  const displaySeries = series || (user as any)?.series || ''
 
   const handleSignOut = async () => {
     setSigningOut(true)
@@ -108,14 +111,20 @@ export default function AccountMenu({ compact = false, phone, nic, specializatio
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-2)' }}>
                   <Stethoscope size={13} color="var(--blue)" style={{ flexShrink: 0 }} />
                   <span style={{ fontWeight: 600 }}>Specialization:</span>
-                  <span style={{ marginLeft: 'auto', fontWeight: 600, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>{displaySpec}</span>
+                  <span style={{ marginLeft: 'auto', fontWeight: 600, color: displaySpec ? 'var(--text-1)' : 'var(--text-4)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>
+                    {displaySpec || 'Not set'}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-2)' }}>
                   <Tag size={13} color="var(--blue)" style={{ flexShrink: 0 }} />
                   <span style={{ fontWeight: 600 }}>Series:</span>
-                  <span style={{ marginLeft: 'auto', fontWeight: 700, color: 'var(--blue-dark)', background: 'var(--blue-dim)', border: '1px solid var(--blue-border)', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>
-                    Series #{displaySeries}
-                  </span>
+                  {displaySeries ? (
+                    <span style={{ marginLeft: 'auto', fontWeight: 700, color: 'var(--blue-dark)', background: 'var(--blue-dim)', border: '1px solid var(--blue-border)', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>
+                      Series #{displaySeries}
+                    </span>
+                  ) : (
+                    <span style={{ marginLeft: 'auto', fontWeight: 600, color: 'var(--text-4)' }}>Not set</span>
+                  )}
                 </div>
               </>
             )}
@@ -151,6 +160,7 @@ export default function AccountMenu({ compact = false, phone, nic, specializatio
           {/* Edit Profile Action */}
           {onEditProfile && (
             <button
+              role="menuitem"
               onClick={() => {
                 setOpen(false)
                 onEditProfile()

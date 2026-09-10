@@ -3,12 +3,36 @@ import { checkSlotAvailability } from '../services/slotLimiterService.js';
 import { evaluatePatientNoShowStatus } from '../services/noShowService.js';
 import { notificationProvider } from '../config/notification.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function createAppointment(req, res, next) {
   try {
     const { doctorId, centerId, appointmentDate, slotHour, patientId } = req.body;
 
-    // 1. Check Slot Limit (BR-02, FR-03: Max 4 patients/hr)
-    const availability = await checkSlotAvailability(doctorId, appointmentDate, slotHour);
+    // 1. Validate the ids up front.
+    //
+    // Each of these used to fall back to "the first row in the table" when the
+    // id wasn't a UUID: an unrecognised patientId booked the appointment for
+    // whichever patient happened to be first in `users`, and an unrecognised
+    // doctorId or centerId booked against an arbitrary doctor or clinic. A bad
+    // id must be an error, never a silent substitution.
+    const missing = [];
+    if (!UUID_RE.test(String(patientId ?? ''))) missing.push('patientId');
+    if (!UUID_RE.test(String(doctorId ?? ''))) missing.push('doctorId');
+    if (!UUID_RE.test(String(centerId ?? ''))) missing.push('centerId');
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: `Cannot book this appointment — ${missing.join(', ')} must be a valid id.`,
+        fields: missing,
+      });
+    }
+
+    const targetPatientId = String(patientId);
+    const targetDoctorId = String(doctorId);
+    const targetCenterId = String(centerId);
+
+    // 2. Check Slot Limit (BR-02, FR-03: Max 4 patients/hr)
+    const availability = await checkSlotAvailability(targetDoctorId, appointmentDate, slotHour);
     if (!availability.available) {
       return res.status(400).json({
         error: 'Slot limit reached for this hour (Max 4 patients/hr). Please select another time slot.',
@@ -16,83 +40,83 @@ export async function createAppointment(req, res, next) {
       });
     }
 
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-    // 2. Resolve DB Patient UUID & Profile Details
-    let targetPatientId = patientId;
-    if (!uuidRegex.test(targetPatientId)) {
-      const { data: foundUser } = await supabase
+    // 3. Confirm the referenced rows exist, and gather what we need from them.
+    const [patientRes, doctorRes, centerRes, postingRes] = await Promise.all([
+      supabase
         .from('users')
-        .select('id')
-        .eq('role', 'patient')
-        .limit(1)
-        .maybeSingle();
+        .select('id, full_name, phone, role')
+        .eq('id', targetPatientId)
+        .maybeSingle(),
+      supabase
+        .from('doctors')
+        .select('id, series, specialization, room_number, users(full_name)')
+        .eq('id', targetDoctorId)
+        .maybeSingle(),
+      supabase
+        .from('medical_centers')
+        .select('id, name')
+        .eq('id', targetCenterId)
+        .maybeSingle(),
+      // Series is per posting since migration 010; the doctors row is the
+      // pre-migration fallback.
+      supabase
+        .from('doctor_center_assignments')
+        .select('series, room_number')
+        .eq('doctor_id', targetDoctorId)
+        .eq('center_id', targetCenterId)
+        .maybeSingle(),
+    ]);
 
-      if (foundUser) targetPatientId = foundUser.id;
-    }
+    if (!patientRes.data) return res.status(404).json({ error: 'That patient account no longer exists.' });
+    if (!doctorRes.data) return res.status(404).json({ error: 'That doctor is no longer available.' });
+    if (!centerRes.data) return res.status(404).json({ error: 'That medical center no longer exists.' });
 
-    // Fetch patient name & contact details for queue mirroring
-    const { data: userData } = await supabase
-      .from('users')
-      .select('full_name, phone, patient_profiles(nic, emergency_contact_phone)')
-      .eq('id', targetPatientId)
+    const { data: profileRow } = await supabase
+      .from('patient_profiles')
+      .select('nic, emergency_contact_phone')
+      .eq('user_id', targetPatientId)
       .maybeSingle();
 
-    const patientName = userData?.full_name || 'Online Patient';
-    const patientPhone = userData?.phone || userData?.patient_profiles?.[0]?.emergency_contact_phone || null;
-    const patientNic = userData?.patient_profiles?.[0]?.nic || null;
+    const patientName = patientRes.data.full_name || 'Online Patient';
+    const patientPhone = patientRes.data.phone || profileRow?.emergency_contact_phone || null;
+    const patientNic = profileRow?.nic || null;
+    const docSeries = postingRes.data?.series || doctorRes.data.series || 'A';
 
-    // 3. Resolve valid Doctor UUID & Series Letter
-    let targetDoctorId = doctorId;
-    if (!uuidRegex.test(targetDoctorId)) {
-      const { data: foundDoc } = await supabase.from('doctors').select('id').limit(1).maybeSingle();
-      if (foundDoc) targetDoctorId = foundDoc.id;
-    }
-
-    const { data: docData } = await supabase
-      .from('doctors')
-      .select('series')
-      .eq('id', targetDoctorId)
-      .maybeSingle();
-    const docSeries = docData?.series || 'A';
-
-    // 4. Resolve valid Center UUID
-    let targetCenterId = centerId;
-    if (!uuidRegex.test(targetCenterId)) {
-      const { data: foundCenter } = await supabase.from('medical_centers').select('id').limit(1).maybeSingle();
-      if (foundCenter) targetCenterId = foundCenter.id;
-    }
-
-    // 5. Evaluate No-Show Penalty Status (BR-03, FR-04)
+    // 4. Evaluate No-Show Penalty Status (BR-03, FR-04)
     const noShowStatus = await evaluatePatientNoShowStatus(targetPatientId);
 
-    // 6. Calculate Unified Next Sequential Token Number across BOTH tables
+    // 5. Next sequential token, counting both tables so an online booking and a
+    //    printed slip never collide. Scoped to this center: a doctor working at
+    //    two clinics runs an independent number series at each.
     const dateStr = appointmentDate || new Date().toISOString().split('T')[0];
 
-    const { data: maxWalkin } = await supabase
-      .from('walk_in_queue')
-      .select('queue_number')
-      .eq('doctor_id', targetDoctorId)
-      .eq('queue_date', dateStr)
-      .order('queue_number', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const [maxWalkinRes, maxApptRes] = await Promise.all([
+      supabase
+        .from('walk_in_queue')
+        .select('queue_number')
+        .eq('doctor_id', targetDoctorId)
+        .eq('center_id', targetCenterId)
+        .eq('queue_date', dateStr)
+        .order('queue_number', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('appointments')
+        .select('queue_number')
+        .eq('doctor_id', targetDoctorId)
+        .eq('center_id', targetCenterId)
+        .eq('appointment_date', dateStr)
+        .order('queue_number', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
-    const { data: maxAppt } = await supabase
-      .from('appointments')
-      .select('queue_number')
-      .eq('doctor_id', targetDoctorId)
-      .eq('appointment_date', dateStr)
-      .order('queue_number', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const wMax = maxWalkin?.queue_number || 0;
-    const aMax = maxAppt?.queue_number || 0;
+    const wMax = maxWalkinRes.data?.queue_number || 0;
+    const aMax = maxApptRes.data?.queue_number || 0;
     const nextTokenNum = Math.max(wMax, aMax) + 1;
-    const queueTokenStr = `#${docSeries}-${nextTokenNum < 10 ? '0' + nextTokenNum : nextTokenNum}`;
+    const queueTokenStr = `#${docSeries}-${String(nextTokenNum).padStart(2, '0')}`;
 
-    // 7. Insert into Supabase `appointments` table
+    // 6. Insert into `appointments`.
     const { data: apptData, error: apptErr } = await supabase
       .from('appointments')
       .insert([
@@ -107,18 +131,31 @@ export async function createAppointment(req, res, next) {
           status: 'booked'
         }
       ])
-      .select();
+      .select()
+      .maybeSingle();
 
-    if (apptErr) {
-      console.warn('Appointment insert notice:', apptErr.message);
+    // A failed insert used to be logged as a "notice" and the handler carried
+    // on to return 201 with `id: 'apt_<timestamp>'`. The patient got a booking
+    // confirmation and a token for an appointment that existed nowhere, and it
+    // disappeared on their next refresh.
+    if (apptErr || !apptData) {
+      return res.status(500).json({
+        error: apptErr?.message
+          ? `Could not save this appointment: ${apptErr.message}`
+          : 'Could not save this appointment. Please try again.',
+      });
     }
 
-    // 8. Auto-mirror entry into `walk_in_queue` for Receptionist & Doctor Desk synchronization
+    // 7. Mirror into `walk_in_queue` so the Reception Desk and Doctor Console
+    //    see online bookings in the same line as walk-ins. `center_id` matters:
+    //    without it the desk's center-scoped query skipped online bookings
+    //    entirely, so a patient who booked online never appeared in the queue.
     const { error: syncErr } = await supabase
       .from('walk_in_queue')
       .insert([
         {
           doctor_id: targetDoctorId,
+          center_id: targetCenterId,
           patient_name: patientName,
           nic: patientNic,
           sms_phone: patientPhone,
@@ -130,6 +167,8 @@ export async function createAppointment(req, res, next) {
       ]);
 
     if (syncErr) {
+      // The appointment itself is saved, so this is recoverable — the merge in
+      // getQueue still surfaces the booking from the appointments table.
       console.warn('walk_in_queue mirror sync notice:', syncErr.message);
     }
 
@@ -146,13 +185,18 @@ export async function createAppointment(req, res, next) {
     res.status(201).json({
       message: 'Appointment booked successfully',
       appointment: {
-        id: apptData && apptData[0] ? apptData[0].id : `apt_${Date.now()}`,
+        id: apptData.id,
         doctorId: targetDoctorId,
+        doctorName: doctorRes.data.users?.full_name || 'Doctor',
+        specialization: doctorRes.data.specialization || null,
         patientId: targetPatientId,
         centerId: targetCenterId,
+        centerName: centerRes.data.name || null,
+        roomNumber: postingRes.data?.room_number || doctorRes.data.room_number || null,
         appointmentDate: dateStr,
         slotHour: slotHour || 10,
         queueToken: queueTokenStr,
+        status: 'booked',
         isLateNumber: noShowStatus.shouldAssignLateNumber,
         queuePosition: noShowStatus.shouldAssignLateNumber ? 'Late Queue (End of Line)' : queueTokenStr
       }
@@ -193,20 +237,41 @@ export async function getPatientAppointments(req, res, next) {
       return res.json({ appointments: [] });
     }
 
+    // Token series is per posting since migration 010, so resolve the series
+    // for each (doctor, center) pair rather than reading the legacy column.
+    const seriesByPair = new Map();
+    const doctorIds = [...new Set(data.map(a => a.doctor_id).filter(Boolean))];
+    if (doctorIds.length > 0) {
+      const { data: postings } = await supabase
+        .from('doctor_center_assignments')
+        .select('doctor_id, center_id, series, room_number')
+        .in('doctor_id', doctorIds);
+      for (const p of postings || []) {
+        seriesByPair.set(`${p.doctor_id}_${p.center_id}`, p);
+      }
+    }
+
     const mapped = data.map(a => {
       const h = a.slot_hour ?? 10;
       const pmHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
       const ampm = h >= 12 ? 'PM' : 'AM';
       const formattedTime = `${pmHour < 10 ? '0' + pmHour : pmHour}:00 ${ampm}`;
-      const docSeries = a.doctor?.series || 'A';
+      const posting = seriesByPair.get(`${a.doctor_id}_${a.center_id}`);
+      const docSeries = posting?.series || a.doctor?.series || '?';
       const numPadded = String(a.queue_number).padStart(2, '0');
 
       return {
         id: a.id,
         doctorId: a.doctor_id,
         doctorName: a.doctor?.user?.full_name || 'Doctor',
-        specialization: a.doctor?.specialization || 'General Medicine',
-        centerName: a.center?.name || 'MediQueue Clinic',
+        // Null rather than an invented "General Medicine" / "MediQueue Clinic":
+        // the dashboard renders a dash for a missing value, and a patient
+        // reading their own appointment shouldn't be shown a specialisation or
+        // a clinic name that nobody entered.
+        specialization: a.doctor?.specialization || null,
+        centerId: a.center_id ?? null,
+        centerName: a.center?.name || null,
+        roomNumber: posting?.room_number || a.doctor?.room_number || null,
         appointmentDate: a.appointment_date,
         slotHour: a.slot_hour,
         timeLabel: formattedTime,

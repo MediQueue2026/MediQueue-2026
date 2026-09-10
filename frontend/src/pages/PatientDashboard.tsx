@@ -20,11 +20,23 @@ import {
   fetchDoctorsList,
   fetchCentersList,
   fetchPatientSubscriptions,
+  fetchPatientDelayAlerts,
   toggleDoctorSubscriptionAPI,
   cancelPatientAppointment,
   formatSlotTime
 } from '../services/patientService'
 import { PatientProfile, HealthRecordItem, AppointmentItem } from '../types/patient'
+import type { ApiDelayAlert } from '../lib/api'
+
+/** "just now" / "12 min ago" / "2 h ago" — for the delay feed timestamps. */
+function timeAgo(iso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
+  if (mins < 1) return 'just now'
+  if (mins === 1) return '1 min ago'
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.round(mins / 60)
+  return hrs === 1 ? '1 h ago' : `${hrs} h ago`
+}
 
 const NAV_PATIENT = [
   { id: 'overview',      icon: <Home size={15} />,         label: 'Overview' },
@@ -62,7 +74,12 @@ export default function PatientDashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
-  const activeUserId = user?.id || 'demo-patient'
+  // Empty, not 'demo-patient'. That literal was sent to the API as a patient
+  // id, and the booking endpoint used to accept any non-UUID by substituting
+  // the first patient row in the database — so a booking made before the
+  // session resolved was filed against a stranger's account. The endpoint now
+  // rejects it, and this stops the request being made at all.
+  const activeUserId = user?.id ?? ''
 
   // Patient Profile state (dynamically bound to logged-in user)
   const [profile, setProfile] = useState<PatientProfile>({
@@ -87,8 +104,22 @@ export default function PatientDashboard() {
   const [recordFilter, setRecordFilter] = useState<'all' | 'prescription' | 'lab_report'>('all')
   const [myAppointments, setMyAppointments] = useState<AppointmentItem[]>([])
 
+  /**
+   * Live delay notices for doctors this patient subscribes to (BR-05 / FR-07).
+   *
+   * These are real `delay_alerts` rows, not a guess derived from each doctor's
+   * current status. The dashboard used to render its delay banner from
+   * `doctors.status === 'delayed'`, which had two problems: the doctor list was
+   * fetched once on mount and never refreshed, so a delay raised while the
+   * patient sat on the page never appeared; and the notice vanished the instant
+   * the doctor resumed, taking the reason and the "+15 min" with it.
+   */
+  const [delayAlerts, setDelayAlerts] = useState<ApiDelayAlert[]>([])
+  /** Alert ids the patient has dismissed this session — banner only, feed keeps them. */
+  const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([])
+
   // Cancellation Modal state
-  const [cancellingAppt, setCancellingAppt] = useState<{ id: string; docName: string; token: string } | null>(null)
+  const [cancellingAppt, setCancellingAppt] = useState<{ id: string; docName: string; token: string | null } | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
   const handleConfirmCancel = async () => {
@@ -97,7 +128,7 @@ export default function PatientDashboard() {
       setCancelling(true)
       const ok = await cancelPatientAppointment(cancellingAppt.id)
       if (ok) {
-        showToast(`Appointment ${cancellingAppt.token} has been cancelled successfully.`)
+        showToast(`Appointment ${cancellingAppt.token ?? ''} has been cancelled successfully.`.replace('  ', ' '))
         const aData = await fetchPatientAppointments(user.id)
         setMyAppointments(aData)
       } else {
@@ -118,32 +149,47 @@ export default function PatientDashboard() {
   const activeAppointment = myAppointments.find(a => a.status === 'waiting' || a.status === 'booked' || a.status === 'in_consultation') || myAppointments[0]
 
   useEffect(() => {
+    let cancelled = false
     async function loadDynamicData() {
       if (!user) return
-      const pData = await fetchPatientProfile(user.id, user.name, user.email)
+      // Parallel: these are independent reads and the page has six of them.
+      const [pData, rData, aData, dData, cData, sData, alertData] = await Promise.all([
+        fetchPatientProfile(user.id, user.name, user.email),
+        fetchHealthRecords(user.id),
+        fetchPatientAppointments(user.id),
+        fetchDoctorsList(),
+        fetchCentersList(),
+        fetchPatientSubscriptions(user.id),
+        fetchPatientDelayAlerts(user.id),
+      ])
+      if (cancelled) return
       setProfile(pData)
-      const rData = await fetchHealthRecords(user.id)
       setRecords(rData)
-      const aData = await fetchPatientAppointments(user.id)
       setMyAppointments(aData)
-      const dData = await fetchDoctorsList()
       setDoctors(dData)
-      const cData = await fetchCentersList()
       setCenters(cData)
-      if (cData.length > 0) setSelectedMapCenterId(cData[0].id)
-      const sData = await fetchPatientSubscriptions(user.id)
+      if (cData.length > 0) setSelectedMapCenterId(prev => prev || cData[0].id)
       setSubscribedIds(sData)
+      setDelayAlerts(alertData)
     }
     loadDynamicData()
+    return () => { cancelled = true }
   }, [user?.id, user?.name, user?.email])
 
-  // Live 3-second polling stream for health records & appointments
+  /**
+   * Live polling. `doctors` and `delayAlerts` are refreshed here too — they
+   * previously loaded once on mount, so a doctor going on break or publishing a
+   * delay while the patient had the page open was never reflected.
+   */
   useEffect(() => {
     if (!user?.id) return
+    const patientId = user.id
     const interval = setInterval(() => {
-      fetchHealthRecords(user.id).then(rData => setRecords(rData)).catch(() => {})
-      fetchPatientAppointments(user.id).then(aData => setMyAppointments(aData)).catch(() => {})
-    }, 3000)
+      fetchHealthRecords(patientId).then(setRecords).catch(() => {})
+      fetchPatientAppointments(patientId).then(setMyAppointments).catch(() => {})
+      fetchDoctorsList().then(setDoctors).catch(() => {})
+      fetchPatientDelayAlerts(patientId).then(setDelayAlerts).catch(() => {})
+    }, 5000)
     return () => clearInterval(interval)
   }, [user?.id])
 
@@ -212,6 +258,9 @@ export default function PatientDashboard() {
     return type === recordFilter
   })
 
+  /** Live, undismissed delay notices — what the overview banner shows. */
+  const activeDelayAlerts = delayAlerts.filter(a => a.isActive && !dismissedAlerts.includes(a.id))
+
 
 
   return (
@@ -222,7 +271,7 @@ export default function PatientDashboard() {
         isOpen={showRxModal}
         onClose={() => setShowRxModal(false)}
         patientName={displayName}
-        patientToken={activeAppointment?.queueToken || "#A-14"}
+        patientToken={activeAppointment?.queueToken ?? '—'}
       />
       <UploadReportModal
         isOpen={showUploadModal}
@@ -273,7 +322,9 @@ export default function PatientDashboard() {
         backdropFilter: 'blur(28px) saturate(160%)',
         WebkitBackdropFilter: 'blur(28px) saturate(160%)',
         borderRight: '1px solid rgba(18, 198, 186, 0.20)',
-        position: 'fixed', top: 42, bottom: 0, left: 0,
+        // 46px == the fixed DevNavbar's height (see App.tsx paddingTop). At 42 the
+        // sidebar's first 4px sat behind the navbar.
+        position: 'fixed', top: 46, bottom: 0, left: 0,
         display: 'flex', flexDirection: 'column', padding: '18px 10px', zIndex: 30,
         boxShadow: '4px 0 24px rgba(8, 48, 45, 0.10)',
       }}>
@@ -335,7 +386,7 @@ export default function PatientDashboard() {
             <span style={{ fontSize: 12.5, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {activeAppointment ? (
                 <>
-                  <strong style={{ color: 'var(--blue)' }}>Token {activeAppointment.queueToken}</strong> for {activeAppointment.doctorName} — <strong style={{ color: 'var(--blue)' }}>{formatSlotTime(activeAppointment.slotHour)}</strong>
+                  <strong style={{ color: 'var(--blue)' }}>Token {activeAppointment.queueToken ?? '—'}</strong> for {activeAppointment.doctorName} — <strong style={{ color: 'var(--blue)' }}>{formatSlotTime(activeAppointment.slotHour)}</strong>
                 </>
               ) : (
                 'No active appointment for today. Click "Book Doctor" to schedule.'
@@ -406,41 +457,49 @@ export default function PatientDashboard() {
                 </div>
               </div>
 
-              {/* ── SUBSCRIBED DOCTORS ONLY DELAY ALERTS ── */}
-              {doctors
-                .filter(d => (d.status === 'delayed' || (d as any).delayMinutes > 0) && (subscribedIds.includes(d.name) || subscribedIds.includes(d.id)))
-                .map(d => (
-                  <div key={d.id} style={{
-                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(217, 119, 6, 0.1) 100%)',
-                    border: '1px solid rgba(245, 158, 11, 0.45)',
-                    borderRadius: 14, padding: '14px 20px', marginBottom: 18,
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 38, height: 38, borderRadius: 10, background: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>
-                        <Bell size={20} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span>🚨 Subscribed Doctor Delay Notice: {d.name}</span>
-                          <span style={{ fontSize: 11, background: 'rgba(245, 158, 11, 0.25)', padding: '2px 8px', borderRadius: 10, color: '#fff' }}>
-                            +{(d as any).delayMinutes || 15} Mins Late
-                          </span>
+              {/* ── LIVE DELAY NOTICES FROM SUBSCRIBED DOCTORS (BR-05 / FR-07) ──
+                  Straight from `delay_alerts`; the server already scoped these
+                  to doctors this patient subscribes to. Each carries the reason
+                  the doctor gave and how many patients were texted. */}
+              {activeDelayAlerts.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {activeDelayAlerts.map(a => (
+                    <div key={a.id} style={{
+                      background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(217, 119, 6, 0.1) 100%)',
+                      border: '1px solid rgba(245, 158, 11, 0.45)',
+                      borderRadius: 14, padding: '14px 20px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                        <div style={{ width: 38, height: 38, borderRadius: 10, background: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>
+                          <Bell size={20} />
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
-                          {d.dept} ({d.centerName || 'Clinic'}) has published a delay notice. Please adjust your travel arrival time.
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: '#B45309', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span>Delay notice — {a.doctorName}</span>
+                            <span style={{ fontSize: 11, background: '#F59E0B', padding: '2px 8px', borderRadius: 10, color: '#fff', fontWeight: 800 }}>
+                              +{a.delayMinutes} min late
+                            </span>
+                            <span style={{ fontSize: 10.5, color: 'var(--text-4)', fontWeight: 600 }}>{timeAgo(a.createdAt)}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>
+                            {[a.specialization, a.roomNumber, a.centerName].filter(Boolean).join(' · ') || 'Consultation'}
+                            {a.reason ? ` — ${a.reason}.` : '.'} Please adjust your arrival time.
+                          </div>
                         </div>
                       </div>
+                      <button
+                        onClick={() => setDismissedAlerts(prev => [...prev, a.id])}
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontWeight: 700, flexShrink: 0 }}
+                        title="Hide this banner — the notice stays in your Subscribed Doctors feed"
+                      >
+                        Dismiss
+                      </button>
                     </div>
-                    <button
-                      onClick={() => toggleSubscribe(d.name, d.id)}
-                      className="btn btn-amber btn-sm"
-                      style={{ fontWeight: 700 }}
-                    >
-                      Subscribed ✓
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
 
               {/* ── ACTIVE TOKEN HERO (HIGH VISIBILITY GLASSMORPHISM CARD) ── */}
               {activeAppointment ? (
@@ -473,7 +532,7 @@ export default function PatientDashboard() {
                     <div style={{ textAlign: 'center', paddingRight: 28 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255, 255, 255, 0.6)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>Your Queue Token</div>
                       <div style={{ fontSize: 62, fontWeight: 900, color: 'var(--blue)', lineHeight: 1, letterSpacing: '-0.04em', fontFamily: 'monospace', textShadow: '0 0 25px rgba(18, 198, 186, 0.5)' }}>
-                        {activeAppointment.queueToken}
+                        {activeAppointment.queueToken ?? '—'}
                       </div>
                       <div style={{ marginTop: 10 }}>
                         <StatusBadge status={activeAppointment.status === 'in_consultation' ? 'active' : 'waiting'} />
@@ -502,7 +561,7 @@ export default function PatientDashboard() {
                     <div>
                       <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.6)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Doctor & Location</div>
                       <div style={{ fontSize: 16, fontWeight: 800, color: '#ffffff', marginBottom: 2 }}>{activeAppointment.doctorName}</div>
-                      <div style={{ fontSize: 12.5, color: 'var(--blue)', marginBottom: 12, fontWeight: 600 }}>{activeAppointment.specialization} · {activeAppointment.centerName}</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--blue)', marginBottom: 12, fontWeight: 600 }}>{[activeAppointment.specialization, activeAppointment.centerName].filter(Boolean).join(' · ') || '—'}</div>
                       
                       {/* Interactive Token Action Buttons */}
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -564,9 +623,9 @@ export default function PatientDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div>
                               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{u.doctorName}</div>
-                              <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>{u.specialization} · {u.centerName}</div>
+                              <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>{[u.specialization, u.centerName].filter(Boolean).join(' · ') || '—'}</div>
                             </div>
-                            <span className="badge badge-blue" style={{ fontSize: 11 }}>{u.queueToken}</span>
+                            <span className="badge badge-blue" style={{ fontSize: 11 }}>{u.queueToken ?? '—'}</span>
                           </div>
                           <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -637,10 +696,26 @@ export default function PatientDashboard() {
                     <div key={doc.id} style={{ background: '#ffffff', borderRadius: 14, padding: 18, border: '1px solid var(--border-md)' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
                         <Avatar name={doc.name} size={42} />
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>{doc.name}</div>
-                          <div style={{ fontSize: 12, color: 'var(--blue-dark)', fontWeight: 600 }}>{doc.spec} · {doc.room}</div>
-                          <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>Est. wait {doc.wait}</div>
+                          {/* Only what's actually recorded — this used to print
+                              "General Medicine · Room 01" for every doctor
+                              regardless of what the database held. */}
+                          <div style={{ fontSize: 12, color: 'var(--blue-dark)', fontWeight: 600 }}>
+                            {[doc.spec, doc.room].filter(Boolean).join(' · ') || 'Details not set'}
+                          </div>
+                          {/* Labelled as the scheduled consult length, because
+                              that is what it is — not a live queue estimate. */}
+                          {doc.avgConsultMinutes != null && (
+                            <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 2 }}>
+                              ~{doc.avgConsultMinutes} min per consultation
+                            </div>
+                          )}
+                          {doc.status === 'delayed' && (
+                            <div style={{ fontSize: 11, color: '#B45309', fontWeight: 700, marginTop: 3 }}>
+                              ⏱ Running {doc.delayMinutes > 0 ? `${doc.delayMinutes} min ` : ''}late
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
@@ -691,49 +766,65 @@ export default function PatientDashboard() {
                   )}
                 </div>
 
+                {/* Delay feed, newest first. Built from `delay_alerts` rows, so
+                    a cleared notice stays visible as history with the reason
+                    the doctor gave — the old version rebuilt this from each
+                    doctor's live status and lost the notice the moment they
+                    resumed. */}
                 <div style={{ background: '#ffffff', borderRadius: 12, padding: 18, border: '1px solid var(--border-md)' }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 12 }}>Live Activity & Delay Updates</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {doctors.filter(d => subscribedIds.includes(d.name) || subscribedIds.includes(d.id)).length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>Live Activity &amp; Delay Updates</div>
+                    {activeDelayAlerts.length > 0 && (
+                      <span className="badge badge-amber" style={{ fontSize: 10.5 }}>
+                        {activeDelayAlerts.length} live
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 420, overflowY: 'auto' }}>
+                    {subscribedIds.length === 0 ? (
                       <div style={{ padding: 16, background: '#f8fafc', borderRadius: 10, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
                         No doctor subscriptions active. Subscribe to a doctor to receive live delay alerts.
                       </div>
+                    ) : delayAlerts.length === 0 ? (
+                      <div style={{ padding: 16, background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: 10, fontSize: 12.5 }}>
+                        <div style={{ color: '#10B981', fontWeight: 700, marginBottom: 2 }}>● All subscribed doctors on schedule</div>
+                        <div style={{ color: 'var(--text-3)', fontSize: 11.5 }}>
+                          No delay notices have been published. You'll get an SMS and see it here the moment one is.
+                        </div>
+                      </div>
                     ) : (
-                      (() => {
-                        const subDocs = doctors.filter(d => subscribedIds.includes(d.name) || subscribedIds.includes(d.id));
-                        const delayedSubDocs = subDocs.filter(d => d.status === 'delayed' || (d as any).delayMinutes > 0);
-                        const onTimeSubDocs = subDocs.filter(d => d.status !== 'delayed' && !(d as any).delayMinutes);
-
-                        return (
-                          <>
-                            {delayedSubDocs.map(d => (
-                              <div key={d.id} style={{ padding: 14, borderRadius: 10, background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.3)', fontSize: 12.5 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#F59E0B', fontWeight: 800, marginBottom: 4 }}>
-                                  <span>🚨 {d.name} ({d.dept})</span>
-                                  <span style={{ fontSize: 11, background: 'rgba(245,158,11,0.2)', padding: '2px 8px', borderRadius: 10 }}>
-                                    +{(d as any).delayMinutes || 15} Min Delay
-                                  </span>
-                                </div>
-                                <div style={{ color: 'var(--text-2)' }}>
-                                  Doctor has posted a live delay alert for {d.room || 'consultation room'}. Please adjust your travel arrival time.
-                                </div>
-                              </div>
-                            ))}
-
-                            {onTimeSubDocs.map(d => (
-                              <div key={d.id} style={{ padding: 12, borderRadius: 10, background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)', fontSize: 12.5 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#10B981', fontWeight: 700, marginBottom: 2 }}>
-                                  <span>● {d.name} ({d.dept})</span>
-                                  <span style={{ fontSize: 10.5, color: '#10B981' }}>On Schedule</span>
-                                </div>
-                                <div style={{ color: 'var(--text-3)', fontSize: 11.5 }}>
-                                  Consultations running on time at {d.room || 'Room 01'} ({d.centerName || 'Clinic'}).
-                                </div>
-                              </div>
-                            ))}
-                          </>
-                        )
-                      })()
+                      delayAlerts.map(a => (
+                        <div
+                          key={a.id}
+                          style={{
+                            padding: 14, borderRadius: 10, fontSize: 12.5,
+                            background: a.isActive ? 'rgba(245, 158, 11, 0.08)' : 'rgba(16, 185, 129, 0.06)',
+                            border: `1px solid ${a.isActive ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.2)'}`,
+                          }}
+                        >
+                          <div style={{
+                            display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap',
+                            color: a.isActive ? '#B45309' : '#10B981', fontWeight: 800, marginBottom: 4,
+                          }}>
+                            <span>{a.isActive ? '⏱' : '✓'} {a.doctorName}{a.specialization ? ` (${a.specialization})` : ''}</span>
+                            <span style={{
+                              fontSize: 11, padding: '2px 8px', borderRadius: 10,
+                              background: a.isActive ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.15)',
+                            }}>
+                              {a.isActive ? `+${a.delayMinutes} min delay` : 'Back on schedule'}
+                            </span>
+                          </div>
+                          <div style={{ color: 'var(--text-2)' }}>
+                            {a.reason || 'Running behind schedule.'}
+                            {a.roomNumber ? ` (${a.roomNumber})` : ''}
+                          </div>
+                          <div style={{ color: 'var(--text-4)', fontSize: 11, marginTop: 5, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <span>Published {timeAgo(a.createdAt)}</span>
+                            {a.notifiedCount > 0 && <span>· {a.notifiedCount} patient{a.notifiedCount === 1 ? '' : 's'} texted</span>}
+                            {!a.isActive && a.clearedAt && <span>· cleared {timeAgo(a.clearedAt)}</span>}
+                          </div>
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
@@ -989,7 +1080,7 @@ export default function PatientDashboard() {
           <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, background: '#ffffff', borderRadius: 16, padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
             <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)', marginBottom: 8 }}>Cancel Booking Confirmation</h3>
             <p style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 20 }}>
-              Are you sure you want to cancel your appointment <strong>{cancellingAppt.token}</strong> with <strong>{cancellingAppt.docName}</strong>? This slot will be released for other patients.
+              Are you sure you want to cancel your appointment <strong>{cancellingAppt.token ?? 'this booking'}</strong> with <strong>{cancellingAppt.docName}</strong>? This slot will be released for other patients.
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button onClick={() => setCancellingAppt(null)} className="btn btn-ghost" style={{ height: 38 }}>

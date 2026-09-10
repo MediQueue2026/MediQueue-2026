@@ -204,9 +204,17 @@ export default function AdminPanel() {
   }, [])
 
   const handleToggleMaintenance = async () => {
+    const nextMode = !maintenanceMode
+    // Switching this on signs every patient, doctor and receptionist out of the
+    // platform. It used to fire on a single click of an unlabelled toggle.
+    if (nextMode && !window.confirm(
+      'Turn on maintenance mode?\n\nEvery patient, doctor and receptionist will be locked out until you turn it off. Live queues and bookings will stop.'
+    )) {
+      return
+    }
+
     setChangingMaintenance(true)
     try {
-      const nextMode = !maintenanceMode
       const res = await api.setMaintenanceMode(nextMode)
       setMaintenanceMode(res.settings?.maintenance_mode || false)
     } catch (err: any) {
@@ -686,7 +694,9 @@ export default function AdminPanel() {
         backdropFilter: 'blur(28px) saturate(160%)',
         WebkitBackdropFilter: 'blur(28px) saturate(160%)',
         borderRight: '1px solid rgba(18, 198, 186, 0.18)',
-        position: 'fixed', top: 42, bottom: 0, left: 0,
+        // 46px == the fixed DevNavbar's height (see App.tsx paddingTop). At 42 the
+        // sidebar's first 4px sat behind the navbar.
+        position: 'fixed', top: 46, bottom: 0, left: 0,
         display: 'flex', flexDirection: 'column', padding: '18px 10px', zIndex: 30,
         boxShadow: '4px 0 24px rgba(8, 48, 45, 0.10)',
       }}>
@@ -758,9 +768,21 @@ export default function AdminPanel() {
               <span style={{ fontSize: 12, fontWeight: 700, color: maintenanceMode ? 'var(--crimson)' : 'var(--text-2)' }}>
                 {maintenanceMode ? 'Maintenance Mode' : 'Operational'}
               </span>
-              <button 
+              {/* This switch takes the whole platform offline for every user,
+                  and it had no accessible name, no state and no confirmation —
+                  a screen reader announced only "button", and a stray click or
+                  Enter keypress on a focused control flipped it silently. */}
+              <button
                 onClick={handleToggleMaintenance}
                 disabled={changingMaintenance}
+                role="switch"
+                aria-checked={maintenanceMode}
+                aria-label={maintenanceMode
+                  ? 'Maintenance mode is on — turn it off to bring the platform back online'
+                  : 'Platform is operational — turn on maintenance mode'}
+                title={maintenanceMode
+                  ? 'Turn off maintenance mode'
+                  : 'Turn on maintenance mode (locks out all non-admin users)'}
                 style={{
                   width: 36, height: 20, borderRadius: 20,
                   background: maintenanceMode ? 'var(--crimson)' : '#10B981',

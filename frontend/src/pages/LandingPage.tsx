@@ -93,7 +93,13 @@ export default function LandingPage() {
       try {
         const [doctorsRes, boardRes] = await Promise.all([api.getDoctors(), api.getPublicBoard()])
         if (cancelled) return
-        if (doctorsRes.doctors.length) setDoctors(doctorsRes.doctors)
+        // Assign unconditionally. This was guarded by
+        // `if (doctorsRes.doctors.length)`, so a backend that answered
+        // correctly with an empty roster left the six sample doctors on screen
+        // *and* set `live` — the board then presented Dr. Aisha Patel and
+        // friends, with invented "now serving" numbers, under a Live badge.
+        // An empty real roster must read as empty.
+        setDoctors(doctorsRes.doctors)
         setBoard(boardRes.board)
         setLive(true)
       } catch {
@@ -444,7 +450,9 @@ export default function LandingPage() {
         <div className="card glass-form-card" style={{ padding: 0, overflow: 'hidden' }}>
           {visibleDoctors.length === 0 && (
             <p style={{ padding: '38px 24px', textAlign: 'center', color: 'var(--text-4)', fontSize: 13.5, margin: 0 }}>
-              No rooms open in {spec} today.
+              {doctors.length === 0
+                ? 'No consulting rooms are registered yet. Once a clinic adds its doctors, their live token board appears here.'
+                : `No rooms open in ${spec} today.`}
             </p>
           )}
 

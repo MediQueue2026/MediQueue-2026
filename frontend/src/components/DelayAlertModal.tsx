@@ -6,29 +6,50 @@ export default function DelayAlertModal({
   onClose,
   onSend,
   doctorName = 'Your Doctor',
-  roomNumber = 'Consultation Room',
-  dept = 'General Practice'
+  roomNumber,
+  dept
 }: {
   isOpen: boolean
   onClose: () => void
-  onSend: (delay: number, reason: string) => void
+  /** May be async; the modal waits for it and reports a rejection rather than assuming success. */
+  onSend: (delay: number, reason: string) => void | Promise<void>
   doctorName?: string
+  /** Omitted when the doctor's posting has no room on record — no "Room 01" default. */
   roomNumber?: string
   dept?: string
 }) {
   const [delay, setDelay] = useState(15)
   const [reason, setReason] = useState('Emergency consultation in progress')
   const [sent, setSent] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
 
   if (!isOpen) return null
 
-  const handleDispatch = () => {
-    onSend(delay, reason)
-    setSent(true)
-    setTimeout(() => {
-      setSent(false)
-      onClose()
-    }, 1500)
+  /**
+   * Waits for the dispatch before claiming success.
+   *
+   * This used to call `onSend` and immediately render "Alert Dispatched to
+   * Subscribers! SMS & In-App delay notification sent." — the handler was
+   * async, so the confirmation appeared whether or not the alert was actually
+   * published. A doctor with a failed request walked away believing their
+   * patients had been told.
+   */
+  const handleDispatch = async () => {
+    setSending(true)
+    setError('')
+    try {
+      await onSend(delay, reason)
+      setSent(true)
+      setTimeout(() => {
+        setSent(false)
+        onClose()
+      }, 1500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not publish the delay alert. Please try again.')
+    } finally {
+      setSending(false)
+    }
   }
 
   return (
@@ -68,7 +89,9 @@ export default function DelayAlertModal({
           </div>
           <div>
             <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Automatic Delay Alert</h3>
-            <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>{doctorName} · {roomNumber} ({dept})</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>
+              {[doctorName, roomNumber, dept].filter(Boolean).join(' · ')}
+            </div>
           </div>
         </div>
 
@@ -129,10 +152,25 @@ export default function DelayAlertModal({
               "Notice from MediQueue: {doctorName} is running approx. <strong>{delay} mins</strong> behind schedule due to <em>{reason}</em>. Thank you for your patience."
             </div>
 
+            {error && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600,
+                color: 'var(--crimson)', background: 'var(--crimson-dim)',
+                border: '1px solid var(--crimson-border)', borderRadius: 9, padding: '9px 12px',
+              }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
-              <button onClick={onClose} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
-              <button onClick={handleDispatch} className="btn btn-amber" style={{ gap: 8, height: 42, padding: '0 20px', fontSize: 14 }}>
-                <Send size={15} /> Send Delay Alert to All
+              <button onClick={onClose} disabled={sending} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
+              <button
+                onClick={handleDispatch}
+                disabled={sending}
+                className="btn btn-amber"
+                style={{ gap: 8, height: 42, padding: '0 20px', fontSize: 14, opacity: sending ? 0.6 : 1 }}
+              >
+                <Send size={15} /> {sending ? 'Sending…' : 'Send Delay Alert to All'}
               </button>
             </div>
           </div>

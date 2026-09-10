@@ -10,32 +10,34 @@ export function formatSlotTime(hour: number): string {
   return `${pmHour < 10 ? '0' + pmHour : pmHour}:00 PM`;
 }
 
+/**
+ * Approved medical centers.
+ *
+ * Returns `[]` when there are none or the API is unreachable. It used to fall
+ * back to two invented clinics ("MediQueue Central Clinic" in Colombo 07 and a
+ * "North Branch" in Kandy, complete with plausible coordinates and phone
+ * numbers). Those rendered as real pins on the patient's clinic map and as
+ * bookable options, then vanished as soon as a genuine center was approved —
+ * and a patient who tried to book one got an error, because the ids didn't
+ * exist in the database.
+ */
 export async function fetchCentersList(): Promise<any[]> {
   try {
     const res = await fetch(`${API_BASE}/centers`);
     if (res.ok) {
       const data = await res.json();
-      if (data.centers && data.centers.length > 0) {
-        return data.centers.map((c: any) => {
-          const rawLat = c.latitude ?? c.lat;
-          const rawLng = c.longitude ?? c.lng;
-          const numLat = rawLat !== null && rawLat !== undefined && !isNaN(Number(rawLat)) ? Number(rawLat) : null;
-          const numLng = rawLng !== null && rawLng !== undefined && !isNaN(Number(rawLng)) ? Number(rawLng) : null;
-          return {
-            ...c,
-            latitude: numLat,
-            longitude: numLng,
-          };
-        });
-      }
+      return (data.centers ?? []).map((c: any) => {
+        const rawLat = c.latitude ?? c.lat;
+        const rawLng = c.longitude ?? c.lng;
+        const numLat = rawLat !== null && rawLat !== undefined && !isNaN(Number(rawLat)) ? Number(rawLat) : null;
+        const numLng = rawLng !== null && rawLng !== undefined && !isNaN(Number(rawLng)) ? Number(rawLng) : null;
+        return { ...c, latitude: numLat, longitude: numLng };
+      });
     }
   } catch (e) {
     console.warn('Centers API error:', e);
   }
-  return [
-    { id: 'a1000000-0000-0000-0000-000000000001', name: 'MediQueue Central Clinic', city: 'Colombo 07', address: '124 Medical Plaza', opening_hours: '08:00 - 20:00', phone: '0112345678', services: ['Cardiology', 'General Medicine', 'Pediatrics'], latitude: 6.9147, longitude: 79.8732 },
-    { id: 'a1000000-0000-0000-0000-000000000002', name: 'MediQueue North Branch', city: 'Kandy', address: '45 Station Road', opening_hours: '09:00 - 18:00', phone: '0812345678', services: ['Orthopedics', 'General Medicine'], latitude: 7.2906, longitude: 80.6337 }
-  ];
+  return [];
 }
 
 export async function fetchPatientProfile(userId: string, defaultName?: string, defaultEmail?: string): Promise<PatientProfile> {
@@ -95,28 +97,57 @@ export async function savePatientProfile(userId: string, profile: Partial<Patien
   };
 }
 
+/**
+ * The public doctor roster.
+ *
+ * Every field now comes from the row itself. Previously each doctor was given
+ * `serving: '#A-01'` (a token nobody was actually being seen under),
+ * `room: 'Room 01'`, `spec: 'General Medicine'` and — worst of all — a
+ * hardcoded `centerId` pointing at a clinic that may not exist, so "Book Slot"
+ * submitted a booking against a bogus center. Missing values are `null` and
+ * the UI shows a dash.
+ */
 export async function fetchDoctorsList(): Promise<any[]> {
   try {
     const res = await fetch(`${API_BASE}/doctors`);
     if (res.ok) {
       const data = await res.json();
-      if (data.doctors && data.doctors.length > 0) {
-        return data.doctors.map((d: any) => ({
-          id: d.id,
-          userId: d.userId || d.user_id,
-          name: d.name || 'Doctor',
-          spec: d.specialization || d.dept || 'General Medicine',
-          room: d.room || d.room_number || 'Room 01',
-          centerId: d.centerId || d.center_id || 'a1000000-0000-0000-0000-000000000001',
-          centerName: d.centerName || 'MediQueue Central Clinic',
-          serving: '#A-01',
-          wait: `${d.avgConsultMinutes || 12} min`,
-          status: d.status || d.current_status || 'active'
-        }));
-      }
+      return (data.doctors ?? []).map((d: any) => ({
+        id: d.id,
+        userId: d.userId ?? d.user_id ?? null,
+        name: d.name ?? 'Doctor',
+        spec: d.specialization ?? d.dept ?? null,
+        room: d.room && d.room !== '—' ? d.room : null,
+        series: d.series && d.series !== '?' ? d.series : null,
+        centerId: d.centerId ?? d.center_id ?? null,
+        centerName: d.centerName ?? null,
+        centers: d.centers ?? [],
+        // Scheduled consult length, not a live queue position — the caller
+        // labels it as an estimate.
+        avgConsultMinutes: typeof d.avgConsultMinutes === 'number' ? d.avgConsultMinutes : null,
+        delayMinutes: typeof d.delayMinutes === 'number' ? d.delayMinutes : 0,
+        status: d.status ?? d.current_status ?? 'active',
+      }));
     }
   } catch (e) {
     console.warn('Doctors API error:', e);
+  }
+  return [];
+}
+
+/**
+ * Live delay notices for doctors this patient subscribes to (BR-05 / FR-07).
+ * Scoping happens server-side: a patient with no subscriptions gets nothing.
+ */
+export async function fetchPatientDelayAlerts(patientId: string): Promise<any[]> {
+  try {
+    const res = await fetch(`${API_BASE}/delay-alerts?patientId=${encodeURIComponent(patientId)}&limit=20`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.alerts ?? [];
+    }
+  } catch (e) {
+    console.warn('Delay alerts API error:', e);
   }
   return [];
 }
@@ -232,6 +263,20 @@ export async function uploadHealthRecord(record: Partial<HealthRecordItem>): Pro
   };
 }
 
+/**
+ * Books a slot. **Throws** when the booking did not happen.
+ *
+ * The old version swallowed every failure and returned a fabricated
+ * appointment: a random token like `#A-17`, a local `apt_<timestamp>` id, a
+ * hardcoded clinic name, and the message "Appointment booked successfully!".
+ * The patient saw a confirmed booking with a queue token that existed nowhere
+ * — no row in `appointments`, nothing at the reception desk, no slot held —
+ * and it disappeared on the next refresh. A failed booking must surface as a
+ * failure.
+ *
+ * `specialization` and `centerName` come from the server response so the
+ * confirmation shows the real clinic rather than a placeholder.
+ */
 export async function bookAppointment(booking: {
   doctorId: string;
   doctorName: string;
@@ -240,53 +285,42 @@ export async function bookAppointment(booking: {
   slotHour: number;
   patientId: string;
 }): Promise<{ appointment: AppointmentItem; message: string }> {
+  let res: Response;
   try {
-    const res = await fetch(`${API_BASE}/appointments`, {
+    res = await fetch(`${API_BASE}/appointments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(booking),
     });
-    if (res.ok) {
-      const data = await res.json();
-      const timeFormatted = formatSlotTime(booking.slotHour);
-      return {
-        appointment: {
-          id: data.appointment.id,
-          doctorId: booking.doctorId,
-          doctorName: booking.doctorName,
-          specialization: 'General Medicine',
-          centerName: 'MediQueue Central Clinic',
-          appointmentDate: booking.appointmentDate,
-          slotHour: booking.slotHour,
-          timeLabel: timeFormatted,
-          queueToken: data.appointment.queuePosition || '#A-15',
-          status: 'booked',
-          isLateNumber: data.appointment.isLateNumber || false,
-        },
-        message: data.message || 'Appointment booked successfully!',
-      };
-    }
-  } catch (e) {
-    console.warn('Book appointment API error:', e);
+  } catch {
+    throw new Error('Cannot reach the MediQueue server. Your appointment was not booked — please try again.');
   }
 
-  const tokenNum = `#A-${Math.floor(Math.random() * 20 + 10)}`;
-  const timeFormatted = formatSlotTime(booking.slotHour);
+  const data = await res.json().catch(() => ({} as any));
+
+  if (!res.ok) {
+    throw new Error(data?.error || `Could not book this slot (${res.status}). Please pick another time.`);
+  }
+  if (!data?.appointment?.id) {
+    throw new Error('The server did not confirm this booking. Please check your appointments before retrying.');
+  }
+
+  const a = data.appointment;
   return {
     appointment: {
-      id: `apt_${Date.now()}`,
-      doctorId: booking.doctorId,
-      doctorName: booking.doctorName,
-      specialization: 'General Medicine',
-      centerName: 'MediQueue Central Clinic',
-      appointmentDate: booking.appointmentDate,
-      slotHour: booking.slotHour,
-      timeLabel: timeFormatted,
-      queueToken: tokenNum,
-      status: 'booked',
-      isLateNumber: false,
+      id: a.id,
+      doctorId: a.doctorId ?? booking.doctorId,
+      doctorName: a.doctorName ?? booking.doctorName,
+      specialization: a.specialization ?? null,
+      centerName: a.centerName ?? null,
+      appointmentDate: a.appointmentDate ?? booking.appointmentDate,
+      slotHour: a.slotHour ?? booking.slotHour,
+      timeLabel: formatSlotTime(a.slotHour ?? booking.slotHour),
+      queueToken: a.queueToken ?? a.queuePosition ?? null,
+      status: a.status ?? 'booked',
+      isLateNumber: a.isLateNumber ?? false,
     },
-    message: 'Appointment booked successfully!',
+    message: data.message || 'Appointment booked successfully!',
   };
 }
 
