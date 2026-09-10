@@ -279,6 +279,14 @@ export default function ReceptionistDesk() {
   const nameInputRef = useRef<HTMLInputElement>(null)
   const physicalInputRef = useRef<HTMLInputElement>(null)
 
+  // A receptionist must submit their official center details before using the
+  // desk. Other roles never enter this flow.
+  useEffect(() => {
+    if (user?.role === 'receptionist' && !user.centerId && !user.isDemo) {
+      setShowRequestCenter(true)
+    }
+  }, [user?.role, user?.centerId, user?.isDemo])
+
   // Keeps the counter fast for back-to-back walk-ins: whichever field is
   // needed first is already focused after a source switch or a successful issue.
   useEffect(() => {
@@ -671,7 +679,16 @@ export default function ReceptionistDesk() {
                 borderRadius: 9, padding: '9px 14px',
               }}>
                 <AlertCircle size={14} />
-                Your account isn't linked to a medical center yet, so no doctors are shown. Ask an admin to assign your desk to a center.
+                <span style={{ flex: 1 }}>
+                  Your account isn't linked to a medical center yet, so no doctors are shown. Request a medical center to get started.
+                </span>
+                <button
+                  onClick={() => setShowRequestCenter(true)}
+                  className="btn btn-primary btn-sm"
+                  style={{ flexShrink: 0, gap: 6, whiteSpace: 'nowrap' }}
+                >
+                  <Building2 size={13} /> Request Medical Center
+                </button>
               </div>
             </div>
           )}

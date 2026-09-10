@@ -129,9 +129,9 @@ router.get('/doctors', getDoctors);
 router.get('/queue/board', getPublicBoard);
 
 // ── Center Routes ────────────────────────────────────────────────────────────
-// A receptionist may submit a new center (goes in 'pending'); only an admin
-// creates one that's immediately 'approved'. Unauthenticated clinic signups are also allowed.
-router.post('/centers', optionalAuth, createCenter);
+// A signed-in receptionist may submit a new center (goes in 'pending'); only
+// an admin creates one that's immediately 'approved'.
+router.post('/centers', authMiddleware, requireRole(['receptionist', 'admin']), createCenter);
 router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);
 router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
 router.patch('/centers/:id/approve', authMiddleware, requireRole(['admin']), approveCenter);

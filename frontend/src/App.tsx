@@ -9,6 +9,7 @@ import TvDisplayPage from './pages/TvDisplayPage'
 import PatientLoginPage from './pages/auth/PatientLoginPage'
 import RegisterPage from './pages/auth/RegisterPage'
 import StaffLoginPage from './pages/auth/StaffLoginPage'
+import MedicalCenterSignupPage from './pages/auth/MedicalCenterSignupPage'
 import AdminLoginPage from './pages/auth/AdminLoginPage'
 
 import { DevNavbar } from './components/DevNavbar'
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="/staff/login" element={<StaffLoginPage />} />
               <Route path="/staff/login/doctor" element={<StaffLoginPage />} />
               <Route path="/staff/login/receptionist" element={<StaffLoginPage />} />
+              <Route path="/staff/register/medical-center" element={<MedicalCenterSignupPage />} />
 
               {/* Legacy staff login redirects */}
               <Route path="/login/doctor" element={<Navigate to="/staff/login" replace />} />
