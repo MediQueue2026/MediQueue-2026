@@ -75,6 +75,58 @@ export interface IssueTokenInput {
   tokenNumber?: number
 }
 
+// ─── Field validation ───────────────────────────────────────────────────────
+
+export interface FieldCheck {
+  ok: boolean
+  /** Present only when `ok` is false. */
+  message?: string
+}
+
+/**
+ * Sri Lankan NIC validation — mirrors the format rules in
+ * backend/src/services/nicService.js so the desk and the console agree.
+ *
+ *  - New format: 12 digits, `YYYYDDDSSSSS`.
+ *  - Old format: 9 digits + `V` or `X`, `YYDDDSSSSC`.
+ *
+ * In both, the day-of-year field carries +500 for females, and once that's
+ * removed it must be a real day (1–366). NIC is optional: a blank value passes.
+ */
+export function validateNic(nic: string): FieldCheck {
+  const cleaned = (nic ?? '').trim().toUpperCase().replace(/\s/g, '')
+  if (!cleaned) return { ok: true }
+
+  let dayField: number
+  if (/^\d{12}$/.test(cleaned)) {
+    dayField = Number(cleaned.slice(4, 7))
+  } else if (/^\d{9}[VX]$/.test(cleaned)) {
+    dayField = Number(cleaned.slice(2, 5))
+  } else {
+    return { ok: false, message: 'NIC must be 12 digits, or 9 digits followed by V or X.' }
+  }
+
+  const dayOfYear = dayField > 500 ? dayField - 500 : dayField
+  if (dayOfYear < 1 || dayOfYear > 366) {
+    return { ok: false, message: "This NIC's date-of-birth digits aren't valid." }
+  }
+  return { ok: true }
+}
+
+/**
+ * Sri Lankan mobile number — required for the SMS the desk sends on issue.
+ * Accepts `07XXXXXXXX`, `+947XXXXXXXX` or `947XXXXXXXX`; spaces and dashes are
+ * ignored.
+ */
+export function validatePhone(phone: string): FieldCheck {
+  const cleaned = (phone ?? '').replace(/[\s-]/g, '')
+  if (!cleaned) return { ok: false, message: 'A mobile number is required.' }
+  if (!/^(?:\+?94|0)7\d{8}$/.test(cleaned)) {
+    return { ok: false, message: 'Enter a valid mobile number, e.g. 0771234567.' }
+  }
+  return { ok: true }
+}
+
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
 export function pad(n: number): string {

@@ -16,10 +16,35 @@ import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
   STATUS_BADGE, STATUS_LABEL, currentFor, entryToken, fmtTime, formatToken,
-  averageWaitMinutes, minutesSince, waitingFor
+  averageWaitMinutes, minutesSince, validateNic, validatePhone, waitingFor
 } from '../lib/receptionQueue'
 import type { QueueEntry, TokenSource } from '../lib/receptionQueue'
-import { api, type ApiDoctor } from '../lib/api'
+import { api, type ApiAppointmentRow, type ApiDoctor } from '../lib/api'
+
+/**
+ * Identity key for a patient — their name plus phone number. Used to collapse
+ * repeat rows in the All Patients table so one person booking several times
+ * shows once.
+ *
+ * Both halves are normalised so trivial differences don't defeat the match:
+ *  - name: trimmed, lower-cased, internal whitespace flattened
+ *  - phone: digits only, reduced to the last 9 (the subscriber number), so
+ *    `0771234567`, `94771234567` and `+94 77 123 4567` all key the same.
+ */
+function patientKey(name: string, phone: string): string {
+  const n = (name || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const p = (phone || '').replace(/\D/g, '').slice(-9)
+  return `${n}|${p}`
+}
+
+/** Badge class + label for an appointment's status (`booked`, `cancelled`, …). */
+function apptStatusBadge(status: string): { cls: string; label: string } {
+  const s = (status || '').toLowerCase()
+  if (s === 'cancelled') return { cls: 'badge-crimson', label: 'Cancelled' }
+  if (s === 'completed') return { cls: 'badge-ghost', label: 'Completed' }
+  if (s === 'booked') return { cls: 'badge-amber', label: 'Booked' }
+  return { cls: 'badge-ghost', label: status ? status[0].toUpperCase() + status.slice(1) : '—' }
+}
 
 
 /** Compact metric — one line, no card chrome, so the strip stays out of the receptionist's way. */
@@ -321,11 +346,17 @@ export default function ReceptionistDesk() {
     setFormName(''); setFormNic(''); setFormPhone(''); setPhysicalToken('')
   }
 
+  // Phone is required (the desk SMSes the token); NIC is optional but, when
+  // given, must be a well-formed Sri Lankan NIC.
+  const phoneCheck = validatePhone(formPhone)
+  const nicCheck = validateNic(formNic)
+
   const handleIssueToken = async () => {
+    if (!phoneCheck.ok || !nicCheck.ok) return
     const result = await queue.issue({
       patientName: formName,
-      nic: formNic,
-      phone: formPhone,
+      nic: formNic.trim(),
+      phone: formPhone.trim(),
       source: tokenSource,
       tokenNumber: tokenSource === 'physical' ? Number(physicalToken) : undefined,
     })
@@ -337,21 +368,70 @@ export default function ReceptionistDesk() {
     }
   }
 
-  // Search spans the whole clinic, not just the selected doctor's queue.
-  const filteredPatients = useMemo(() => {
+  /**
+   * Every appointment booked for a doctor at this desk's center — the single
+   * source for both Patients-tab tables. Re-fetched whenever the tab is opened
+   * or the desk's center changes. When the account isn't linked to a center
+   * (e.g. demo mode) it falls back to an unscoped list so the tab still shows
+   * data instead of sitting empty.
+   */
+  const [allAppointments, setAllAppointments] = useState<ApiAppointmentRow[]>([])
+  useEffect(() => {
+    if (activeTab !== 'patients') return
+    let cancelled = false
+    api.getAppointments(queue.centerId ? { centerId: queue.centerId } : undefined)
+      .then(res => { if (!cancelled) setAllAppointments(res.appointments) })
+      .catch(() => { if (!cancelled) setAllAppointments([]) })
+    return () => { cancelled = true }
+  }, [activeTab, queue.centerId])
+
+  /** Local YYYY-MM-DD, recomputed each minute so the table rolls over at midnight. */
+  const todayIso = useMemo(() => {
+    const d = queue.now
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }, [queue.now])
+
+  /** Apply the shared search box; optionally collapse to one row per patient. */
+  const filterRows = (rows: ApiAppointmentRow[], opts: { dedupe: boolean }) => {
     const q = patientSearch.trim().toLowerCase()
-    return queue.entries.filter(e =>
-      !q ||
-      e.patientName.toLowerCase().includes(q) ||
-      (e.nic ?? '').includes(q) ||
-      entryToken(e).toLowerCase().includes(q),
-    )
-  }, [queue.entries, patientSearch])
+    const seen = new Set<string>()
+    const out: ApiAppointmentRow[] = []
+    for (const a of rows) {
+      if (opts.dedupe) {
+        const key = patientKey(a.patientName, a.phone)
+        if (seen.has(key)) continue
+        seen.add(key)
+      }
+      if (
+        !q ||
+        a.patientName.toLowerCase().includes(q) ||
+        (a.nic ?? '').toLowerCase().includes(q) ||
+        a.queueToken.toLowerCase().includes(q)
+      ) {
+        out.push(a)
+      }
+    }
+    return out
+  }
+
+  /** Table 1 — every appointment dated today, whatever its status; resets daily. */
+  const todaysSession = useMemo(
+    () => filterRows(allAppointments.filter(a => a.appointmentDate === todayIso), { dedupe: false }),
+    [allAppointments, patientSearch, todayIso],
+  )
+
+  /** Table 2 — every patient who has ever booked at this center. */
+  const allPatients = useMemo(
+    () => filterRows(allAppointments, { dedupe: true }),
+    [allAppointments, patientSearch],
+  )
 
   const canIssue =
     !queue.issuing &&
     formName.trim().length > 0 &&
-    physicalToken.trim().length > 0
+    physicalToken.trim().length > 0 &&
+    phoneCheck.ok &&
+    nicCheck.ok
 
   /**
    * The selected doctor's line, split by what the receptionist can act on.
@@ -900,24 +980,37 @@ export default function ReceptionistDesk() {
                     </div>
                     <div className="form-responsive-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div>
-                        <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>NIC / Passport</label>
+                        <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>NIC <span style={{ color: 'var(--text-4)', fontWeight: 600 }}>(optional)</span></label>
                         <input
                           className="input"
-                          placeholder="198845210082"
+                          placeholder="200012312345 or 891234567V"
                           value={formNic}
-                          onChange={e => setFormNic(e.target.value)}
-                          style={{ height: 42, fontSize: 14 }}
+                          onChange={e => { setFormNic(e.target.value); queue.clearError() }}
+                          aria-invalid={!nicCheck.ok}
+                          style={{ height: 42, fontSize: 14, borderColor: !nicCheck.ok ? 'var(--crimson-border)' : undefined }}
                         />
+                        {!nicCheck.ok && (
+                          <div style={{ fontSize: 11, color: 'var(--crimson)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <AlertCircle size={11} /> {nicCheck.message}
+                          </div>
+                        )}
                       </div>
                       <div>
-                        <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mobile (SMS)</label>
+                        <label style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 700, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mobile (SMS) <span style={{ color: 'var(--crimson)', fontWeight: 700 }}>*</span></label>
                         <input
                           className="input"
                           placeholder="0771234567"
+                          inputMode="tel"
                           value={formPhone}
-                          onChange={e => setFormPhone(e.target.value)}
-                          style={{ height: 42, fontSize: 14 }}
+                          onChange={e => { setFormPhone(e.target.value); queue.clearError() }}
+                          aria-invalid={formPhone.trim().length > 0 && !phoneCheck.ok}
+                          style={{ height: 42, fontSize: 14, borderColor: formPhone.trim().length > 0 && !phoneCheck.ok ? 'var(--crimson-border)' : undefined }}
                         />
+                        {formPhone.trim().length > 0 && !phoneCheck.ok && (
+                          <div style={{ fontSize: 11, color: 'var(--crimson)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <AlertCircle size={11} /> {phoneCheck.message}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1124,14 +1217,20 @@ export default function ReceptionistDesk() {
             </>
           )}
 
-          {/* ALL PATIENTS MANAGEMENT TAB */}
+          {/* PATIENTS TAB — two lists: everyone booked in for today, then the
+              subset waiting on a doctor who is on duty, where the receptionist
+              issues the walk-in token after verifying name + phone. */}
           {activeTab === 'patients' && (
-            <div style={{ padding: '18px 24px 28px' }}>
+            <div style={{ padding: '18px 24px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+              {/* ── TABLE 1 — today's session, rolls over daily ── */}
               <div className="card glass-form-card" style={{ padding: 26 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
                   <div>
-                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>All Registered Patients Directory</h3>
-                    <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Search, check-in, update status, or view patient profiles</div>
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Today's Session</h3>
+                    <div style={{ fontSize: 12, color: 'var(--text-4)' }}>
+                      Every appointment at {deskCenterName ?? 'this center'} dated today, whatever its status — this list resets each day.
+                    </div>
                   </div>
                   <div style={{ position: 'relative', width: 320, maxWidth: '100%' }}>
                     <Search size={15} color="var(--text-4)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
@@ -1146,7 +1245,7 @@ export default function ReceptionistDesk() {
                 </div>
 
                 <div className="table-responsive-wrapper">
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 740 }}>
                     <thead>
                       <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
                         <th style={{ padding: '13px 16px' }}>Name</th>
@@ -1155,33 +1254,73 @@ export default function ReceptionistDesk() {
                         <th style={{ padding: '13px 16px' }}>Active Token</th>
                         <th style={{ padding: '13px 16px' }}>Assigned Doctor</th>
                         <th style={{ padding: '13px 16px' }}>Status</th>
-                        <th style={{ padding: '13px 16px' }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredPatients.length === 0 && (
+                      {todaysSession.length === 0 && (
                         <tr>
-                          <td colSpan={7} style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>
-                            No patients match "{patientSearch}".
+                          <td colSpan={6} style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>
+                            {patientSearch ? `No patients match "${patientSearch}".` : 'No appointments dated today.'}
                           </td>
                         </tr>
                       )}
-                      {filteredPatients.map(p => {
-                        const doc = queue.doctors.find(d => d.id === p.doctorId)
+                      {todaysSession.map(p => {
+                        const b = apptStatusBadge(p.status)
                         return (
                           <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
                             <td style={{ padding: '13px 16px', fontWeight: 600, color: 'var(--text-1)' }}>{p.patientName}</td>
                             <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.nic ?? '—'}</td>
                             <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.phone || '—'}</td>
-                            <td style={{ padding: '13px 16px', fontWeight: 800, color: 'var(--blue)', fontFamily: 'monospace' }}>{entryToken(p)}</td>
-                            <td style={{ padding: '13px 16px', color: 'var(--text-2)' }}>{doc?.name ?? '—'}</td>
-                            <td style={{ padding: '13px 16px' }}><Badge cls={STATUS_BADGE[p.status]}>{STATUS_LABEL[p.status]}</Badge></td>
-                            <td style={{ padding: '13px 16px' }}>
-                              <button className="btn btn-ghost btn-sm">Edit Profile</button>
-                            </td>
+                            <td style={{ padding: '13px 16px', fontWeight: 800, color: 'var(--blue)', fontFamily: 'monospace' }}>{p.queueToken}</td>
+                            <td style={{ padding: '13px 16px', color: 'var(--text-2)' }}>{p.doctorName || '—'}</td>
+                            <td style={{ padding: '13px 16px' }}><Badge cls={b.cls}>{b.label}</Badge></td>
                           </tr>
                         )
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ── TABLE 2 — every patient ever booked at this center ── */}
+              <div className="card glass-form-card" style={{ padding: 26 }}>
+                <div style={{ marginBottom: 18 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>All Patients</h3>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 620 }}>
+                    Every patient who has booked an appointment with a doctor at {deskCenterName ?? 'this center'}, across all dates.
+                  </div>
+                </div>
+
+                <div className="table-responsive-wrapper">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 700 }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
+                        <th style={{ padding: '13px 16px' }}>Name</th>
+                        <th style={{ padding: '13px 16px' }}>NIC Number</th>
+                        <th style={{ padding: '13px 16px' }}>Phone</th>
+                        <th style={{ padding: '13px 16px' }}>Active Token</th>
+                        <th style={{ padding: '13px 16px' }}>Assigned Doctor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allPatients.length === 0 && (
+                        <tr>
+                          <td colSpan={5} style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>
+                            {patientSearch
+                              ? `No patients match "${patientSearch}".`
+                              : 'No patients have booked an appointment at this center yet.'}
+                          </td>
+                        </tr>
+                      )}
+                      {allPatients.map(p => (
+                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '13px 16px', fontWeight: 600, color: 'var(--text-1)' }}>{p.patientName}</td>
+                          <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.nic ?? '—'}</td>
+                          <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.phone || '—'}</td>
+                          <td style={{ padding: '13px 16px', fontWeight: 800, color: 'var(--blue)', fontFamily: 'monospace' }}>{p.queueToken}</td>
+                          <td style={{ padding: '13px 16px', color: 'var(--text-2)' }}>{p.doctorName || '—'}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
