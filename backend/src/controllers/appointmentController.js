@@ -208,16 +208,66 @@ export async function createAppointment(req, res, next) {
 
 export async function getAppointments(req, res, next) {
   try {
-    const { data, error } = await supabase
+    // The Reception Desk passes its center so the "all patients" directory is
+    // scoped to patients who booked a doctor at that clinic.
+    const centerFilter = req.query.centerId ? String(req.query.centerId) : null;
+
+    let query = supabase
       .from('appointments')
-      .select('*, doctor:doctors(*, user:users(full_name)), center:medical_centers(name)')
+      .select(
+        '*, doctor:doctors(*, user:users(full_name)), center:medical_centers(name), patient:users!patient_id(full_name, phone)',
+      )
       .order('created_at', { ascending: false });
+    if (centerFilter) query = query.eq('center_id', centerFilter);
+
+    const { data, error } = await query;
 
     if (error || !data) {
+      if (error) console.warn('getAppointments query notice:', error.message);
       return res.json({ appointments: [] });
     }
 
-    res.json({ appointments: data });
+    // Token series is per (doctor, center) posting since migration 010.
+    const seriesByPair = new Map();
+    const doctorIds = [...new Set(data.map(a => a.doctor_id).filter(Boolean))];
+    if (doctorIds.length > 0) {
+      const { data: postings } = await supabase
+        .from('doctor_center_assignments')
+        .select('doctor_id, center_id, series')
+        .in('doctor_id', doctorIds);
+      for (const p of postings || []) seriesByPair.set(`${p.doctor_id}_${p.center_id}`, p.series);
+    }
+
+    // NIC lives on patient_profiles, not users — batch it in.
+    const nicByPatient = new Map();
+    const patientIds = [...new Set(data.map(a => a.patient_id).filter(Boolean))];
+    if (patientIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('patient_profiles')
+        .select('user_id, nic')
+        .in('user_id', patientIds);
+      for (const p of profiles || []) if (p.nic) nicByPatient.set(p.user_id, p.nic);
+    }
+
+    const appointments = data.map(a => {
+      const series = seriesByPair.get(`${a.doctor_id}_${a.center_id}`) || a.doctor?.series || '?';
+      return {
+        id: a.id,
+        patientId: a.patient_id,
+        patientName: a.patient?.full_name || 'Online Patient',
+        nic: nicByPatient.get(a.patient_id) || null,
+        phone: a.patient?.phone || '',
+        doctorId: a.doctor_id,
+        doctorName: a.doctor?.user?.full_name || 'Doctor',
+        centerId: a.center_id ?? null,
+        centerName: a.center?.name || null,
+        queueToken: `#${series}-${String(a.queue_number).padStart(2, '0')}`,
+        appointmentDate: a.appointment_date,
+        status: a.status,
+      };
+    });
+
+    res.json({ appointments });
   } catch (err) {
     next(err);
   }

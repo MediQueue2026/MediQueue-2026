@@ -228,6 +228,22 @@ export interface ApiQueueEntry {
 /** Statuses the Reception Desk may actively set — matches the backend's `allowed` list in updateQueueEntryStatus. */
 export type SettableQueueStatus = 'waiting' | 'called' | 'in_progress' | 'completed' | 'left'
 
+/** One row of `GET /appointments` — a patient's booking at a center. */
+export interface ApiAppointmentRow {
+  id: string
+  patientId: string
+  patientName: string
+  nic: string | null
+  phone: string
+  doctorId: string
+  doctorName: string
+  centerId: string | null
+  centerName: string | null
+  queueToken: string
+  appointmentDate: string
+  status: string
+}
+
 /** One doctor's public standing on the lobby board. */
 export interface ApiBoardEntry {
   doctorId: string
@@ -778,6 +794,17 @@ export const api = {
     const qs = q.toString()
     return request<{ entries: ApiQueueEntry[]; migrationPending?: boolean }>(
       `/queue${qs ? `?${qs}` : ''}`,
+    )
+  },
+
+  /** Every appointment ever booked (optionally scoped to one center) — the
+   *  Reception Desk's "all patients" directory. */
+  getAppointments: (opts?: { centerId?: string | null }) => {
+    const q = new URLSearchParams()
+    if (opts?.centerId) q.set('centerId', opts.centerId)
+    const qs = q.toString()
+    return request<{ appointments: ApiAppointmentRow[] }>(
+      `/appointments${qs ? `?${qs}` : ''}`,
     )
   },
 

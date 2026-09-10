@@ -231,13 +231,30 @@ export async function getQueue(req, res, next) {
       return res.json({ entries: [], migrationPending: true });
     }
 
-    // Query online appointments for today OR active/cancelled appointments
+    // Online appointments for this date only. A `booked` row carries no
+    // date-independent "still active" meaning the way an in-progress walk-in
+    // token does — every un-consumed future/past booking is still `booked` —
+    // so scoping to the date is what keeps the desk queue to today's session.
+    // NIC is on patient_profiles, not users — referencing users.nic here made
+    // the whole select error, so online bookings only ever reached the desk via
+    // the walk_in_queue mirror written at booking time.
     let aptQuery = supabase
       .from('appointments')
-      .select('*, doctors(series, user_id), users:patient_id(full_name, phone, nic)')
-      .or(`appointment_date.eq.${date},status.in.(booked,cancelled)`);
+      .select('*, doctors(series, user_id), users:patient_id(full_name, phone)')
+      .eq('appointment_date', date);
     if (centerFilter) aptQuery = aptQuery.eq('center_id', centerFilter);
-    const { data: aptData } = await aptQuery;
+    const { data: aptData, error: aptError } = await aptQuery;
+    if (aptError) console.warn('getQueue appointments query notice:', aptError.message);
+
+    const nicByPatient = new Map();
+    const aptPatientIds = [...new Set((aptData || []).map(a => a.patient_id).filter(Boolean))];
+    if (aptPatientIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('patient_profiles')
+        .select('user_id, nic')
+        .in('user_id', aptPatientIds);
+      for (const p of profiles || []) if (p.nic) nicByPatient.set(p.user_id, p.nic);
+    }
 
     const seriesMap = await seriesMapFor([...(queueData || []), ...(aptData || [])]);
     const seriesFor = (row) => seriesMap.get(`${row.doctor_id}_${row.center_id}`) ?? row.doctors?.series ?? '?';
@@ -268,7 +285,7 @@ export async function getQueue(req, res, next) {
           series: seriesFor(a),
           tokenNumber: a.queue_number,
           patientName: a.users?.full_name || 'Online Patient',
-          nic: a.users?.nic || undefined,
+          nic: nicByPatient.get(a.patient_id) || undefined,
           phone: a.users?.phone || '',
           source: 'online',
           status: apptStatus,
@@ -297,6 +314,18 @@ export async function issueWalkinToken(req, res, next) {
 
     if (!name) { res.status(400); throw new Error('Patient name is required.'); }
     if (!doctorId) { res.status(400); throw new Error('Select a doctor before issuing a token.'); }
+
+    // Phone is required — the desk SMSes the token to it. NIC stays optional,
+    // but a value that's given must be a well-formed Sri Lankan NIC (12 digits,
+    // or 9 digits + V/X). Mirrors validateNic/validatePhone on the frontend.
+    const cleanPhone = (phone || '').replace(/[\s-]/g, '');
+    if (!/^(?:\+?94|0)7\d{8}$/.test(cleanPhone)) {
+      res.status(400); throw new Error('A valid mobile number is required to issue a token.');
+    }
+    const trimmedNic = (nic || '').trim();
+    if (trimmedNic && !/^(?:\d{12}|\d{9}[VXvx])$/.test(trimmedNic.replace(/\s/g, ''))) {
+      res.status(400); throw new Error('NIC must be 12 digits, or 9 digits followed by V or X.');
+    }
 
     const today = todayDate();
     const isPhysical = source === 'physical';
@@ -337,8 +366,8 @@ export async function issueWalkinToken(req, res, next) {
         doctor_id: doctorId,
         center_id: centerScope,
         patient_name: name,
-        nic: nic?.trim() || null,
-        sms_phone: phone?.trim() || null,
+        nic: trimmedNic || null,
+        sms_phone: (phone || '').trim() || null,
         queue_date: today,
         queue_number: queueNumber,
         source: isPhysical ? 'physical' : 'online',
