@@ -159,6 +159,31 @@ CREATE TABLE public.doctor_subscriptions (
   UNIQUE(patient_id, doctor_id)
 );
 
+-- 8b. Delay Alerts Table (one row per published delay notice — see migration 011)
+--     Kept after the doctor resumes (cleared_at stamped, row retained) so the
+--     patient and reception dashboards can show a delay feed with history.
+CREATE TABLE public.delay_alerts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  doctor_id UUID NOT NULL REFERENCES public.doctors(id) ON DELETE CASCADE,
+  center_id UUID REFERENCES public.medical_centers(id) ON DELETE SET NULL,
+  doctor_name TEXT NOT NULL DEFAULT 'Doctor',
+  specialization TEXT,
+  room_number TEXT,
+  center_name TEXT,
+  delay_minutes INT NOT NULL DEFAULT 15 CHECK (delay_minutes >= 0),
+  reason TEXT NOT NULL DEFAULT '',
+  message TEXT,
+  notified_count INT NOT NULL DEFAULT 0,
+  skipped_count INT NOT NULL DEFAULT 0,
+  raised_by_name TEXT,
+  raised_by_role TEXT CHECK (raised_by_role IN ('receptionist', 'doctor', 'admin', 'system')) DEFAULT 'doctor',
+  cleared_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_delay_alerts_doctor ON public.delay_alerts(doctor_id, created_at DESC);
+CREATE INDEX idx_delay_alerts_center ON public.delay_alerts(center_id, created_at DESC);
+CREATE INDEX idx_delay_alerts_live ON public.delay_alerts(created_at DESC) WHERE cleared_at IS NULL;
+
 -- 9. Health Records Table
 CREATE TABLE public.health_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -246,6 +271,7 @@ ALTER TABLE public.doctor_center_assignments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appointments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.walk_in_queue DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctor_subscriptions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.delay_alerts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.health_records DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.patient_profiles DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.refresh_sessions DISABLE ROW LEVEL SECURITY;

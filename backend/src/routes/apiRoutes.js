@@ -20,6 +20,7 @@ import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from 
 import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser, getSystemStats, getSettings, setMaintenanceMode } from '../controllers/adminController.js';
 import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
 import { createDoctorRequest, getDoctorRequests, approveDoctorRequest, rejectDoctorRequest } from '../controllers/doctorRequestController.js';
+import { createDelayAlert, getDelayAlerts, clearDelayAlert } from '../controllers/delayAlertController.js';
 import { uploadFile } from '../controllers/uploadController.js';
 import multer from 'multer';
 import { maintenanceMiddleware } from '../middleware/maintenanceMiddleware.js';
@@ -151,6 +152,15 @@ router.put('/doctors/:doctorId', authMiddleware, requireRole(['admin']), updateD
 router.post('/doctors', authMiddleware, requireRole(['receptionist', 'admin']), createDoctor);
 router.get('/doctors/:doctorId/summary', getDoctorSummary);
 router.get('/doctors/:doctorId/hours', getDoctorHours);
+
+// ── Delay Alert Routes (BR-05 / FR-07) ─────────────────────────────────────
+// Reads are open like /doctors and /centers, because the Patient Dashboard
+// polls its own feed without an access token. Publishing or clearing a delay
+// is staff-only.
+const DELAY_ROLES = ['doctor', 'receptionist', 'admin'];
+router.get('/delay-alerts', getDelayAlerts);
+router.post('/doctors/:doctorId/delay-alerts', authMiddleware, requireRole(DELAY_ROLES), createDelayAlert);
+router.patch('/delay-alerts/:id/clear', authMiddleware, requireRole(DELAY_ROLES), clearDelayAlert);
 router.put('/doctors/:doctorId/hours', authMiddleware, requireRole(['receptionist', 'admin']), upsertDoctorHours);
 
 // ── Appointment Routes ──────────────────────────────────────────────────────

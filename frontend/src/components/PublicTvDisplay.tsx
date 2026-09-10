@@ -8,9 +8,11 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api
 interface DoctorBoard {
   doctorId: string
   doctorName: string
-  specialization: string
-  roomNumber: string
-  centerName: string
+  // Nullable: the board endpoint returns null for details that aren't on
+  // record rather than substituting a plausible-looking default.
+  specialization: string | null
+  roomNumber: string | null
+  centerName: string | null
   series: string
   nowServing: { token: string; patientName: string } | null
   waitingQueue: { token: string; patientName: string; queue_number: number }[]
@@ -87,10 +89,34 @@ export default function PublicTvDisplay({
         status: i === 0 ? 'Next In Line' : 'Waiting',
       })) : [])
 
+  /**
+   * Identity line for the board.
+   *
+   * This is a screen on a waiting-room wall, so a wrong room number sends real
+   * people to the wrong door. It used to fall back to "Dr. Medical Specialist ·
+   * General Practice", "Room 01" and "MediQueue Central Clinic" when no doctor
+   * was selected, and pinned the clinic name to "MediQueue Central Clinic" even
+   * when the doctor came from a different branch. Unknown values are now null
+   * and simply aren't rendered.
+   */
   const doctorLine = activeDocBoard
-    ? { name: `${activeDocBoard.doctorName} · ${activeDocBoard.specialization}`, room: activeDocBoard.roomNumber, center: activeDocBoard.centerName }
-    : (doctor ? { name: `${doctor.name} · ${doctor.dept}`, room: doctor.room, center: 'MediQueue Central Clinic' }
-               : { name: 'Dr. Medical Specialist · General Practice', room: 'Room 01', center: 'MediQueue Central Clinic' })
+    ? {
+        name: [activeDocBoard.doctorName, activeDocBoard.specialization].filter(Boolean).join(' · '),
+        room: activeDocBoard.roomNumber || null,
+        center: activeDocBoard.centerName || null,
+      }
+    : doctor
+      ? {
+          name: [doctor.name, doctor.dept].filter(Boolean).join(' · '),
+          room: doctor.room && doctor.room !== '—' ? doctor.room : null,
+          center: doctor.centerName || null,
+        }
+      : { name: 'No doctor selected', room: null, center: null }
+
+  // Display-ready strings, so a missing room or clinic never renders as an
+  // empty gap or a stray "()" on a wall-mounted screen.
+  const roomLabel = doctorLine.room ?? 'the consultation room'
+  const centerLabel = doctorLine.center ?? 'this clinic'
 
   return (
     <div style={{
@@ -130,12 +156,12 @@ export default function PublicTvDisplay({
             </h1>
             <div style={{ fontSize: 'clamp(11px, 1.5vw, 13px)', color: 'rgba(255,255,255,0.75)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
               <span style={{ color: '#F59E0B', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Building2 size={12} /> {doctorLine.center}
+                <Building2 size={12} /> {doctorLine.center ?? '—'}
               </span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
               <span style={{ color: '#ffffff', fontWeight: 700 }}>{doctorLine.name}</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
-              <span style={{ color: '#10B981', fontWeight: 800 }}>{doctorLine.room}</span>
+              <span style={{ color: '#10B981', fontWeight: 800 }}>{doctorLine.room ?? '—'}</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>•</span>
               <span style={{ color: '#10B981', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <Wifi size={11} /> Live DB Polling Active (3s)
@@ -226,7 +252,7 @@ export default function PublicTvDisplay({
                 fontSize: 'clamp(11px, 1.5vw, 15px)',
                 fontWeight: 900, letterSpacing: '0.10em', textTransform: 'uppercase', color: '#10B981',
               }}>
-                Now Serving · {doctorLine.room} ({doctorLine.center})
+                Now Serving{doctorLine.room ? ` · ${doctorLine.room}` : ''}{doctorLine.center ? ` (${doctorLine.center})` : ''}
               </span>
             </div>
 
@@ -262,7 +288,7 @@ export default function PublicTvDisplay({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Volume2 size={18} color="#10B981" />
               <span style={{ fontSize: 'clamp(10px, 1.3vw, 13px)', color: 'rgba(255,255,255,0.75)' }}>
-                Please proceed to {doctorLine.room} at {doctorLine.center} when your token flashes
+                Please proceed to {roomLabel} at {centerLabel} when your token flashes
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'clamp(10px, 1.2vw, 13px)', fontWeight: 700, color: '#10b3a8', flexShrink: 0 }}>
@@ -305,7 +331,7 @@ export default function PublicTvDisplay({
                 color: 'rgba(255,255,255,0.4)', fontSize: 'clamp(12px, 1.6vw, 15px)', textAlign: 'center'
               }}>
                 <Users size={40} color="rgba(255,255,255,0.3)" style={{ marginBottom: 10 }} />
-                No patients currently waiting in queue for {doctorLine.room}
+                No patients currently waiting in queue for {roomLabel}
               </div>
             ) : (
               waitingQueue.map((item, i) => (
@@ -364,7 +390,7 @@ export default function PublicTvDisplay({
         fontSize: 'clamp(10px, 1.3vw, 12px)', color: 'rgba(255,255,255,0.55)',
         flexShrink: 0, flexWrap: 'wrap', gap: 8,
       }}>
-        <span>MediQueue · {doctorLine.center} · Multi-Room Consultation Stream</span>
+        <span>MediQueue{doctorLine.center ? ` · ${doctorLine.center}` : ''} · Multi-Room Consultation Stream</span>
         <span style={{ color: '#10B981', fontWeight: 700 }}>● Supabase Live Database Sync</span>
       </div>
     </div>

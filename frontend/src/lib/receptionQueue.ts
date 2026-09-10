@@ -1,20 +1,17 @@
 /**
- * Reception queue domain logic.
+ * Reception queue domain logic — types, formatting and selectors.
  *
- * Ported from the QueueManagementProto receptionist module — the *logic* only.
- * All presentation stays in MediQueue's own glass theme; nothing here knows
- * about colours or markup.
+ * This file used to double as a demo-data bundle: it exported a hardcoded
+ * `RECEPTION_DOCTORS` roster and a 14-row `seedQueue()`, plus a full set of
+ * pure reducers so the desk could run entirely offline. `useReceptionQueue`
+ * seeded its state from those, which meant the Reception Desk painted four
+ * fictional doctors and a dozen fictional patients on first render, then
+ * swapped them for the real (usually empty) queue a moment later — the
+ * "hardcoded data loads then disappears" behaviour.
  *
- * DB tables this maps onto (connect when the backend is ready):
- *   walk_in_queue — id, patient_name, patient_id, doctor_id, clinic_id,
- *                   queue_date, queue_number, status, sms_phone, source,
- *                   estimated_wait_minutes, checked_in_at, called_at
- *   doctors       — id, user_id, specialization
- *   users         — id, full_name
- *
- * Every mutation below is a pure reducer over `QueueEntry[]`, so swapping the
- * in-memory store for API calls means replacing the caller (the hook), not this
- * file. The SQL each one stands in for is noted above the function.
+ * Everything here is now a pure function over data the caller supplies; the
+ * queue's only source of truth is the backend (`walk_in_queue` + `appointments`
+ * via backend/src/controllers/queueController.js).
  */
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -27,13 +24,13 @@ export type QueueStatus = 'waiting' | 'called' | 'in_progress' | 'completed' | '
 
 export interface QueueEntry {
   id: string
-  /** Token series letter, one per doctor — renders as #A-11. */
+  /** Token series letter, one per doctor per center — renders as #A-11. */
   series: string
   /** DB: walk_in_queue.queue_number */
   tokenNumber: number
   /** DB: walk_in_queue.patient_name */
   patientName: string
-  /** NIC / passport captured at the counter (no DB column yet). */
+  /** DB: walk_in_queue.nic */
   nic?: string
   /** DB: walk_in_queue.sms_phone */
   phone: string
@@ -55,14 +52,15 @@ export interface ReceptionDoctor {
   /** DB: doctors.specialization */
   dept: string
   room: string
-  /** Token series this doctor issues under. */
+  /** Token series this doctor issues under at this center. */
   series: string
   status: 'active' | 'break' | 'delayed' | 'offline'
   /** Drives the estimated-wait projection. */
   avgConsultMinutes: number
-  /** DB: doctors.max_appointments_per_hour */
+  /** DB: doctor_center_assignments.max_appointments_per_hour */
   maxAppointmentsPerHour?: number
-  /** DB: doctors.center_id */
+  /** DB: doctor_center_assignments.delay_minutes */
+  delayMinutes?: number
   centerId?: string | null
   centerName?: string | null
 }
@@ -75,57 +73,6 @@ export interface IssueTokenInput {
   source: TokenSource
   /** Required for `physical` — the number pre-printed on the paper token. */
   tokenNumber?: number
-}
-
-// ─── Reference data (replace with GET /doctors when the API lands) ────────────
-
-// DB: SELECT d.id, u.full_name, d.specialization FROM doctors d
-//     JOIN users u ON u.id = d.user_id WHERE u.is_active = true ORDER BY u.full_name
-export const RECEPTION_DOCTORS: ReceptionDoctor[] = [
-  { id: 'dr-1', name: 'Dr. Ethan Carr', dept: 'General Medicine', room: 'Room 04', series: 'A', status: 'active', avgConsultMinutes: 8 },
-  { id: 'dr-2', name: 'Dr. Aisha Patel', dept: 'Cardiology', room: 'Room 03', series: 'B', status: 'active', avgConsultMinutes: 12 },
-  { id: 'dr-3', name: 'Dr. S. Montoya', dept: 'Pediatrics', room: 'Room 11', series: 'C', status: 'delayed', avgConsultMinutes: 15 },
-  { id: 'dr-4', name: 'Dr. K. Nakamura', dept: 'Orthopedics', room: 'Room 02', series: 'D', status: 'break', avgConsultMinutes: 10 },
-]
-
-export function findDoctor(doctorId: string): ReceptionDoctor | undefined {
-  return RECEPTION_DOCTORS.find((d) => d.id === doctorId)
-}
-
-// ─── Seed queue (DB: walk_in_queue rows for today) ───────────────────────────
-
-const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000)
-
-let seq = 0
-function entryId() {
-  seq += 1
-  return `q-${seq}`
-}
-
-// DB: SELECT * FROM walk_in_queue WHERE queue_date = CURRENT_DATE ORDER BY doctor_id, queue_number
-export function seedQueue(): QueueEntry[] {
-  const rows: Array<Omit<QueueEntry, 'id'>> = [
-    // Dr. Ethan Carr — series A
-    { series: 'A', tokenNumber: 9, patientName: 'Chamari Jayawardena', nic: '198512345671', phone: '0771000001', doctorId: 'dr-1', source: 'online', status: 'completed', issuedAt: minutesAgo(150), calledAt: minutesAgo(140) },
-    { series: 'A', tokenNumber: 10, patientName: 'Mahesh Gunaratne', nic: '199012345672', phone: '', doctorId: 'dr-1', source: 'physical', status: 'completed', issuedAt: minutesAgo(120), calledAt: minutesAgo(105) },
-    { series: 'A', tokenNumber: 11, patientName: 'Nimal Silva', nic: '197945210082', phone: '0771234567', doctorId: 'dr-1', source: 'online', status: 'in_progress', issuedAt: minutesAgo(90), calledAt: minutesAgo(12) },
-    { series: 'A', tokenNumber: 12, patientName: 'Kasun Perera', nic: '199212004821', phone: '0719876543', doctorId: 'dr-1', source: 'online', status: 'waiting', issuedAt: minutesAgo(62) },
-    { series: 'A', tokenNumber: 13, patientName: 'Dilini Fernando', nic: '199856210099', phone: '0754433221', doctorId: 'dr-1', source: 'physical', status: 'waiting', issuedAt: minutesAgo(48) },
-    { series: 'A', tokenNumber: 14, patientName: 'Rajan Mehta', nic: '198845210082', phone: '0778899001', doctorId: 'dr-1', source: 'online', status: 'waiting', issuedAt: minutesAgo(30) },
-    { series: 'A', tokenNumber: 15, patientName: 'Sunil Wickramasinghe', nic: '196512345678', phone: '0721122334', doctorId: 'dr-1', source: 'physical', status: 'waiting', issuedAt: minutesAgo(14) },
-
-    // Dr. Aisha Patel — series B
-    { series: 'B', tokenNumber: 6, patientName: 'Anura Kumara', nic: '197712345673', phone: '0765544332', doctorId: 'dr-2', source: 'online', status: 'in_progress', issuedAt: minutesAgo(70), calledAt: minutesAgo(9) },
-    { series: 'B', tokenNumber: 7, patientName: 'Shanika Ratnayake', nic: '199412345674', phone: '0712233445', doctorId: 'dr-2', source: 'online', status: 'waiting', issuedAt: minutesAgo(40) },
-    { series: 'B', tokenNumber: 8, patientName: 'Tharindu Bandara', nic: '198912345675', phone: '', doctorId: 'dr-2', source: 'physical', status: 'waiting', issuedAt: minutesAgo(22) },
-
-    // Dr. S. Montoya — series C (running late)
-    { series: 'C', tokenNumber: 9, patientName: 'Isuru Madushanka', nic: '200112345676', phone: '0703344556', doctorId: 'dr-3', source: 'online', status: 'in_progress', issuedAt: minutesAgo(95), calledAt: minutesAgo(28) },
-    { series: 'C', tokenNumber: 10, patientName: 'Hasini Wijesinghe', nic: '200212345677', phone: '0774455667', doctorId: 'dr-3', source: 'online', status: 'waiting', issuedAt: minutesAgo(55) },
-    { series: 'C', tokenNumber: 11, patientName: 'Nadeesha Alwis', nic: '199712345678', phone: '', doctorId: 'dr-3', source: 'physical', status: 'waiting', issuedAt: minutesAgo(35) },
-    { series: 'C', tokenNumber: 12, patientName: 'Ruwan Dissanayake', nic: '198312345679', phone: '0756677889', doctorId: 'dr-3', source: 'online', status: 'waiting', issuedAt: minutesAgo(18) },
-  ]
-  return rows.map((r) => ({ ...r, id: entryId() }))
 }
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -147,11 +94,9 @@ export function fmtTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-/** Statuses that still occupy a slot in the queue. */
-export const ACTIVE_STATUSES: QueueStatus[] = ['waiting', 'called', 'in_progress']
-
-export function isActive(entry: QueueEntry): boolean {
-  return ACTIVE_STATUSES.includes(entry.status)
+/** "12 min ago" / "just now" — for how long someone has been in the lobby. */
+export function minutesSince(d: Date, now: Date = new Date()): number {
+  return Math.max(0, Math.round((now.getTime() - d.getTime()) / 60_000))
 }
 
 export const STATUS_LABEL: Record<QueueStatus, string> = {
@@ -173,24 +118,44 @@ export const STATUS_BADGE: Record<QueueStatus, string> = {
   cancelled: 'badge-crimson',
 }
 
+/** Statuses that still occupy a place in line. */
+export const ACTIVE_STATUSES: QueueStatus[] = ['waiting', 'called', 'in_progress']
+
+export function isActive(entry: QueueEntry): boolean {
+  return ACTIVE_STATUSES.includes(entry.status)
+}
+
+/** Statuses that are finished, one way or another. */
+export function isClosed(entry: QueueEntry): boolean {
+  return entry.status === 'completed' || entry.status === 'left' || entry.status === 'cancelled'
+}
+
 // ─── Selectors ───────────────────────────────────────────────────────────────
 
+/**
+ * A doctor's tokens, lowest number first.
+ *
+ * Matching is deliberately loose: a queue row may carry `doctors.id` or the
+ * doctor's `users.id` depending on which screen created it, and legacy rows
+ * only reliably carry the series letter.
+ */
 export function forDoctor(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): QueueEntry[] {
-  if (!doctorId) return entries
-  const docIdLower = (doctorId || '').toLowerCase()
-  const docSeriesLower = (doctor?.series || '').toLowerCase()
-  const docUserIdLower = ((doctor as any)?.userId || '').toLowerCase()
+  if (!doctorId) return []
+  const docIdLower = doctorId.toLowerCase()
+  const docSeriesLower = (doctor?.series ?? '').toLowerCase()
+  const docUserIdLower = ((doctor as { userId?: string } | undefined)?.userId ?? '').toLowerCase()
 
-  return entries.filter((e) => {
-    const eDocId = (e.doctorId || '').toLowerCase()
-    const eSeries = (e.series || '').toLowerCase()
-
-    return (
-      eDocId === docIdLower ||
-      (docUserIdLower && eDocId === docUserIdLower) ||
-      (docSeriesLower && eSeries && eSeries === docSeriesLower)
-    )
-  }).sort((a, b) => a.tokenNumber - b.tokenNumber)
+  return entries
+    .filter((e) => {
+      const eDocId = (e.doctorId || '').toLowerCase()
+      const eSeries = (e.series || '').toLowerCase()
+      return (
+        eDocId === docIdLower ||
+        (docUserIdLower !== '' && eDocId === docUserIdLower) ||
+        (docSeriesLower !== '' && eSeries !== '' && eSeries === docSeriesLower)
+      )
+    })
+    .sort((a, b) => a.tokenNumber - b.tokenNumber)
 }
 
 export function waitingFor(entries: QueueEntry[], doctorId: string, doctor?: ReceptionDoctor): QueueEntry[] {
@@ -215,116 +180,24 @@ export function nextTokenNumber(entries: QueueEntry[], doctorId: string, doctor?
   return nums.length > 0 ? Math.max(...nums) + 1 : 1
 }
 
-/** A pre-printed number can only be recorded once per doctor per day. */
-export function isTokenTaken(entries: QueueEntry[], doctorId: string, tokenNumber: number): boolean {
-  return issuedNumbers(entries, doctorId).includes(tokenNumber)
-}
-
 /** Projected wait for the Nth patient in line, from the doctor's average consult time. */
 export function estimateWaitMinutes(positionInLine: number, doctor?: ReceptionDoctor): number {
   const avg = doctor?.avgConsultMinutes ?? 10
-  const penalty = doctor?.status === 'delayed' ? avg : 0
-  return positionInLine * avg + penalty
+  // A published delay pushes every projection out by however long the doctor
+  // said they'd be, not by a flat one-consult penalty.
+  const delay = doctor?.status === 'delayed' ? (doctor.delayMinutes ?? avg) : 0
+  return positionInLine * avg + delay
 }
 
-export function averageWaitMinutes(entries: QueueEntry[], doctors: ReceptionDoctor[] = RECEPTION_DOCTORS): number {
+/**
+ * Mean projected wait across the given doctors.
+ * `doctors` is required — it used to default to the hardcoded demo roster,
+ * which silently averaged over four doctors who didn't exist.
+ */
+export function averageWaitMinutes(entries: QueueEntry[], doctors: ReceptionDoctor[]): number {
   const waits = doctors.flatMap((doc) =>
     waitingFor(entries, doc.id, doc).map((_, i) => estimateWaitMinutes(i + 1, doc)),
   )
   if (waits.length === 0) return 0
   return Math.round(waits.reduce((sum, w) => sum + w, 0) / waits.length)
-}
-
-// ─── Mutations (pure reducers) ───────────────────────────────────────────────
-
-export class QueueError extends Error {}
-
-/**
- * DB: INSERT INTO walk_in_queue
- *       (patient_name, sms_phone, doctor_id, queue_number, source, status,
- *        queue_date, checked_in_at)
- *     VALUES ($1, $2, $3, $4, $5, 'waiting', CURRENT_DATE, NOW())
- *
- * `online` takes the next sequential number; `physical` records the number
- * already printed on the paper token and rejects a repeat.
- */
-export function issueToken(entries: QueueEntry[], input: IssueTokenInput): QueueEntry[] {
-  const name = input.patientName.trim()
-  if (!name) throw new QueueError('Patient name is required.')
-
-  const doctor = findDoctor(input.doctorId)
-  if (!doctor) throw new QueueError('Select a doctor before issuing a token.')
-
-  let tokenNumber: number
-  if (input.source === 'physical') {
-    tokenNumber = Number(input.tokenNumber)
-    if (!Number.isInteger(tokenNumber) || tokenNumber < 1) {
-      throw new QueueError('Enter the number printed on the paper token.')
-    }
-    if (isTokenTaken(entries, input.doctorId, tokenNumber)) {
-      throw new QueueError(`Token ${formatToken(doctor.series, tokenNumber)} has already been issued today.`)
-    }
-  } else {
-    tokenNumber = nextTokenNumber(entries, input.doctorId)
-  }
-
-  const entry: QueueEntry = {
-    id: entryId(),
-    series: doctor.series,
-    tokenNumber,
-    patientName: name,
-    nic: input.nic?.trim() || undefined,
-    phone: input.phone?.trim() ?? '',
-    doctorId: input.doctorId,
-    source: input.source,
-    status: 'waiting',
-    issuedAt: new Date(),
-  }
-
-  return [...entries, entry].sort((a, b) => a.tokenNumber - b.tokenNumber)
-}
-
-/**
- * DB: UPDATE walk_in_queue SET status='completed'
- *       WHERE doctor_id=$1 AND queue_date=CURRENT_DATE AND status IN ('called','in_progress');
- *     UPDATE walk_in_queue SET status='called', called_at=NOW()
- *       WHERE id=(lowest waiting queue_number for that doctor today);
- *
- * A doctor has one room, so exactly one token is live at a time: announcing the
- * next one closes out whoever was live. The prototype only promoted
- * `called` → `in_progress` and left the previous consultation open, which put
- * two tokens on the board at once and hid the patient who had just been called.
- * If someone left without being seen, mark them `left` from the row actions
- * before calling the next token.
- */
-export function callNext(entries: QueueEntry[], doctorId: string): QueueEntry[] {
-  const queue = forDoctor(entries, doctorId)
-  const nextWaiting = queue.find((e) => e.status === 'waiting')
-  if (!nextWaiting) return entries
-
-  return entries.map((e) => {
-    if (e.doctorId !== doctorId) return e
-    if (e.status === 'called' || e.status === 'in_progress') {
-      return { ...e, status: 'completed' as QueueStatus }
-    }
-    if (e.id === nextWaiting.id) {
-      return { ...e, status: 'called' as QueueStatus, calledAt: new Date() }
-    }
-    return e
-  })
-}
-
-/**
- * Closes the live token without calling anyone else.
- * DB: UPDATE walk_in_queue SET status='completed' WHERE id=$1
- */
-export function completeCurrent(entries: QueueEntry[], doctorId: string): QueueEntry[] {
-  const live = currentFor(entries, doctorId)
-  if (!live) return entries
-  return entries.map((e) => (e.id === live.id ? { ...e, status: 'completed' as QueueStatus } : e))
-}
-
-/** DB: UPDATE walk_in_queue SET status=$2 WHERE id=$1 */
-export function setEntryStatus(entries: QueueEntry[], id: string, status: QueueStatus): QueueEntry[] {
-  return entries.map((e) => (e.id === id ? { ...e, status } : e))
 }

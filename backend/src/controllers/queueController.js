@@ -107,11 +107,15 @@ export async function getPublicBoard(req, res, next) {
       const docObj = {
         doctorId: d.id,
         userId: d.user_id,
-        doctorName: d.users?.full_name || 'Dr. Medical Specialist',
-        specialization: d.specialization || 'General Medicine',
-        roomNumber: d.room_number || 'Room 01',
-        centerName: d.medical_centers?.name || 'MediQueue Central Clinic',
-        series: d.series || 'A',
+        doctorName: d.users?.full_name || 'Doctor',
+        // Null, not an invented value. These defaulted to 'General Medicine',
+        // 'Room 01' and 'MediQueue Central Clinic', which the public waiting
+        // room TV then displayed as fact for any doctor whose posting was
+        // incomplete — sending patients to a room that doesn't exist.
+        specialization: d.specialization || null,
+        roomNumber: d.room_number || null,
+        centerName: d.medical_centers?.name || null,
+        series: d.series || '?',
         nowServing: null,
         waitingQueue: []
       };
@@ -125,11 +129,11 @@ export async function getPublicBoard(req, res, next) {
         docObj = {
           doctorId: row.doctor_id,
           userId: row.doctors?.user_id,
-          doctorName: row.doctors?.users?.full_name || 'Dr. Medical Specialist',
-          specialization: row.doctors?.specialization || 'General Medicine',
-          roomNumber: row.doctors?.room_number || 'Room 01',
-          centerName: row.doctors?.medical_centers?.name || 'MediQueue Central Clinic',
-          series: row.doctors?.series || 'A',
+          doctorName: row.doctors?.users?.full_name || 'Doctor',
+          specialization: row.doctors?.specialization || null,
+          roomNumber: row.doctors?.room_number || null,
+          centerName: row.doctors?.medical_centers?.name || null,
+          series: row.doctors?.series || '?',
           nowServing: null,
           waitingQueue: []
         };
@@ -163,11 +167,11 @@ export async function getPublicBoard(req, res, next) {
           docObj = {
             doctorId: a.doctor_id,
             userId: a.doctors?.user_id,
-            doctorName: a.doctors?.users?.full_name || 'Dr. Medical Specialist',
-            specialization: a.doctors?.specialization || 'General Medicine',
-            roomNumber: a.doctors?.room_number || 'Room 01',
-            centerName: a.doctors?.medical_centers?.name || 'MediQueue Central Clinic',
-            series: a.doctors?.series || 'A',
+            doctorName: a.doctors?.users?.full_name || 'Doctor',
+            specialization: a.doctors?.specialization || null,
+            roomNumber: a.doctors?.room_number || null,
+            centerName: a.doctors?.medical_centers?.name || null,
+            series: a.doctors?.series || '?',
             nowServing: null,
             waitingQueue: []
           };

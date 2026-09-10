@@ -1,21 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, api } from '../lib/api'
-import type { ApiDoctor, ApiQueueEntry } from '../lib/api'
+import type { ApiDelayAlert, ApiDoctor, ApiQueueEntry } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import {
-  QueueError,
-  RECEPTION_DOCTORS,
-  callNext as callNextReducer,
-  completeCurrent as completeCurrentReducer,
   currentFor,
   estimateWaitMinutes,
   forDoctor,
   formatToken,
-  issueToken as issueTokenReducer,
   issuedNumbers as issuedNumbersFor,
   nextTokenNumber,
-  setEntryStatus as setEntryStatusReducer,
-  seedQueue,
   waitingFor,
 } from '../lib/receptionQueue'
 import type { IssueTokenInput, QueueEntry, QueueStatus, ReceptionDoctor } from '../lib/receptionQueue'
@@ -36,33 +29,50 @@ function fromApiEntry(e: ApiQueueEntry): QueueEntry {
   }
 }
 
+/** `ApiDoctor` carries `delayMinutes` per posting; the wait projection needs it. */
+function fromApiDoctor(d: ApiDoctor): ReceptionDoctor {
+  return {
+    id: d.id,
+    name: d.name,
+    dept: d.dept,
+    room: d.room,
+    series: d.series,
+    status: d.status,
+    avgConsultMinutes: d.avgConsultMinutes,
+    maxAppointmentsPerHour: d.maxAppointmentsPerHour,
+    delayMinutes: (d as ApiDoctor & { delayMinutes?: number }).delayMinutes ?? 0,
+    centerId: d.centerId ?? null,
+    centerName: d.centerName ?? null,
+  }
+}
+
+const POLL_MS = 3000
+
 /**
  * Live reception queue for one counter.
  *
- * Talks to the real backend (Supabase-backed `walk_in_queue` + `doctors`
- * tables — see backend/src/controllers/queueController.js) whenever it's
- * reachable. If the API can't be reached at all — e.g. previewing the
- * frontend standalone with no backend running — it transparently falls back
- * to the bundled in-memory demo data and the original pure reducers, so the
- * desk stays fully usable either way.
+ * The backend (`walk_in_queue` + `appointments`, see
+ * backend/src/controllers/queueController.js) is the only source of truth.
+ *
+ * This hook used to initialise `doctors` and `entries` from a bundled demo
+ * roster and a 14-row seed queue, and fell back to a set of in-memory reducers
+ * whenever the API was unreachable. That made the desk *look* populated before
+ * the first response landed and then blank out — and worse, while offline it
+ * happily "issued" tokens that were never recorded anywhere. State now starts
+ * empty, `loading` gates the first paint, and an unreachable backend is
+ * reported rather than simulated.
  */
 export function useReceptionQueue() {
-  // A receptionist only manages one medical center — the desk roster and the
-  // queue's doctor picker are scoped to it. `centerId` is null for accounts not
-  // yet linked to a center (and for the offline demo identity).
+  // A receptionist manages one medical center — the desk roster and the queue's
+  // doctor picker are scoped to it. `centerId` is null for accounts not yet
+  // linked to a center.
   const { user, loading: authLoading } = useAuth()
   const centerId = user?.centerId ?? null
 
-  /** Doctors assigned to this receptionist's center — empty until one is linked. */
-  const fetchCenterDoctors = useCallback(
-    (): Promise<{ doctors: ApiDoctor[] }> =>
-      centerId ? api.getDoctors({ centerId }) : Promise.resolve({ doctors: [] }),
-    [centerId],
-  )
-
-  const [doctors, setDoctors] = useState<ReceptionDoctor[]>(RECEPTION_DOCTORS)
-  const [entries, setEntries] = useState<QueueEntry[]>(seedQueue)
-  const [selectedDoctorId, setSelectedDoctorId] = useState(RECEPTION_DOCTORS[0]?.id ?? '')
+  const [doctors, setDoctors] = useState<ReceptionDoctor[]>([])
+  const [entries, setEntries] = useState<QueueEntry[]>([])
+  const [delayAlerts, setDelayAlerts] = useState<ApiDelayAlert[]>([])
+  const [selectedDoctorId, setSelectedDoctorId] = useState('')
 
   const [loading, setLoading] = useState(true)
   const [offline, setOffline] = useState(false)
@@ -73,42 +83,69 @@ export function useReceptionQueue() {
   const [completing, setCompleting] = useState(false)
   const [error, setError] = useState('')
 
-  // Load the real clinic roster + today's queue once the session is known
-  // (we need the receptionist's center before we can scope the roster).
+  /** Ticks once a minute so "waiting 12 min" ages without a full refetch. */
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
+  /**
+   * One fetch of everything the desk shows. Held in a ref so the polling
+   * effect doesn't re-subscribe whenever a piece of state changes — the old
+   * version listed a `useCallback` in its dependency array and tore the
+   * interval down and back up on every tick.
+   */
+  const loadRef = useRef<(opts?: { silent?: boolean }) => Promise<void>>(async () => {})
+
+  loadRef.current = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
+    try {
+      const [doctorsRes, queueRes, alertsRes] = await Promise.all([
+        centerId ? api.getDoctors({ centerId }) : Promise.resolve({ doctors: [] as ApiDoctor[] }),
+        api.getQueue({ centerId }),
+        centerId
+          ? api.getDelayAlerts({ centerId, activeOnly: true, limit: 20 })
+          : Promise.resolve({ alerts: [] as ApiDelayAlert[] }),
+      ])
+
+      const mappedDoctors = doctorsRes.doctors.map(fromApiDoctor)
+      setDoctors(mappedDoctors)
+      setEntries(queueRes.entries.map(fromApiEntry))
+      setDelayAlerts(alertsRes.alerts ?? [])
+      setMigrationPending(!!queueRes.migrationPending)
+      setOffline(false)
+      setSelectedDoctorId(prev =>
+        mappedDoctors.some(d => d.id === prev) ? prev : (mappedDoctors[0]?.id ?? ''),
+      )
+    } catch (err) {
+      // A polling failure shouldn't wipe the desk mid-shift; only report it.
+      setOffline(true)
+      if (!silent) {
+        setDoctors([])
+        setEntries([])
+        setDelayAlerts([])
+      }
+      if (err instanceof ApiError && err.status !== 0) setError(err.message)
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }
+
+  // First load, once the session is known — we need the receptionist's center
+  // before the roster can be scoped.
   useEffect(() => {
     if (authLoading) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const [doctorsRes, queueRes] = await Promise.all([fetchCenterDoctors(), api.getQueue({ centerId })])
-        if (cancelled) return
-        setDoctors(doctorsRes.doctors)
-        setEntries(queueRes.entries.map(fromApiEntry))
-        setMigrationPending(!!queueRes.migrationPending)
-        setSelectedDoctorId(prev =>
-          doctorsRes.doctors.some(d => d.id === prev) ? prev : (doctorsRes.doctors[0]?.id ?? ''),
-        )
-      } catch {
-        if (cancelled) return
-        setOffline(true) // keep the bundled demo data (RECEPTION_DOCTORS / seedQueue)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [authLoading, fetchCenterDoctors])
+    loadRef.current?.()
+  }, [authLoading, centerId])
 
-  // Live 3-second doctor status & queue polling loop across doctor terminals
+  // Live polling so a doctor calling the next patient from their own console
+  // shows up at the desk within a few seconds.
   useEffect(() => {
-    if (offline) return
-    const interval = setInterval(() => {
-      Promise.all([fetchCenterDoctors(), api.getQueue({ centerId })]).then(([doctorsRes, queueRes]) => {
-        setDoctors(doctorsRes.doctors)
-        setEntries(queueRes.entries.map(fromApiEntry))
-      }).catch(() => {})
-    }, 3000)
+    if (authLoading) return
+    const interval = setInterval(() => { loadRef.current?.({ silent: true }) }, POLL_MS)
     return () => clearInterval(interval)
-  }, [offline, fetchCenterDoctors])
+  }, [authLoading])
 
   const selectedDoctor = useMemo(() => doctors.find(d => d.id === selectedDoctorId), [doctors, selectedDoctorId])
 
@@ -126,27 +163,23 @@ export function useReceptionQueue() {
   /** The token the "Call Next" button will pull in. */
   const upNext = waiting[0]
 
+  /** Live delay notice for the doctor whose queue is on screen, if any. */
+  const selectedDoctorDelay = useMemo(
+    () => delayAlerts.find(a => a.isActive && a.doctorId === selectedDoctorId) ?? null,
+    [delayAlerts, selectedDoctorId],
+  )
+
   const issue = useCallback(
     async (input: Omit<IssueTokenInput, 'doctorId'> & { doctorId?: string }) => {
       const doctorId = input.doctorId ?? selectedDoctorId
-      setIssuing(true)
-      setError('')
-
-      if (offline) {
-        try {
-          const next = issueTokenReducer(entries, { ...input, doctorId })
-          setEntries(next)
-          const added = next.find(e => !entries.some(prev => prev.id === e.id))
-          return { ok: true as const, entry: added }
-        } catch (err) {
-          const message = err instanceof QueueError ? err.message : 'Could not issue this token.'
-          setError(message)
-          return { ok: false as const, message }
-        } finally {
-          setIssuing(false)
-        }
+      if (!doctorId) {
+        const message = 'Select a doctor before issuing a token.'
+        setError(message)
+        return { ok: false as const, message }
       }
 
+      setIssuing(true)
+      setError('')
       try {
         const { entry } = await api.issueWalkinToken({
           doctorId,
@@ -168,19 +201,13 @@ export function useReceptionQueue() {
         setIssuing(false)
       }
     },
-    [entries, offline, selectedDoctorId, centerId],
+    [selectedDoctorId, centerId],
   )
 
   const callNext = useCallback(async () => {
-    if (waiting.length === 0) return
+    if (waiting.length === 0 || !selectedDoctorId) return
     setCalling(true)
-
-    if (offline) {
-      setEntries(prev => callNextReducer(prev, selectedDoctorId))
-      setCalling(false)
-      return
-    }
-
+    setError('')
     try {
       const { entries: updated } = await api.callNext(selectedDoctorId, centerId)
       const mappedUpdated = updated.map(fromApiEntry)
@@ -194,18 +221,12 @@ export function useReceptionQueue() {
     } finally {
       setCalling(false)
     }
-  }, [offline, selectedDoctorId, waiting.length, centerId])
+  }, [selectedDoctorId, waiting.length, centerId])
 
   const completeCurrent = useCallback(async () => {
     if (!current) return
     setCompleting(true)
-
-    if (offline) {
-      setEntries(prev => completeCurrentReducer(prev, selectedDoctorId))
-      setCompleting(false)
-      return
-    }
-
+    setError('')
     try {
       const { entry } = await api.setQueueEntryStatus(current.id, 'completed')
       const mapped = fromApiEntry(entry)
@@ -215,14 +236,11 @@ export function useReceptionQueue() {
     } finally {
       setCompleting(false)
     }
-  }, [current, offline, selectedDoctorId])
+  }, [current])
 
   const setStatus = useCallback(
     async (id: string, status: Exclude<QueueStatus, 'cancelled'>) => {
-      if (offline) {
-        setEntries(prev => setEntryStatusReducer(prev, id, status))
-        return
-      }
+      setError('')
       try {
         const { entry } = await api.setQueueEntryStatus(id, status)
         const mapped = fromApiEntry(entry)
@@ -231,7 +249,7 @@ export function useReceptionQueue() {
         setError(err instanceof ApiError ? err.message : 'Could not update this token.')
       }
     },
-    [offline],
+    [],
   )
 
   /** Estimated wait for a waiting entry, by its place in line. */
@@ -243,32 +261,57 @@ export function useReceptionQueue() {
     [waiting, selectedDoctor],
   )
 
-  /** Re-fetches doctors (and today's queue) from the server. Used after add/edit. */
-  const refresh = useCallback(async () => {
-    if (offline) return
+  /** Publishes a delay for the doctor currently on screen. */
+  const raiseDelay = useCallback(
+    async (delayMinutes: number, reason: string) => {
+      if (!selectedDoctorId) return { ok: false as const, message: 'Select a doctor first.' }
+      try {
+        const res = await api.createDelayAlert(selectedDoctorId, { delayMinutes, reason, centerId })
+        setDelayAlerts(prev => [res.alert, ...prev.filter(a => a.id !== res.alert.id)])
+        await loadRef.current?.({ silent: true })
+        return { ok: true as const, notifiedCount: res.notifiedCount, message: res.message }
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Could not publish the delay alert.'
+        setError(message)
+        return { ok: false as const, message }
+      }
+    },
+    [selectedDoctorId, centerId],
+  )
+
+  const clearDelay = useCallback(async (alertId: string) => {
     try {
-      const [doctorsRes, queueRes] = await Promise.all([fetchCenterDoctors(), api.getQueue({ centerId })])
-      setDoctors(doctorsRes.doctors)
-      setEntries(queueRes.entries.map(fromApiEntry))
-      setSelectedDoctorId(prev =>
-        doctorsRes.doctors.some(d => d.id === prev) ? prev : (doctorsRes.doctors[0]?.id ?? ''),
-      )
-    } catch { /* silently ignore */ }
-  }, [offline, fetchCenterDoctors])
+      const res = await api.clearDelayAlert(alertId)
+      setDelayAlerts(prev => prev.filter(a => a.id !== res.alert.id))
+      await loadRef.current?.({ silent: true })
+      return { ok: true as const, message: res.message }
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Could not clear the delay alert.'
+      setError(message)
+      return { ok: false as const, message }
+    }
+  }, [])
+
+  /** Re-fetches everything. Used after add/edit and by the manual refresh control. */
+  const refresh = useCallback(async () => { await loadRef.current?.({ silent: true }) }, [])
 
   return {
     // data
     entries,
     doctorQueue,
     doctors,
+    delayAlerts,
     selectedDoctor,
     selectedDoctorId,
+    selectedDoctorDelay,
     waiting,
     current,
     upNext,
     issuedNumbers,
     nextNumber,
     nextToken,
+    /** Ticks every 30s so elapsed-time labels stay current. */
+    now,
     // connection state
     loading,
     offline,
@@ -286,6 +329,8 @@ export function useReceptionQueue() {
     callNext,
     completeCurrent,
     setStatus,
+    raiseDelay,
+    clearDelay,
     clearError: () => setError(''),
     waitFor,
     refresh,

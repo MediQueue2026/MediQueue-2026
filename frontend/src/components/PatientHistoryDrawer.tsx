@@ -62,8 +62,11 @@ export default function PatientHistoryDrawer({
   isOpen,
   onClose,
   patientId,
-  patientName = 'Nimal Silva',
-  patientToken = '#A-11'
+  // Neutral placeholders. These defaulted to 'Nimal Silva' / '#A-11' — a name
+  // from the old demo seed data — so any render that didn't pass a patient
+  // showed a fabricated patient identity on a clinical history screen.
+  patientName = 'Patient',
+  patientToken = '—'
 }: PatientHistoryDrawerProps) {
   const [records, setRecords] = useState<HealthRecordItem[]>([])
   const [loading, setLoading] = useState(false)

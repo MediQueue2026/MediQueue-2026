@@ -306,6 +306,100 @@ export interface ApiDoctorRequest {
   createdAt: string
 }
 
+/**
+ * One row of the Doctor Console's live queue.
+ *
+ * `age`/`g` are decoded from the patient's NIC and are **null when there is no
+ * usable NIC** — the console used to render a hardcoded "35 · M" for everyone,
+ * which is fabricated clinical data. Render a dash, never a guess.
+ */
+export interface ApiDoctorQueueItem {
+  id: string
+  patientId: string | null
+  token: string
+  name: string
+  age: number | null
+  /** 'M' | 'F' | null */
+  g: string | null
+  nic: string | null
+  /** How the patient reached the queue — not a chief complaint. */
+  visitType: 'Walk-in' | 'Online'
+  allergy: string | null
+  checkedInAt: string | null
+  calledAt: string | null
+  status: 'waiting' | 'called' | 'in_progress' | 'completed' | 'left' | 'cancelled' | 'no_show' | 'skipped'
+}
+
+export interface ApiDoctorSummary {
+  doctor: {
+    id: string
+    userId: string | null
+    name: string
+    specialization: string | null
+    roomNumber: string | null
+    currentStatus: 'active' | 'delayed' | 'break' | 'offline'
+    delayMinutes: number
+    series: string
+    centerId: string | null
+    centerName: string | null
+    maxAppointmentsPerHour: number
+  }
+  stats: {
+    totalToday: number
+    avgConsultTime: string
+    avgConsultMinutes: number
+    /** True while avgConsultTime is the scheduled rate, not a measurement. */
+    avgConsultIsEstimate: boolean
+    remainingTokens: number
+    skippedNoShow: number
+    patientsSeen: number
+  }
+  activePatient: {
+    id: string
+    patientId: string | null
+    token: string
+    name: string
+    nic: string | null
+    age: number | null
+    gender: string | null
+    visitType: 'Walk-in' | 'Online'
+    allergy: string | null
+    checkedInAt: string | null
+    calledAt: string | null
+  } | null
+  queueList: ApiDoctorQueueItem[]
+}
+
+/**
+ * One published delay notice (BR-05 / FR-07 — see delay_alerts, migration 011).
+ *
+ * Persisted rather than derived from the doctor's status, so the patient and
+ * reception feeds still show the notice after the doctor resumes, and so there
+ * is a record of how many patients were actually reached by SMS.
+ */
+export interface ApiDelayAlert {
+  id: string
+  doctorId: string
+  centerId: string | null
+  doctorName: string
+  specialization: string | null
+  roomNumber: string | null
+  centerName: string | null
+  delayMinutes: number
+  reason: string
+  /** The exact SMS body that was sent. */
+  message: string | null
+  notifiedCount: number
+  /** Patients who have delay SMS switched off in their profile. */
+  skippedCount: number
+  raisedByName: string | null
+  raisedByRole: string | null
+  clearedAt: string | null
+  /** False once the doctor is back on schedule. */
+  isActive: boolean
+  createdAt: string
+}
+
 /** A row of `health_records` as the API returns it (snake_case, straight from Postgres). */
 export interface ApiHealthRecord {
   id: string
@@ -503,6 +597,73 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ reason }),
     }),
+
+  /**
+   * Everything the Doctor Console renders, scoped to today. Unauthenticated
+   * like the other doctor reads. 404s on an unknown id rather than returning
+   * some other doctor's queue.
+   */
+  getDoctorSummary: (doctorId: string, centerId?: string | null) =>
+    rawRequest<ApiDoctorSummary>(
+      `/doctors/${doctorId}/summary${centerId ? `?centerId=${encodeURIComponent(centerId)}` : ''}`,
+    ),
+
+  // ── Delay alerts (BR-05 / FR-07) ──
+  /**
+   * Publishes a delay for one doctor's posting: flips them to `delayed`,
+   * records the notice and SMSes subscribed patients, today's appointments and
+   * anyone still holding a walk-in token. `centerId` is required when the
+   * doctor works at more than one center.
+   */
+  createDelayAlert: (doctorId: string, input: { delayMinutes: number; reason?: string; centerId?: string | null }) =>
+    request<{ message: string; alert: ApiDelayAlert; notifiedCount: number; skippedCount: number }>(
+      `/doctors/${doctorId}/delay-alerts`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+
+  /**
+   * The delay feed. Reads are unauthenticated (like `/doctors` and `/centers`)
+   * because the Patient Dashboard polls its own feed without an access token.
+   *
+   * `patientId` scopes to doctors that patient subscribes to — a patient with
+   * no subscriptions gets an empty list, not everyone's alerts.
+   */
+  getDelayAlerts: (params?: {
+    patientId?: string | null
+    centerId?: string | null
+    doctorId?: string | null
+    activeOnly?: boolean
+    limit?: number
+  }) => {
+    const q = new URLSearchParams()
+    if (params?.patientId) q.set('patientId', params.patientId)
+    if (params?.centerId) q.set('centerId', params.centerId)
+    if (params?.doctorId) q.set('doctorId', params.doctorId)
+    if (params?.activeOnly) q.set('activeOnly', 'true')
+    if (params?.limit) q.set('limit', String(params.limit))
+    const qs = q.toString()
+    return rawRequest<{ alerts: ApiDelayAlert[]; subscribedDoctorIds?: string[]; migrationPending?: boolean }>(
+      `/delay-alerts${qs ? `?${qs}` : ''}`,
+    )
+  },
+
+  /** Doctor is back on schedule: stamps the alert and texts the same recipients. */
+  clearDelayAlert: (id: string, notify = true) =>
+    request<{ message: string; alert: ApiDelayAlert; notifiedCount: number }>(`/delay-alerts/${id}/clear`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notify }),
+    }),
+
+  /** Shift changes and room moves. A `delayed` status routes through the delay-alert path server-side. */
+  updateDoctorStatus: (doctorId: string, input: {
+    currentStatus?: 'online' | 'active' | 'break' | 'offline'
+    roomNumber?: string
+    centerId?: string | null
+  }) =>
+    request<{ message: string; status: { doctorId: string; currentStatus: string | null; delayMinutes: number; roomNumber: string | null } }>(
+      `/doctors/${doctorId}/status`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    ),
 
   getDoctorHours: (doctorId: string, centerId?: string | null) =>
     request<{ hours: ApiDoctorHour[]; maxAppointmentsPerHour: number }>(

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Activity, AlertCircle, Bell, BellRing, Building2, CheckCircle2, Clock, Hash, Plus, Radio,
-  Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil, Menu, X
+  Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil, Menu, X,
+  ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -10,13 +11,14 @@ import PublicTvDisplay from '../components/PublicTvDisplay'
 import AddDoctorModal from '../components/AddDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import DoctorHoursModal from '../components/DoctorHoursModal'
+import DelayAlertModal from '../components/DelayAlertModal'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
   STATUS_BADGE, STATUS_LABEL, currentFor, entryToken, fmtTime, formatToken,
-  averageWaitMinutes, waitingFor
+  averageWaitMinutes, minutesSince, waitingFor
 } from '../lib/receptionQueue'
-import type { TokenSource } from '../lib/receptionQueue'
+import type { QueueEntry, TokenSource } from '../lib/receptionQueue'
 import { api, type ApiDoctor } from '../lib/api'
 
 
@@ -39,6 +41,205 @@ function StatPill({ icon, label, value, accent = 'var(--text-2)' }: {
   )
 }
 
+/**
+ * Wait-time colour bands. A receptionist scanning the queue needs to spot the
+ * person who has been sitting there 40 minutes without reading every number,
+ * so the figure is colour-coded rather than plain grey text.
+ */
+function waitTone(minutes: number): { fg: string; bg: string; border: string } {
+  if (minutes < 15) return { fg: '#047857', bg: 'var(--emerald-dim)', border: 'var(--emerald-border)' }
+  if (minutes < 30) return { fg: '#B45309', bg: 'var(--amber-dim)', border: 'var(--amber-border)' }
+  return { fg: '#B91C1C', bg: 'var(--crimson-dim)', border: 'var(--crimson-border)' }
+}
+
+/** Small pill used for the segment counts in the Active Queue header. */
+function CountChip({ label, value, tone }: { label: string; value: number; tone: 'amber' | 'emerald' | 'ghost' | 'crimson' }) {
+  const tones = {
+    amber:   { fg: '#B45309', bg: 'var(--amber-dim)', border: 'var(--amber-border)' },
+    emerald: { fg: '#047857', bg: 'var(--emerald-dim)', border: 'var(--emerald-border)' },
+    crimson: { fg: '#B91C1C', bg: 'var(--crimson-dim)', border: 'var(--crimson-border)' },
+    ghost:   { fg: 'var(--text-3)', bg: 'rgba(30,41,59,0.05)', border: 'var(--border-md)' },
+  }[tone]
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'baseline', gap: 5,
+      padding: '3px 10px', borderRadius: 20, fontSize: 11.5, fontWeight: 600,
+      color: tones.fg, background: tones.bg, border: `1px solid ${tones.border}`,
+      whiteSpace: 'nowrap',
+    }}>
+      <strong style={{ fontSize: 13, fontWeight: 800 }}>{value}</strong> {label}
+    </span>
+  )
+}
+
+/**
+ * One token in the Active Queue.
+ *
+ * Replaces the eight-column table row. That table needed 780px before it
+ * started scrolling horizontally, which on the desk's own screen meant the
+ * Actions column — the only interactive part — was the bit that got cut off.
+ * This is a flex row that reflows instead, and it leads with the two things
+ * that matter at a counter: place in line and token number.
+ */
+function QueueRow({
+  entry, tone, position, estWait, now, onCall, onDone, onNoShow,
+}: {
+  entry: QueueEntry
+  tone: 'live' | 'waiting' | 'closed'
+  position?: number
+  estWait?: number
+  now: Date
+  onCall?: () => void
+  onDone?: () => void
+  onNoShow?: () => void
+}) {
+  const waited = minutesSince(entry.issuedAt, now)
+  const accent =
+    tone === 'live' ? 'var(--emerald)'
+    : tone === 'waiting' ? 'var(--amber)'
+    : entry.status === 'completed' ? 'var(--border-lg)'
+    : 'var(--crimson-border)'
+
+  const wait = estWait != null ? waitTone(estWait) : null
+
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+        padding: '12px 14px', borderRadius: 10,
+        borderLeft: `3px solid ${accent}`,
+        border: '1px solid var(--border)',
+        borderLeftWidth: 3, borderLeftColor: accent,
+        background: tone === 'live' ? 'var(--emerald-dim)' : tone === 'closed' ? 'rgba(30,41,59,0.02)' : '#ffffff',
+        opacity: tone === 'closed' ? 0.72 : 1,
+      }}
+    >
+      {/* Place in line — the answer to "how many before me?" */}
+      {position != null && (
+        <div
+          title={`${position === 1 ? 'Next to be called' : `${position} in line`}`}
+          style={{
+            width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12.5, fontWeight: 800,
+            background: position === 1 ? 'var(--blue)' : 'rgba(30,41,59,0.06)',
+            color: position === 1 ? '#fff' : 'var(--text-3)',
+            border: position === 1 ? 'none' : '1px solid var(--border-md)',
+          }}
+        >
+          {position}
+        </div>
+      )}
+
+      {/* Token */}
+      <div style={{
+        fontFamily: 'monospace', fontSize: 17, fontWeight: 800, minWidth: 68, flexShrink: 0,
+        color: tone === 'live' ? '#047857' : tone === 'closed' ? 'var(--text-4)' : 'var(--blue)',
+      }}>
+        {entryToken(entry)}
+      </div>
+
+      {/* Identity */}
+      <div style={{ flex: 1, minWidth: 150 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)' }}>{entry.patientName}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-4)', display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Clock size={10} /> in at {fmtTime(entry.issuedAt)}
+          </span>
+          {entry.phone && <span>· {entry.phone}</span>}
+          {entry.nic && <span>· {entry.nic}</span>}
+        </div>
+      </div>
+
+      {/* Source */}
+      <div style={{ flexShrink: 0 }}>
+        {entry.source === 'online'
+          ? <Badge cls="badge-blue"><Wifi size={10} /> Online</Badge>
+          : <Badge cls="badge-amber"><Hash size={10} /> Physical</Badge>}
+      </div>
+
+      {/* How long they've actually been sitting there, plus the projection */}
+      {tone !== 'closed' && (
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+          <span
+            title="Time since check-in"
+            style={{
+              fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
+              color: waitTone(waited).fg, background: waitTone(waited).bg,
+              border: `1px solid ${waitTone(waited).border}`,
+              display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+            }}
+          >
+            <Timer size={10} /> {waited} min here
+          </span>
+          {wait && (
+            <span
+              title="Projected wait from this doctor's average consult time"
+              style={{
+                fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
+                color: wait.fg, background: wait.bg, border: `1px solid ${wait.border}`,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              ~{estWait} min to go
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Status */}
+      <div style={{ flexShrink: 0 }}>
+        <Badge cls={STATUS_BADGE[entry.status] || 'badge-crimson'}>
+          {STATUS_LABEL[entry.status] || 'Cancelled'}
+        </Badge>
+      </div>
+
+      {/* Actions */}
+      {tone !== 'closed' && (
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {onCall && (
+            <button
+              onClick={onCall}
+              className="btn btn-ghost btn-sm"
+              style={{ gap: 4, color: 'var(--blue)', border: '1px solid var(--blue-border)' }}
+              title={position === 1 ? 'Call this token' : 'Call out of order'}
+            >
+              <PhoneCall size={12} /> Call
+            </button>
+          )}
+          {onDone && (
+            <button onClick={onDone} className="btn btn-ghost btn-sm" style={{ gap: 4, color: '#047857' }}>
+              <CheckCircle2 size={12} /> Done
+            </button>
+          )}
+          {onNoShow && (
+            <button onClick={onNoShow} className="btn btn-ghost btn-sm" style={{ gap: 4, color: 'var(--crimson)' }}>
+              <UserX size={12} /> No-Show
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Grey placeholder rows, so the first paint isn't an empty table that then fills in. */
+function QueueSkeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[0, 1, 2].map(i => (
+        <div
+          key={i}
+          style={{
+            height: 62, borderRadius: 10, background: 'rgba(30,41,59,0.045)',
+            border: '1px solid var(--border)', opacity: 1 - i * 0.25,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
   const { user } = useAuth()
@@ -57,6 +258,14 @@ export default function ReceptionistDesk() {
   const [showAddDoctor, setShowAddDoctor] = useState(false)
   const [editingDoctor, setEditingDoctor] = useState<ApiDoctor | null>(null)
   const [hoursDoctor, setHoursDoctor] = useState<ApiDoctor | null>(null)
+
+  // Delay alerts (BR-05 / FR-07) — reception is usually the first to know a
+  // doctor is running late, so the desk can publish the notice too.
+  const [showDelayModal, setShowDelayModal] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [delayToast, setDelayToast] = useState<string | null>(null)
+  /** Closed tokens are collapsed by default — they're reference, not work. */
+  const [showClosed, setShowClosed] = useState(false)
 
   // Counter form — patients book their own online tokens from the Patient app;
   // this desk only records walk-ins against a pre-printed physical slip.
@@ -136,8 +345,61 @@ export default function ReceptionistDesk() {
     formName.trim().length > 0 &&
     physicalToken.trim().length > 0
 
+  /**
+   * The selected doctor's line, split by what the receptionist can act on.
+   *
+   * The old table listed every token of the day in one flat run — completed,
+   * no-shows and the people still waiting all interleaved by token number — so
+   * finding who was actually next meant reading the Status column of every row.
+   */
+  const segments = useMemo(() => {
+    const live = queue.doctorQueue.filter(e => e.status === 'called' || e.status === 'in_progress')
+    const waitingRows = queue.doctorQueue.filter(e => e.status === 'waiting')
+    const closed = queue.doctorQueue.filter(
+      e => e.status === 'completed' || e.status === 'left' || e.status === 'cancelled',
+    )
+    return {
+      live,
+      waiting: waitingRows,
+      closed,
+      completed: closed.filter(e => e.status === 'completed').length,
+      noShow: closed.filter(e => e.status === 'left' || e.status === 'cancelled').length,
+    }
+  }, [queue.doctorQueue])
+
+  const activeAlerts = useMemo(() => queue.delayAlerts.filter(a => a.isActive), [queue.delayAlerts])
+
+  /** Name of the center this desk is scoped to, taken from the roster it loaded. */
+  const deskCenterName = useMemo(
+    () => queue.doctors.find(d => d.centerName)?.centerName ?? null,
+    [queue.doctors],
+  )
+
+  const showDelayToast = (msg: string) => {
+    setDelayToast(msg)
+    setTimeout(() => setDelayToast(null), 4000)
+  }
+
+  const handleRaiseDelay = async (delayMinutes: number, reason: string) => {
+    const res = await queue.raiseDelay(delayMinutes, reason)
+    // Throwing lets DelayAlertModal show the failure inline rather than
+    // confirming a dispatch that didn't happen.
+    if (!res.ok) throw new Error(res.message)
+    showDelayToast(res.message)
+  }
+
+  const handleClearDelay = async (alertId: string) => {
+    const res = await queue.clearDelay(alertId)
+    showDelayToast(res.message)
+  }
+
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: 'var(--bg)', display: 'flex' }}>
+    // App.tsx wraps every route in `paddingTop: 46` to clear the fixed
+    // DevNavbar, so a bare `100vh` here made the desk 46px taller than the
+    // viewport: the body grew its own scrollbar on top of the desk's internal
+    // one, and the bottom of the queue sat below the fold with no way to reach
+    // it except the outer scrollbar.
+    <div style={{ height: 'calc(100vh - 46px)', overflow: 'hidden', background: 'var(--bg)', display: 'flex' }}>
 
       {/* Modals */}
 
@@ -162,6 +424,33 @@ export default function ReceptionistDesk() {
         }}
       />
 
+      <DelayAlertModal
+        isOpen={showDelayModal}
+        onClose={() => setShowDelayModal(false)}
+        onSend={handleRaiseDelay}
+        doctorName={selectedDoctor?.name ?? 'This doctor'}
+        roomNumber={selectedDoctor?.room ?? undefined}
+        dept={selectedDoctor?.dept ?? undefined}
+      />
+
+      {/* Result of publishing or clearing a delay — states how many patients
+          were actually reached rather than assuming it worked. */}
+      {delayToast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 99999, maxWidth: 380,
+          background: '#0d2623', color: '#ffffff', border: '1px solid var(--emerald)',
+          padding: '12px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+          boxShadow: '0 10px 30px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span>{delayToast}</span>
+          <button
+            onClick={() => setDelayToast(null)}
+            aria-label="Dismiss"
+            style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
+          >✕</button>
+        </div>
+      )}
+
       {/* ── MOBILE BACKDROP OVERLAY ── */}
       {showMobileSidebar && (
         <div
@@ -174,18 +463,29 @@ export default function ReceptionistDesk() {
       {/* ── SIDEBAR ── */}
       <div className={`reception-sidebar ${showMobileSidebar ? 'mobile-open' : ''}`} style={{
         width: 260, background: 'var(--surface)', borderRight: '1px solid var(--border-md)',
-        display: 'flex', flexDirection: 'column', flexShrink: 0, height: '100vh'
+        display: 'flex', flexDirection: 'column', flexShrink: 0, height: '100%'
       }}>
         {/* Branding */}
+        {/* The series badge and clinic name are read from the desk's actual
+            center and selected doctor. They were hardcoded to "A-01" and
+            "Central Clinic", so every receptionist at every branch saw the same
+            two labels regardless of where they worked. */}
         <div style={{ padding: '24px 20px', borderBottom: '1px solid var(--border-md)', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
             background: 'var(--blue-dim)', border: '1px solid var(--blue-border)',
             borderRadius: 7, padding: '4px 10px', fontSize: 11.5, fontWeight: 700,
             color: 'var(--blue-dark)', flexShrink: 0,
-          }}>A-01</div>
-          <div>
+          }}>
+            {selectedDoctor?.series && selectedDoctor.series !== '?' ? `Series ${selectedDoctor.series}` : 'Desk'}
+          </div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', lineHeight: 1.1 }}>Reception Desk</div>
-            <div style={{ fontSize: 11, color: 'var(--text-4)' }}>Central Clinic</div>
+            <div style={{
+              fontSize: 11, color: 'var(--text-4)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {deskCenterName ?? 'No center assigned'}
+            </div>
           </div>
         </div>
 
@@ -250,11 +550,89 @@ export default function ReceptionistDesk() {
             >
               <Radio size={13} color="var(--blue)" /> Public TV Board
             </button>
+            {/* Reflects the real connection state instead of always claiming
+                the queue is live. */}
             <div className="desktop-only" style={{ alignItems: 'center', gap: 6 }}>
-              <span className="pulse-live" />
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>Live queue</span>
+              <span className={queue.offline ? '' : 'pulse-live'} style={queue.offline ? {
+                width: 7, height: 7, borderRadius: '50%', background: 'var(--crimson)', display: 'inline-block',
+              } : undefined} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: queue.offline ? 'var(--crimson)' : 'var(--text-4)' }}>
+                {queue.offline ? 'Reconnecting…' : 'Live queue'}
+              </span>
             </div>
-            <div style={{ position: 'relative', cursor: 'pointer' }}><Bell size={16} color="var(--text-3)" /><span style={{ position: 'absolute', top: -3, right: -3, width: 7, height: 7, background: 'var(--crimson)', borderRadius: '50%', border: '2px solid var(--bg)' }} /></div>
+
+            {/* Notifications. This was a bare <div> with a permanent red dot —
+                it looked like an unread badge, had no click handler and could
+                not be reached by keyboard. It now opens the live delay feed,
+                and the dot only appears when something is actually unread. */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowNotifications(o => !o)}
+                className="btn btn-ghost btn-sm"
+                aria-label={activeAlerts.length > 0 ? `Notifications: ${activeAlerts.length} active delay alerts` : 'Notifications: none'}
+                aria-expanded={showNotifications}
+                style={{ padding: '6px 8px', position: 'relative' }}
+              >
+                <Bell size={16} color={activeAlerts.length > 0 ? '#B45309' : 'var(--text-3)'} />
+                {activeAlerts.length > 0 && (
+                  <span style={{
+                    position: 'absolute', top: 2, right: 2, minWidth: 14, height: 14, padding: '0 3px',
+                    background: 'var(--crimson)', color: '#fff', borderRadius: 8,
+                    fontSize: 9, fontWeight: 800, lineHeight: '14px', textAlign: 'center',
+                  }}>{activeAlerts.length}</span>
+                )}
+              </button>
+
+              {showNotifications && (
+                <>
+                  <div
+                    onClick={() => setShowNotifications(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+                  />
+                  <div className="card" style={{
+                    position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 41,
+                    width: 320, maxHeight: 380, overflowY: 'auto', padding: 14,
+                    background: '#ffffff', border: '1px solid var(--border-md)',
+                    borderRadius: 12, boxShadow: '0 12px 32px rgba(15,23,42,0.16)',
+                  }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-1)', marginBottom: 10 }}>
+                      Delay alerts at this center
+                    </div>
+                    {activeAlerts.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--text-4)', padding: '10px 0' }}>
+                        No doctors are running late right now.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {activeAlerts.map(a => (
+                          <div key={a.id} style={{
+                            padding: 10, borderRadius: 9, fontSize: 12,
+                            background: 'var(--amber-dim)', border: '1px solid var(--amber-border)',
+                          }}>
+                            <div style={{ fontWeight: 800, color: '#B45309' }}>
+                              {a.doctorName} · +{a.delayMinutes} min
+                            </div>
+                            <div style={{ color: 'var(--text-3)', marginTop: 2 }}>
+                              {a.reason || 'No reason given'}
+                            </div>
+                            <div style={{ color: 'var(--text-4)', fontSize: 11, marginTop: 4 }}>
+                              {a.notifiedCount} notified by SMS
+                            </div>
+                            <button
+                              onClick={() => { handleClearDelay(a.id); setShowNotifications(false) }}
+                              className="btn btn-ghost btn-sm"
+                              style={{ marginTop: 7, gap: 4, color: '#047857', fontSize: 11 }}
+                            >
+                              <CheckCircle2 size={11} /> Mark back on schedule
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
             <AccountMenu />
           </div>
         </div>
@@ -562,107 +940,168 @@ export default function ReceptionistDesk() {
                   </form>
                 </div>
 
-                {/* ACTIVE QUEUE — the selected doctor's live line, now the visual centre of the page */}
-                <div className="card glass-form-card" style={{ padding: 26 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-                    <div>
-                      <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)' }}>Active Queue — {selectedDoctor?.name}</h3>
-                      <div style={{ fontSize: 12, color: 'var(--text-4)' }}>
-                        {waiting.length} waiting · {queue.doctorQueue.filter(e => e.status === 'completed').length} completed · {queue.doctorQueue.filter(e => e.status === 'left' || e.status === 'cancelled').length} cancelled / no-show
+                {/* ACTIVE QUEUE — the selected doctor's live line, segmented so
+                    the people still waiting are never buried among finished
+                    tokens. Each waiting row leads with its place in line, which
+                    is the one thing a patient at the counter actually asks. */}
+                <div className="card glass-form-card" style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                  {/* Header: identity, segment counts, delay control */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)' }}>
+                        Active Queue — {selectedDoctor?.name ?? '—'}
+                      </h3>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
+                        <CountChip label="waiting" value={segments.waiting.length} tone="amber" />
+                        <CountChip label="in consultation" value={segments.live.length} tone="emerald" />
+                        <CountChip label="completed" value={segments.completed} tone="ghost" />
+                        {segments.noShow > 0 && <CountChip label="no-show" value={segments.noShow} tone="crimson" />}
                       </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <button
+                        onClick={queue.refresh}
+                        className="btn btn-ghost btn-sm"
+                        style={{ gap: 5, border: '1px solid var(--border-md)' }}
+                        title="Refresh now (the queue also polls every few seconds)"
+                      >
+                        <RefreshCw size={12} /> Refresh
+                      </button>
+                      {queue.selectedDoctorDelay ? (
+                        <button
+                          onClick={() => handleClearDelay(queue.selectedDoctorDelay!.id)}
+                          className="btn btn-ghost btn-sm"
+                          style={{ gap: 5, color: '#047857', border: '1px solid var(--emerald-border)' }}
+                        >
+                          <CheckCircle2 size={12} /> Clear delay
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setShowDelayModal(true)}
+                          disabled={!selectedDoctor}
+                          className="btn btn-ghost btn-sm"
+                          style={{ gap: 5, color: '#B45309', border: '1px solid var(--amber-border)', opacity: selectedDoctor ? 1 : 0.5 }}
+                          title="Tell subscribed patients this doctor is running late"
+                        >
+                          <TriangleAlert size={12} /> Raise delay
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  <div className="table-responsive-wrapper">
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 780 }}>
-                      <thead>
-                        <tr style={{ background: 'rgba(30, 41, 59, 0.04)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
-                          <th style={{ padding: '13px 16px' }}>Token</th>
-                          <th style={{ padding: '13px 16px' }}>Patient</th>
-                          <th style={{ padding: '13px 16px' }}>Phone</th>
-                          <th style={{ padding: '13px 16px' }}>Source</th>
-                          <th style={{ padding: '13px 16px' }}>Status</th>
-                          <th style={{ padding: '13px 16px' }}>Checked In</th>
-                          <th style={{ padding: '13px 16px' }}>Est. Wait</th>
-                          <th style={{ padding: '13px 16px' }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {queue.doctorQueue.length === 0 && (
-                          <tr>
-                            <td colSpan={8} style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>
-                              No tokens issued for this doctor yet.
-                            </td>
-                          </tr>
+                  {/* Live delay notice for this doctor */}
+                  {queue.selectedDoctorDelay && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                      background: 'var(--amber-dim)', border: '1px solid var(--amber-border)',
+                      borderRadius: 10, padding: '10px 14px', fontSize: 12.5,
+                    }}>
+                      <TriangleAlert size={15} color="#B45309" style={{ flexShrink: 0 }} />
+                      <span style={{ color: '#B45309', fontWeight: 800 }}>
+                        Running {queue.selectedDoctorDelay.delayMinutes} min late
+                      </span>
+                      <span style={{ color: 'var(--text-3)' }}>
+                        {queue.selectedDoctorDelay.reason || 'No reason given'}
+                      </span>
+                      <span style={{ color: 'var(--text-4)', fontSize: 11.5, marginLeft: 'auto' }}>
+                        {queue.selectedDoctorDelay.notifiedCount} patient
+                        {queue.selectedDoctorDelay.notifiedCount === 1 ? '' : 's'} notified by SMS
+                      </span>
+                    </div>
+                  )}
+
+                  {queue.loading ? (
+                    <QueueSkeleton />
+                  ) : queue.doctorQueue.length === 0 ? (
+                    <div style={{
+                      textAlign: 'center', padding: '48px 24px',
+                      background: 'rgba(255,255,255,0.5)', borderRadius: 12,
+                      border: '1.5px dashed var(--border-md)',
+                    }}>
+                      <Ticket size={32} style={{ margin: '0 auto 12px', color: 'var(--text-4)' }} />
+                      <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-2)' }}>No tokens issued today</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 4 }}>
+                        Record a printed slip on the left and it appears here immediately.
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* ── IN CONSULTATION ── */}
+                      {segments.live.length > 0 && (
+                        <section>
+                          <div className="queue-section-label">In consultation</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {segments.live.map(entry => (
+                              <QueueRow
+                                key={entry.id}
+                                entry={entry}
+                                tone="live"
+                                now={queue.now}
+                                onDone={() => queue.setStatus(entry.id, 'completed')}
+                                onNoShow={() => queue.setStatus(entry.id, 'left')}
+                              />
+                            ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* ── WAITING, in call order ── */}
+                      <section>
+                        <div className="queue-section-label">
+                          Waiting in lobby
+                          {segments.waiting.length > 0 && <span> · next up is {entryToken(segments.waiting[0])}</span>}
+                        </div>
+                        {segments.waiting.length === 0 ? (
+                          <div style={{
+                            padding: '18px 16px', borderRadius: 10, fontSize: 12.5, color: 'var(--text-4)',
+                            background: 'rgba(30,41,59,0.03)', border: '1px dashed var(--border-md)', textAlign: 'center',
+                          }}>
+                            Nobody waiting — the lobby is clear for this doctor.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {segments.waiting.map((entry, i) => (
+                              <QueueRow
+                                key={entry.id}
+                                entry={entry}
+                                tone="waiting"
+                                position={i + 1}
+                                estWait={queue.waitFor(entry)}
+                                now={queue.now}
+                                onCall={i === 0 ? queue.callNext : () => queue.setStatus(entry.id, 'called')}
+                                onDone={() => queue.setStatus(entry.id, 'completed')}
+                                onNoShow={() => queue.setStatus(entry.id, 'left')}
+                              />
+                            ))}
+                          </div>
                         )}
-                        {queue.doctorQueue.map(entry => {
-                          const isCurrent = current?.id === entry.id
-                          const isClosed = entry.status === 'completed' || entry.status === 'left' || entry.status === 'cancelled'
-                          const stripeColor = isCurrent
-                            ? 'var(--emerald)'
-                            : entry.status === 'waiting' ? 'var(--amber)'
-                              : (entry.status === 'left' || entry.status === 'cancelled') ? 'var(--crimson-border)'
-                                : 'transparent'
-                          return (
-                            <tr
-                              key={entry.id}
-                              style={{
-                                borderBottom: '1px solid var(--border)',
-                                borderLeft: `3px solid ${stripeColor}`,
-                                background: isCurrent ? 'var(--emerald-dim)' : undefined,
-                                opacity: isClosed ? 0.75 : 1,
-                              }}
-                            >
-                              <td style={{ padding: '13px 16px', fontWeight: 800, fontFamily: 'monospace', color: isCurrent ? 'var(--emerald)' : 'var(--blue)' }}>
-                                {entryToken(entry)}
-                              </td>
-                              <td style={{ padding: '13px 16px', fontWeight: 600, color: 'var(--text-1)' }}>{entry.patientName}</td>
-                              <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{entry.phone || '—'}</td>
-                              <td style={{ padding: '13px 16px' }}>
-                                {entry.source === 'online'
-                                  ? <Badge cls="badge-blue"><Wifi size={10} /> Online</Badge>
-                                  : <Badge cls="badge-amber"><Hash size={10} /> Physical</Badge>}
-                              </td>
-                              <td style={{ padding: '13px 16px' }}>
-                                <Badge cls={STATUS_BADGE[entry.status] || 'badge-crimson'}>{STATUS_LABEL[entry.status] || 'Cancelled'}</Badge>
-                              </td>
-                              <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                                  <Clock size={12} /> {fmtTime(entry.issuedAt)}
-                                </span>
-                              </td>
-                              <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>
-                                {entry.status === 'waiting' ? `~${queue.waitFor(entry)} min` : '—'}
-                              </td>
-                              <td style={{ padding: '13px 16px' }}>
-                                {isClosed ? (
-                                  // The Status column already names the state — no need to repeat it here.
-                                  <span style={{ fontSize: 12, color: 'var(--text-4)' }}>—</span>
-                                ) : (
-                                  <div style={{ display: 'flex', gap: 6 }}>
-                                    <button
-                                      onClick={() => queue.setStatus(entry.id, 'completed')}
-                                      className="btn btn-ghost btn-sm"
-                                      style={{ gap: 4, color: 'var(--emerald)' }}
-                                    >
-                                      <CheckCircle2 size={12} /> Done
-                                    </button>
-                                    <button
-                                      onClick={() => queue.setStatus(entry.id, 'left')}
-                                      className="btn btn-ghost btn-sm"
-                                      style={{ gap: 4, color: 'var(--crimson)' }}
-                                    >
-                                      <UserX size={12} /> No-Show
-                                    </button>
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                      </section>
+
+                      {/* ── CLOSED — reference only, collapsed by default ── */}
+                      {segments.closed.length > 0 && (
+                        <section>
+                          <button
+                            onClick={() => setShowClosed(o => !o)}
+                            className="btn btn-ghost btn-sm"
+                            style={{ gap: 6, padding: '5px 10px', color: 'var(--text-3)' }}
+                            aria-expanded={showClosed}
+                          >
+                            {showClosed ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                            Finished today ({segments.closed.length})
+                          </button>
+                          {showClosed && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                              {segments.closed.map(entry => (
+                                <QueueRow key={entry.id} entry={entry} tone="closed" now={queue.now} />
+                              ))}
+                            </div>
+                          )}
+                        </section>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </>
