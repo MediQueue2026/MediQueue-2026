@@ -995,7 +995,7 @@ export default function AdminPanel() {
                           className="btn btn-ghost btn-sm"
                           style={{ flex: 1, justifyContent: 'center', gap: 6, height: 38, color: 'var(--crimson)' }}
                         >
-                          <UserX size={14} /> Reject
+                          <UserX size={14} /> Reject &amp; Delete
                         </button>
                       </div>
                     </div>
@@ -1202,8 +1202,12 @@ export default function AdminPanel() {
                           background: 'rgba(30, 41, 59, 0.03)', border: '1px solid var(--border-md)',
                           borderRadius: 10, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6
                         }}>
-                          <div>Hours: <strong style={{ color: 'var(--text-1)' }}>{req.opening_hours}</strong> · Phone: <strong style={{ color: 'var(--text-1)' }}>{req.phone || '—'}</strong></div>
-                          <div>Email: <strong style={{ color: 'var(--text-1)' }}>{req.email || '—'}</strong></div>
+                          <div>Registration / License No.: <strong style={{ color: 'var(--text-1)' }}>{req.registrationNumber || '—'}</strong></div>
+                          <div>License Status: <strong style={{ color: 'var(--text-1)' }}>{req.licenseStatus || '—'}</strong></div>
+                          <div>Location: <strong style={{ color: 'var(--text-1)' }}>{req.city}{req.province ? ` · ${req.province}` : ''}</strong></div>
+                          <div>Official Phone: <strong style={{ color: 'var(--text-1)' }}>{req.phone || '—'}</strong></div>
+                          <div>Official Email: <strong style={{ color: 'var(--text-1)' }}>{req.email || '—'}</strong></div>
+                          {req.website && <div>Website: <strong style={{ color: 'var(--text-1)' }}>{req.website}</strong></div>}
                           <div>Requested By: <strong style={{ color: 'var(--text-2)' }}>{req.requestedByName || 'Receptionist'}</strong></div>
                           {req.services && req.services.length > 0 && (
                             <div>Services: <span style={{ color: 'var(--text-3)' }}>{req.services.join(', ')}</span></div>
@@ -1271,9 +1275,9 @@ export default function AdminPanel() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
                 }}>
                   <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, padding: 28, background: '#ffffff', borderRadius: 16 }}>
-                    <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)', marginBottom: 8 }}>Reject Medical Center Request</h3>
+                    <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)', marginBottom: 8 }}>Reject &amp; Delete Medical Center Request</h3>
                     <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 14 }}>
-                      Provide an optional rejection reason for <strong>{rejectingCenterRequest.name}</strong>.
+                      This permanently deletes <strong>{rejectingCenterRequest.name}</strong> and its uploaded documents. Provide an optional reason.
                     </p>
                     <textarea
                       className="input"

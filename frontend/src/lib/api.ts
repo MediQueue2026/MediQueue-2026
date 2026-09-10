@@ -259,12 +259,16 @@ export interface ApiCenterDocument {
 export interface ApiCenter {
   id: string
   name: string
+  registrationNumber?: string | null
+  licenseStatus?: 'active' | 'pending' | 'expired' | 'suspended' | null
   address: string
   city: string
+  province?: string | null
   opening_hours: string
   services: string[]
   phone?: string
   email?: string
+  website?: string | null
   status?: 'operational' | 'maintenance' | 'closed'
   /** Super Admin approval state — a receptionist-requested center starts 'pending'. */
   approvalStatus?: 'pending' | 'approved' | 'rejected'
@@ -680,7 +684,7 @@ export const api = {
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
 
-  createCenter: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; status?: 'operational' | 'maintenance' | 'closed'; latitude?: number; longitude?: number; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
+  createCenter: (input: { name: string; registrationNumber?: string; licenseStatus?: ApiCenter['licenseStatus']; city: string; province?: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; website?: string; status?: 'operational' | 'maintenance' | 'closed'; latitude?: number; longitude?: number; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
     request<{ message: string; center: ApiCenter }>('/centers', {
       method: 'POST',
       body: JSON.stringify(input),
@@ -692,13 +696,13 @@ export const api = {
    * (no-auth-header) request so the backend never mistakes an admin browsing
    * the login page for an admin directly creating a live center.
    */
-  registerCenterPublic: (input: { name: string; city: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
+  registerCenterPublic: (input: { name: string; registrationNumber?: string; licenseStatus?: ApiCenter['licenseStatus']; city: string; province?: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; website?: string; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
     requestAnonymous<{ message: string; center: ApiCenter }>('/centers', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
 
-  updateCenter: (id: string, updates: Partial<{ name: string; city: string; address: string; openingHours: string; services: string[]; phone: string; email: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
+  updateCenter: (id: string, updates: Partial<{ name: string; registrationNumber: string; licenseStatus: ApiCenter['licenseStatus']; city: string; province: string; address: string; openingHours: string; services: string[]; phone: string; email: string; website: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
     request<{ message: string; center: ApiCenter }>(`/centers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
@@ -717,7 +721,7 @@ export const api = {
     }),
 
   rejectCenter: (id: string, reason?: string) =>
-    request<{ message: string; centerId: string; approvalStatus: 'rejected'; reason?: string }>(`/centers/${id}/reject`, {
+    request<{ message: string; centerId: string; approvalStatus: 'deleted'; reason?: string }>(`/centers/${id}/reject`, {
       method: 'PATCH',
       body: JSON.stringify({ reason }),
     }),

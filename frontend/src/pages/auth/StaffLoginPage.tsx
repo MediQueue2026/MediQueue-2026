@@ -1,8 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { Activity, AlertCircle, ArrowLeft, ArrowRight, Building2, CloudOff, Stethoscope } from 'lucide-react'
-import AddCenterModal from '../../components/AddCenterModal'
-import { api, ApiError, ApiOfflineError } from '../../lib/api'
+import { ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'
 import type { UserRole } from '../../context/AuthContext'
 
@@ -39,8 +38,8 @@ export default function StaffLoginPage() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [notice] = useState((location.state as { message?: string } | null)?.message ?? '')
   const [offline, setOffline] = useState(backendOffline)
-  const [showRequestCenter, setShowRequestCenter] = useState(false)
 
   const portal = STAFF_PORTALS.find(p => p.role === activeTab)!
 
@@ -71,13 +70,6 @@ export default function StaffLoginPage() {
 
   return (
     <div className="auth-screen">
-      <AddCenterModal
-        isOpen={showRequestCenter}
-        onClose={() => setShowRequestCenter(false)}
-        mode="request"
-        onAdd={async (centerData) => { await api.registerCenterPublic(centerData) }}
-      />
-
       <div className="auth-card">
         {/* ── Context ── */}
         <aside className="auth-aside">
@@ -164,6 +156,15 @@ export default function StaffLoginPage() {
           </p>
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 13, marginTop: 18 }}>
+          {notice && (
+            <div role="status" style={{
+              fontSize: 12.5, fontWeight: 600, color: '#047857',
+              background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)',
+              borderRadius: 9, padding: '9px 11px',
+            }}>
+              {notice}
+            </div>
+          )}
             <div>
               <label className="auth-field-label" htmlFor="staff-email">Work Email</label>
               <input
@@ -234,7 +235,7 @@ export default function StaffLoginPage() {
             </div>
             <button
               type="button"
-              onClick={() => setShowRequestCenter(true)}
+              onClick={() => navigate('/staff/register/medical-center')}
               className="btn btn-ghost btn-sm"
               style={{ gap: 5, flexShrink: 0, fontSize: 12, fontWeight: 700, color: '#0d9488' }}
             >

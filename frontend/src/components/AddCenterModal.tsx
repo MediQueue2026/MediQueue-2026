@@ -81,12 +81,16 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
   mode?: 'create' | 'request'
   onAdd?: (centerData: {
     name: string
+    registrationNumber?: string
+    licenseStatus?: 'active' | 'pending' | 'expired' | 'suspended'
     city: string
+    province?: string
     address?: string
     openingHours?: string
     services?: string[]
     phone?: string
     email?: string
+    website?: string
     status?: ApiCenter['status']
     latitude?: number
     longitude?: number
@@ -96,13 +100,17 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
 }) {
   const isRequest = mode === 'request'
   const [name, setName] = useState('')
+  const [registrationNumber, setRegistrationNumber] = useState('')
+  const [licenseStatus, setLicenseStatus] = useState<'active' | 'pending' | 'expired' | 'suspended'>('active')
   const [city, setCity] = useState('')
+  const [province, setProvince] = useState('')
   const [address, setAddress] = useState('')
   const [openingHours, setOpeningHours] = useState('08:00 - 18:00')
   /** Chosen from a list rather than typed as comma-separated text — see ServiceMultiSelect. */
   const [services, setServices] = useState<string[]>(['General Medicine'])
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
+  const [website, setWebsite] = useState('')
   const [status, setStatus] = useState<ApiCenter['status']>('operational')
   const [latitude, setLatitude] = useState<string>('6.9271')
   const [longitude, setLongitude] = useState<string>('79.8612')
@@ -154,6 +162,11 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         setSubmitting(false)
         return
       }
+      if (isRequest && (!name.trim() || !registrationNumber.trim() || !licenseStatus || !address.trim() || !city.trim() || !province.trim() || !phone.trim())) {
+        setError('Complete the official registration, license, address, province, and phone details before submitting.')
+        setSubmitting(false)
+        return
+      }
       if (documentFile) {
         const uploaded = await api.uploadFile(documentFile, 'center-documents')
         registrationDocument = {
@@ -165,12 +178,16 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
 
       await onAdd?.({
         name,
+        registrationNumber: registrationNumber.trim() || undefined,
+        licenseStatus: isRequest ? licenseStatus : undefined,
         city,
+        province: province.trim() || undefined,
         address: address || city,
         openingHours,
         services,
         phone: phone || undefined,
         email: email || undefined,
+        website: website.trim() || undefined,
         status,
         latitude: latitude ? Number(latitude) : undefined,
         longitude: longitude ? Number(longitude) : undefined,
@@ -182,12 +199,16 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
       setTimeout(() => {
         setSubmitted(false)
         setName('')
+        setRegistrationNumber('')
+        setLicenseStatus('active')
         setCity('')
+        setProvince('')
         setAddress('')
         setOpeningHours('08:00 - 18:00')
         setServices(['General Medicine'])
         setPhone('')
         setEmail('')
+        setWebsite('')
         setStatus('operational')
         setRequestComment('')
         setDocumentFile(null)
@@ -255,7 +276,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
             borderRadius: 10, padding: '10px 14px', marginBottom: 18, fontSize: 12.5, color: '#1e40af'
           }}>
             <ShieldAlert size={18} style={{ flexShrink: 0 }} />
-            <span>This request will be sent to the <strong>Super Admin</strong>. The center profile is only created once it's approved.</span>
+            <span>This request will be sent to the <strong>Super Admin</strong>. It is saved as pending and becomes visible only after approval.</span>
           </div>
         )}
 
@@ -275,7 +296,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                Facility Name
+                {isRequest ? 'Official Registered Name' : 'Facility Name'}
               </label>
               <input
                 required
@@ -287,10 +308,60 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               />
             </div>
 
+            {isRequest && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                      Registration / License Number
+                    </label>
+                    <input
+                      required
+                      className="input"
+                      placeholder="Government-issued number"
+                      value={registrationNumber}
+                      onChange={e => setRegistrationNumber(e.target.value)}
+                      style={{ height: 44, fontSize: 14 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                      License Status
+                    </label>
+                    <select
+                      required
+                      className="input"
+                      value={licenseStatus}
+                      onChange={e => setLicenseStatus(e.target.value as typeof licenseStatus)}
+                      style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
+                    >
+                      <option value="active">Active</option>
+                      <option value="pending">Pending</option>
+                      <option value="expired">Expired</option>
+                      <option value="suspended">Suspended</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                    Province
+                  </label>
+                  <input
+                    required
+                    className="input"
+                    placeholder="e.g. Western Province"
+                    value={province}
+                    onChange={e => setProvince(e.target.value)}
+                    style={{ height: 44, fontSize: 14 }}
+                  />
+                </div>
+              </>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  City / Location
+                  City / District
                 </label>
                 <input
                   required
@@ -371,7 +442,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Phone
+                  {isRequest ? 'Official Phone Number' : 'Phone'}
                 </label>
                 <input
                   className="input"
@@ -385,7 +456,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
 
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                Email
+                {isRequest ? 'Official Email (Optional)' : 'Email'}
               </label>
               <input
                 className="input"
@@ -396,6 +467,22 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                 style={{ height: 44, fontSize: 14 }}
               />
             </div>
+
+            {isRequest && (
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Website (Optional)
+                </label>
+                <input
+                  className="input"
+                  type="url"
+                  placeholder="https://example.org"
+                  value={website}
+                  onChange={e => setWebsite(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
+            )}
 
             <div>
               <label

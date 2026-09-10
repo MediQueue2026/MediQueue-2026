@@ -16,7 +16,10 @@ function mapDbCenterToPublic(row) {
   return {
     id: row.id,
     name: row.name,
+    registrationNumber: row.registration_number ?? null,
+    licenseStatus: row.license_status ?? null,
     city: row.city,
+    province: row.province ?? null,
     address: row.address,
     latitude: row.latitude !== null && row.latitude !== undefined ? Number(row.latitude) : null,
     longitude: row.longitude !== null && row.longitude !== undefined ? Number(row.longitude) : null,
@@ -24,6 +27,7 @@ function mapDbCenterToPublic(row) {
     services: row.services ?? [],
     phone: row.phone ?? null,
     email: row.email ?? null,
+    website: row.website ?? null,
     status: row.status ?? 'operational',
     approvalStatus: row.approval_status ?? 'approved',
     requestedByName: row.requested_by_name ?? null,
@@ -100,7 +104,11 @@ export async function getCenters(req, res, next) {
  */
 export async function createCenter(req, res, next) {
   try {
-    const { name, city, address, openingHours, services, phone, email, status, latitude, longitude, requestComment, registrationDocument } = req.body;
+    const {
+      name, registrationNumber, licenseStatus, city, province, address, openingHours,
+      services, phone, email, website, status, latitude, longitude, requestComment,
+      registrationDocument,
+    } = req.body;
 
     if (!name || !city) {
       return res.status(400).json({ error: 'Facility Name and City are required.' });
@@ -110,6 +118,12 @@ export async function createCenter(req, res, next) {
     const requesterName = req.user?.fullName || req.user?.email || 'Receptionist';
     const isAdmin = requesterRole === 'admin';
     const approvalStatus = isAdmin ? 'approved' : 'pending';
+
+    if (!isAdmin && (!registrationNumber || !licenseStatus || !address || !province || !phone)) {
+      return res.status(400).json({
+        error: 'Official name, registration number, license status, address, province, and official phone are required.',
+      });
+    }
 
     // A receptionist manages exactly one medical center. Check this up front
     // so a second request doesn't create an orphaned, unlinked 'pending' row.
@@ -161,7 +175,10 @@ export async function createCenter(req, res, next) {
 
     const payload = {
       name,
+      registration_number: registrationNumber || null,
+      license_status: licenseStatus || null,
       city,
+      province: province || null,
       address: address || city,
       latitude: parsedLat,
       longitude: parsedLng,
@@ -169,6 +186,7 @@ export async function createCenter(req, res, next) {
       services: Array.isArray(services) ? services : (services ? [services] : []),
       phone: phone || null,
       email: email || null,
+      website: website || null,
       status: status || 'operational',
       approval_status: approvalStatus,
       requested_by_name: requesterName,
@@ -480,18 +498,23 @@ export async function rejectCenter(req, res, next) {
     const { id } = req.params;
     const { reason } = req.body;
 
-    const { data: updated, error } = await supabase
+    // Rejection is destructive for an unapproved request: remove the center
+    // row, and let center_documents' ON DELETE CASCADE remove its uploads.
+    // Never allow this endpoint to delete an already-approved center.
+    const { data: pendingCenter, error: lookupError } = await supabase
       .from('medical_centers')
-      .update({ approval_status: 'rejected', rejection_reason: reason || 'Rejected by Admin' })
+      .select('id, name, city, approval_status')
       .eq('id', id)
-      .select()
       .maybeSingle();
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    if (lookupError) {
+      return res.status(500).json({ error: lookupError.message });
     }
-    if (!updated) {
+    if (!pendingCenter) {
       return res.status(404).json({ error: 'Medical center not found' });
+    }
+    if (pendingCenter.approval_status !== 'pending') {
+      return res.status(409).json({ error: 'Only pending medical center requests can be rejected.' });
     }
 
     const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
@@ -500,16 +523,38 @@ export async function rejectCenter(req, res, next) {
         actor_name: adminName,
         actor_role: 'admin',
         event_type: 'center_edit',
-        action: `Rejected medical center "${updated.name}" (${reason || 'No reason provided'})`,
-        center_name: updated.name,
+        action: `Rejected and deleted medical center "${pendingCenter.name}" (${reason || 'No reason provided'})`,
+        center_name: pendingCenter.name,
         status: 'rejected',
       }]);
     } catch (_) {}
 
+    // Remove the receptionist account created for this rejected registration
+    // so the same email can register again after correcting the details.
+    const { error: userDeleteError } = await supabase
+      .from('users')
+      .delete()
+      .eq('center_id', id)
+      .eq('role', 'receptionist');
+
+    if (userDeleteError) {
+      return res.status(500).json({ error: userDeleteError.message });
+    }
+
+    const { error: deleteError } = await supabase
+      .from('medical_centers')
+      .delete()
+      .eq('id', id)
+      .eq('approval_status', 'pending');
+
+    if (deleteError) {
+      return res.status(500).json({ error: deleteError.message });
+    }
+
     res.json({
-      message: 'Medical center request rejected',
+      message: 'Medical center request rejected and deleted',
       centerId: id,
-      approvalStatus: 'rejected',
+      approvalStatus: 'deleted',
       reason: reason || 'Rejected by Admin',
     });
   } catch (err) {
