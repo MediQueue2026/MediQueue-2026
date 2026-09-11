@@ -490,6 +490,494 @@ export async function approveCenter(req, res, next) {
   }
 }
 
+// ── Per-date Center Closures (migration 012) ────────────────────────────────
+
+const CLOSURE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Local calendar date as YYYY-MM-DD (not UTC — `toISOString` would roll a
+ *  late-evening request onto tomorrow). */
+function localIsoDate(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function mapClosure(row) {
+  return {
+    id: row.id,
+    centerId: row.center_id,
+    closedDate: row.closed_date,
+    reason: row.reason ?? '',
+    cancelledCount: row.cancelled_count ?? 0,
+    notifiedCount: row.notified_count ?? 0,
+    createdAt: row.created_at ?? null,
+  };
+}
+
+/** A receptionist may only touch their own center's schedule; an admin, any. */
+function closureAuthError(req, centerId) {
+  if (req.user?.role === 'receptionist' && req.user?.centerId && req.user.centerId !== centerId) {
+    return 'You can only change the schedule for your own medical center.';
+  }
+  return null;
+}
+
+/**
+ * Cancel a set of already-fetched appointment rows and SMS each patient.
+ * Mirrors the single-row logic in appointmentController.cancelAppointment
+ * (status flip on both tables + a notification), batched.
+ *
+ * `appts` rows must carry `id, doctor_id, queue_number, patient_id,
+ * patient:users!patient_id(full_name, phone)`. `buildMsg(row)` returns the SMS
+ * body for that appointment.
+ */
+async function flipAndNotify(appts, centerId, date, buildMsg) {
+  if (!appts || appts.length === 0) return { cancelledCount: 0, notifiedCount: 0 };
+
+  const ids = appts.map(a => a.id);
+  await supabase.from('appointments').update({ status: 'cancelled' }).in('id', ids);
+
+  // Online bookings are mirrored into walk_in_queue by (doctor_id, queue_number).
+  await Promise.all(appts.map(a =>
+    supabase
+      .from('walk_in_queue')
+      .update({ status: 'left' })
+      .eq('center_id', centerId)
+      .eq('doctor_id', a.doctor_id)
+      .eq('queue_number', a.queue_number)
+      .eq('queue_date', date),
+  ));
+
+  // Patients with no phone on their user row: fall back to the emergency
+  // contact on their profile (same precedence as createAppointment).
+  const needProfile = [...new Set(appts.filter(a => !a.patient?.phone && a.patient_id).map(a => a.patient_id))];
+  const profilePhone = new Map();
+  if (needProfile.length > 0) {
+    const { data: profs } = await supabase
+      .from('patient_profiles')
+      .select('user_id, emergency_contact_phone')
+      .in('user_id', needProfile);
+    for (const p of profs || []) {
+      if (p.emergency_contact_phone) profilePhone.set(p.user_id, p.emergency_contact_phone);
+    }
+  }
+
+  let notifiedCount = 0;
+  for (const a of appts) {
+    const phone = a.patient?.phone || profilePhone.get(a.patient_id) || null;
+    if (!phone) continue;
+    notifiedCount++;
+    notificationProvider.sendSMS(phone, buildMsg(a)).catch(e => console.warn('[SCHEDULE SMS NOTICE]', e));
+  }
+
+  return { cancelledCount: ids.length, notifiedCount };
+}
+
+const APPT_SELECT = 'id, doctor_id, queue_number, slot_hour, patient_id, patient:users!patient_id(full_name, phone)';
+const ACTIVE_APPT_STATUSES = ['booked', 'waiting', 'in_consultation'];
+
+/** Whole-day cancel for a center closure (migration 012). */
+async function cancelAppointmentsForClosure(centerId, date, centerName, reason) {
+  const { data: appts, error } = await supabase
+    .from('appointments')
+    .select(APPT_SELECT)
+    .eq('center_id', centerId)
+    .eq('appointment_date', date)
+    .in('status', ACTIVE_APPT_STATUSES);
+  if (error) return { cancelledCount: 0, notifiedCount: 0 };
+
+  return flipAndNotify(appts, centerId, date, a =>
+    `MediQueue Notice: ${centerName || 'The medical center'} is CLOSED on ${date}${reason ? ` (${reason})` : ''}. Your appointment (Token #${a.queue_number}) has been cancelled. Please re-book another day.`,
+  );
+}
+
+/**
+ * Cancel a doctor's appointments on `date` that no longer fit a date-specific
+ * hours override (migration 014). Off that day ⇒ all of them; otherwise only
+ * those whose slot_hour is outside [startHour, endHour).
+ */
+async function cancelDoctorAppointmentsForOverride(centerId, doctorId, date, centerName, { isWorking, startHour, endHour }) {
+  const { data: appts, error } = await supabase
+    .from('appointments')
+    .select(APPT_SELECT)
+    .eq('center_id', centerId)
+    .eq('doctor_id', doctorId)
+    .eq('appointment_date', date)
+    .in('status', ACTIVE_APPT_STATUSES);
+  if (error || !appts) return { cancelledCount: 0, notifiedCount: 0 };
+
+  const doomed = isWorking === false
+    ? appts
+    : appts.filter(a => Number(a.slot_hour) < startHour || Number(a.slot_hour) >= endHour);
+
+  return flipAndNotify(doomed, centerId, date, a =>
+    isWorking === false
+      ? `MediQueue Notice: Your doctor at ${centerName || 'the medical center'} is not working on ${date}. Your appointment (Token #${a.queue_number}) has been cancelled — please re-book another day.`
+      : `MediQueue Notice: Your doctor's hours at ${centerName || 'the medical center'} on ${date} changed to ${pad2(startHour)}:00–${pad2(endHour)}:00. Your appointment (Token #${a.queue_number}) fell outside them and has been cancelled — please re-book.`,
+  );
+}
+
+/** '9' -> '09'. */
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const hourOf = (hhmm) => parseInt(String(hhmm || '').slice(0, 2), 10);
+
+function mapCenterDateHours(row) {
+  return {
+    id: row.id,
+    centerId: row.center_id,
+    openDate: row.open_date,
+    hoursLabel: row.hours_label ?? '',
+    note: row.note ?? '',
+  };
+}
+function mapDoctorDateHours(row) {
+  return {
+    id: row.id,
+    doctorId: row.doctor_id,
+    centerId: row.center_id,
+    workDate: row.work_date,
+    isWorking: row.is_working !== false,
+    startTime: row.start_time ?? null,
+    endTime: row.end_time ?? null,
+    cancelledCount: row.cancelled_count ?? 0,
+    notifiedCount: row.notified_count ?? 0,
+  };
+}
+
+/**
+ * GET /centers/:centerId/closures
+ * Upcoming closed dates for one center. Unauthenticated, like GET /centers —
+ * the patient booking modal reads this to grey out closed days.
+ * `?all=true` includes past closures too (unused by the UI, handy for support).
+ */
+export async function getCenterClosures(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const from = req.query.all === 'true' ? '1900-01-01' : localIsoDate();
+
+    const { data, error } = await supabase
+      .from('center_closures')
+      .select('*')
+      .eq('center_id', centerId)
+      .gte('closed_date', from)
+      .order('closed_date', { ascending: true });
+
+    if (error) {
+      // Table not migrated yet, etc. — degrade to "no closures" rather than 500,
+      // matching how the other reads here handle a missing column/table.
+      console.warn('getCenterClosures notice:', error.message);
+      return res.json({ closures: [] });
+    }
+
+    res.json({ closures: (data || []).map(mapClosure) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /centers/:centerId/closures  { date, reason }
+ * Marks a calendar day closed. Auto-cancels that day's still-active
+ * appointments and SMSes the patients. Idempotent — a repeat call for a day
+ * that's already closed returns the existing row and cancels nothing more.
+ */
+export async function createCenterClosure(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const { date, reason } = req.body;
+
+    if (!CLOSURE_DATE_RE.test(String(date || ''))) {
+      return res.status(400).json({ error: 'A closure date (YYYY-MM-DD) is required.' });
+    }
+    if (String(date) < localIsoDate()) {
+      return res.status(400).json({ error: 'You can only close today or a future date.' });
+    }
+
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const { data: center } = await supabase
+      .from('medical_centers')
+      .select('id, name')
+      .eq('id', centerId)
+      .maybeSingle();
+    if (!center) return res.status(404).json({ error: 'That medical center no longer exists.' });
+
+    const cleanReason = String(reason || '').trim().slice(0, 200);
+
+    const { data: existing } = await supabase
+      .from('center_closures')
+      .select('*')
+      .eq('center_id', centerId)
+      .eq('closed_date', date)
+      .maybeSingle();
+    if (existing) {
+      return res.json({
+        closure: mapClosure(existing),
+        cancelledCount: existing.cancelled_count ?? 0,
+        notifiedCount: existing.notified_count ?? 0,
+        alreadyClosed: true,
+      });
+    }
+
+    const { cancelledCount, notifiedCount } =
+      await cancelAppointmentsForClosure(centerId, date, center.name, cleanReason);
+
+    const { data: inserted, error: insErr } = await supabase
+      .from('center_closures')
+      .insert([{
+        center_id: centerId,
+        closed_date: date,
+        reason: cleanReason,
+        cancelled_count: cancelledCount,
+        notified_count: notifiedCount,
+        created_by_name: req.user?.fullName || req.user?.email || 'Receptionist',
+        created_by_role: req.user?.role === 'admin' ? 'admin' : 'receptionist',
+      }])
+      .select()
+      .maybeSingle();
+
+    if (insErr || !inserted) {
+      return res.status(500).json({ error: insErr?.message || 'Could not save this closure.' });
+    }
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'Receptionist',
+      actorRole: req.user?.role || 'receptionist',
+      eventType: 'center_edit',
+      action: `Marked "${center.name}" closed on ${date}${cleanReason ? ` (${cleanReason})` : ''} — ${cancelledCount} appointment(s) cancelled, ${notifiedCount} patient(s) notified`,
+      centerName: center.name,
+      status: 'completed',
+    });
+
+    res.status(201).json({ closure: mapClosure(inserted), cancelledCount, notifiedCount });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /centers/:centerId/closures/:date
+ * Re-opens a closed day for new bookings. Does NOT restore appointments that
+ * were cancelled when the day was closed — those patients must re-book.
+ */
+export async function deleteCenterClosure(req, res, next) {
+  try {
+    const { centerId, date } = req.params;
+
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const { data: center } = await supabase
+      .from('medical_centers')
+      .select('name')
+      .eq('id', centerId)
+      .maybeSingle();
+
+    const { error } = await supabase
+      .from('center_closures')
+      .delete()
+      .eq('center_id', centerId)
+      .eq('closed_date', date);
+    if (error) return res.status(500).json({ error: error.message });
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'Receptionist',
+      actorRole: req.user?.role || 'receptionist',
+      eventType: 'center_edit',
+      action: `Re-opened "${center?.name || 'medical center'}" on ${date} for new bookings`,
+      centerName: center?.name || 'Center',
+      status: 'completed',
+    });
+
+    res.json({
+      message: `${date} re-opened for new bookings. Appointments already cancelled were not restored.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── Date-specific hours (migration 014) ─────────────────────────────────────
+
+/**
+ * GET /centers/:centerId/day-hours
+ * Upcoming per-date overrides for one center: `{ centerHours, doctorHours }`.
+ * Unauthenticated like getCenterClosures — the booking modal reads doctorHours
+ * to shape slots and centerHours to show the label. Degrades to empty arrays.
+ */
+export async function getCenterDayHours(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const from = req.query.all === 'true' ? '1900-01-01' : localIsoDate();
+
+    const [ch, dh] = await Promise.all([
+      supabase.from('center_date_hours').select('*').eq('center_id', centerId).gte('open_date', from).order('open_date', { ascending: true }),
+      supabase.from('doctor_date_hours').select('*').eq('center_id', centerId).gte('work_date', from).order('work_date', { ascending: true }),
+    ]);
+    if (ch.error) console.warn('getCenterDayHours center notice:', ch.error.message);
+    if (dh.error) console.warn('getCenterDayHours doctor notice:', dh.error.message);
+
+    res.json({
+      centerHours: (ch.data || []).map(mapCenterDateHours),
+      doctorHours: (dh.data || []).map(mapDoctorDateHours),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** PUT /centers/:centerId/center-hours  { date, hoursLabel, note } — display-only label. */
+export async function putCenterDateHours(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const { date, hoursLabel, note } = req.body;
+
+    if (!CLOSURE_DATE_RE.test(String(date || ''))) {
+      return res.status(400).json({ error: 'A date (YYYY-MM-DD) is required.' });
+    }
+    if (String(date) < localIsoDate()) {
+      return res.status(400).json({ error: 'You can only set hours for today or a future date.' });
+    }
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const row = {
+      center_id: centerId,
+      open_date: date,
+      hours_label: String(hoursLabel || '').trim().slice(0, 60),
+      note: String(note || '').trim().slice(0, 200),
+      created_by_name: req.user?.fullName || req.user?.email || 'Receptionist',
+    };
+    const { data, error } = await supabase
+      .from('center_date_hours')
+      .upsert(row, { onConflict: 'center_id,open_date' })
+      .select()
+      .maybeSingle();
+    if (error || !data) return res.status(500).json({ error: error?.message || 'Could not save these hours.' });
+
+    res.json({ centerHours: mapCenterDateHours(data) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** DELETE /centers/:centerId/center-hours/:date — revert to the center default. */
+export async function deleteCenterDateHours(req, res, next) {
+  try {
+    const { centerId, date } = req.params;
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const { error } = await supabase
+      .from('center_date_hours')
+      .delete()
+      .eq('center_id', centerId)
+      .eq('open_date', date);
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ message: `${date} reverted to the center's usual opening hours.` });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PUT /centers/:centerId/doctor-hours
+ * body { doctorId, date, isWorking, startTime, endTime }
+ * Overrides one doctor's hours for one date. Cancels + SMSes that doctor's
+ * appointments on that date that no longer fit.
+ */
+export async function putDoctorDateHours(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const { doctorId, date, isWorking, startTime, endTime } = req.body;
+
+    if (!doctorId || !CLOSURE_DATE_RE.test(String(date || ''))) {
+      return res.status(400).json({ error: 'doctorId and a date (YYYY-MM-DD) are required.' });
+    }
+    if (String(date) < localIsoDate()) {
+      return res.status(400).json({ error: 'You can only set hours for today or a future date.' });
+    }
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const working = isWorking !== false;
+    let start = null;
+    let end = null;
+    if (working) {
+      if (!HHMM_RE.test(String(startTime || '')) || !HHMM_RE.test(String(endTime || ''))) {
+        return res.status(400).json({ error: 'Start and end must be HH:MM times.' });
+      }
+      if (String(startTime) >= String(endTime)) {
+        return res.status(400).json({ error: 'End time must be after start time.' });
+      }
+      start = startTime;
+      end = endTime;
+    }
+
+    const { data: center } = await supabase
+      .from('medical_centers').select('name').eq('id', centerId).maybeSingle();
+
+    const { cancelledCount, notifiedCount } = await cancelDoctorAppointmentsForOverride(
+      centerId, doctorId, date, center?.name,
+      { isWorking: working, startHour: hourOf(start), endHour: hourOf(end) },
+    );
+
+    const row = {
+      doctor_id: doctorId,
+      center_id: centerId,
+      work_date: date,
+      is_working: working,
+      start_time: start,
+      end_time: end,
+      cancelled_count: cancelledCount,
+      notified_count: notifiedCount,
+      created_by_name: req.user?.fullName || req.user?.email || 'Receptionist',
+    };
+    const { data, error } = await supabase
+      .from('doctor_date_hours')
+      .upsert(row, { onConflict: 'doctor_id,center_id,work_date' })
+      .select()
+      .maybeSingle();
+    if (error || !data) return res.status(500).json({ error: error?.message || 'Could not save these hours.' });
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'Receptionist',
+      actorRole: req.user?.role || 'receptionist',
+      eventType: 'center_edit',
+      action: `Set date-specific hours for a doctor at "${center?.name || 'center'}" on ${date}: ${working ? `${start}–${end}` : 'not working'} — ${cancelledCount} cancelled, ${notifiedCount} notified`,
+      centerName: center?.name || 'Center',
+      status: 'completed',
+    });
+
+    res.json({ doctorHours: mapDoctorDateHours(data), cancelledCount, notifiedCount });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** DELETE /centers/:centerId/doctor-hours/:doctorId/:date — revert to weekly hours. */
+export async function deleteDoctorDateHours(req, res, next) {
+  try {
+    const { centerId, doctorId, date } = req.params;
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const { error } = await supabase
+      .from('doctor_date_hours')
+      .delete()
+      .eq('center_id', centerId)
+      .eq('doctor_id', doctorId)
+      .eq('work_date', date);
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ message: `${date} reverted to the doctor's usual weekly hours.` });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /**
  * PATCH /centers/:id/reject
  */

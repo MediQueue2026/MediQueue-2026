@@ -295,6 +295,46 @@ export interface ApiCenter {
   documents?: ApiCenterDocument[]
 }
 
+/** One calendar day a medical center is closed (migration 012 / center_closures). */
+export interface ApiCenterClosure {
+  id: string
+  centerId: string
+  /** YYYY-MM-DD */
+  closedDate: string
+  reason: string
+  /** Appointments cancelled by the sweep when this closure was created. */
+  cancelledCount: number
+  /** Patients SMSed by that sweep. */
+  notifiedCount: number
+  createdAt: string | null
+}
+
+/** Display-only centre opening-hours label for one date (migration 014). */
+export interface ApiCenterDateHours {
+  id: string
+  centerId: string
+  /** YYYY-MM-DD */
+  openDate: string
+  hoursLabel: string
+  note: string
+}
+
+/** One doctor's hours override for one date (migration 014) — drives bookable slots. */
+export interface ApiDoctorDateHours {
+  id: string
+  doctorId: string
+  centerId: string
+  /** YYYY-MM-DD */
+  workDate: string
+  isWorking: boolean
+  /** HH:MM, null when isWorking is false. */
+  startTime: string | null
+  endTime: string | null
+  /** From the sweep run when this override was saved. */
+  cancelledCount: number
+  notifiedCount: number
+}
+
 export interface AuditLog {
   id: string
   time: string
@@ -686,14 +726,15 @@ export const api = {
     ),
 
   getDoctorHours: (doctorId: string, centerId?: string | null) =>
-    request<{ hours: ApiDoctorHour[]; maxAppointmentsPerHour: number }>(
+    request<{ hours: ApiDoctorHour[]; maxAppointmentsPerHour: number; advanceBookingDays: number }>(
       `/doctors/${doctorId}/hours${centerId ? `?centerId=${encodeURIComponent(centerId)}` : ''}`,
     ),
 
-  upsertDoctorHours: (doctorId: string, hours: Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'>[], maxAppointmentsPerHour?: number, centerId?: string | null) =>
+  /** `advanceBookingDays` — how many days ahead patients may book this doctor (migration 013). */
+  upsertDoctorHours: (doctorId: string, hours: Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'>[], maxAppointmentsPerHour?: number, advanceBookingDays?: number, centerId?: string | null) =>
     request<{ message: string; hours: ApiDoctorHour[] }>(`/doctors/${doctorId}/hours`, {
       method: 'PUT',
-      body: JSON.stringify({ hours, maxAppointmentsPerHour, centerId }),
+      body: JSON.stringify({ hours, maxAppointmentsPerHour, advanceBookingDays, centerId }),
     }),
 
   getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
@@ -727,6 +768,58 @@ export const api = {
   deleteCenter: (id: string) => request<{ message: string }>(`/centers/${id}`, {
     method: 'DELETE',
   }),
+
+  // ── Per-date Center Closures (migration 012) ──
+  /** Upcoming closed dates for a center. Unauthenticated, like `getCenters`. */
+  getCenterClosures: (centerId: string) =>
+    request<{ closures: ApiCenterClosure[] }>(`/centers/${centerId}/closures`),
+
+  /** Mark a day closed — the backend cancels that day's appointments and SMSes
+   *  the patients, returning how many of each. Idempotent per (center, date). */
+  createCenterClosure: (centerId: string, input: { date: string; reason?: string }) =>
+    request<{ closure: ApiCenterClosure; cancelledCount: number; notifiedCount: number; alreadyClosed?: boolean }>(
+      `/centers/${centerId}/closures`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+
+  /** Re-open a day for new bookings. Previously cancelled appointments are not restored. */
+  deleteCenterClosure: (centerId: string, date: string) =>
+    request<{ message: string }>(`/centers/${centerId}/closures/${date}`, {
+      method: 'DELETE',
+    }),
+
+  // ── Date-specific Hours (migration 014) ──
+  /** Upcoming per-date overrides for a center. Unauthenticated, like `getCenters`. */
+  getCenterDayHours: (centerId: string) =>
+    request<{ centerHours: ApiCenterDateHours[]; doctorHours: ApiDoctorDateHours[] }>(
+      `/centers/${centerId}/day-hours`,
+    ),
+
+  /** Sets the (display-only) centre opening-hours label for one date. */
+  putCenterDateHours: (centerId: string, input: { date: string; hoursLabel: string; note?: string }) =>
+    request<{ centerHours: ApiCenterDateHours }>(`/centers/${centerId}/center-hours`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+
+  /** Reverts a date to the centre's default opening hours. */
+  deleteCenterDateHours: (centerId: string, date: string) =>
+    request<{ message: string }>(`/centers/${centerId}/center-hours/${date}`, {
+      method: 'DELETE',
+    }),
+
+  /** Overrides one doctor's hours for one date; cancels + SMSes appointments that no longer fit. */
+  putDoctorDateHours: (centerId: string, input: { doctorId: string; date: string; isWorking: boolean; startTime?: string; endTime?: string }) =>
+    request<{ doctorHours: ApiDoctorDateHours; cancelledCount: number; notifiedCount: number }>(
+      `/centers/${centerId}/doctor-hours`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    ),
+
+  /** Reverts a doctor to their usual weekly hours on this date. No cancellations. */
+  deleteDoctorDateHours: (centerId: string, doctorId: string, date: string) =>
+    request<{ message: string }>(`/centers/${centerId}/doctor-hours/${doctorId}/${date}`, {
+      method: 'DELETE',
+    }),
 
   // ── Medical Center Approvals (Receptionist request -> Super Admin) ──
   getPendingCenters: () => request<{ pendingCenters: ApiCenter[] }>('/centers/pending'),

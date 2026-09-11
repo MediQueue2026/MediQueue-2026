@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Calendar, Clock, X, Check, Stethoscope, AlertCircle, Building2, Loader2 } from 'lucide-react'
-import { bookAppointment, fetchCentersList, fetchDoctorsList, fetchDoctorHours, fetchAllAppointments } from '../services/patientService'
+import { bookAppointment, fetchCentersList, fetchDoctorsList, fetchDoctorHours, fetchAllAppointments, fetchCenterClosures, fetchCenterDayHours } from '../services/patientService'
 import { AppointmentItem } from '../types/patient'
 
 interface BookAppointmentModalProps {
@@ -19,6 +19,16 @@ interface SlotItem {
   maxLimit: number
 }
 
+/** Local YYYY-MM-DD for a Date (not UTC — `toISOString` shifts the day near midnight). */
+function toLocalIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** `base` + `days`, as a local YYYY-MM-DD string. */
+function addDaysIso(base: Date, days: number): string {
+  return toLocalIso(new Date(base.getFullYear(), base.getMonth(), base.getDate() + days))
+}
+
 export function BookAppointmentModal({
   isOpen,
   onClose,
@@ -32,13 +42,45 @@ export function BookAppointmentModal({
   
   const [selectedCenterId, setSelectedCenterId] = useState(preselectedCenter || '')
   const [selectedDoctorId, setSelectedDoctorId] = useState(preselectedDoctor || '')
-  const [appointmentDate, setAppointmentDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [appointmentDate, setAppointmentDate] = useState(() => toLocalIso(new Date()))
   const [slotHour, setSlotHour] = useState(10)
 
   const [dynamicSlots, setDynamicSlots] = useState<SlotItem[]>([])
   const [maxCapacity, setMaxCapacity] = useState(4)
   const [doctorOffDuty, setDoctorOffDuty] = useState(false)
   const [loadingSlots, setLoadingSlots] = useState(false)
+
+  // Ticks every minute while the modal is open so passed dates/slots drop off
+  // on their own — no config, it just follows the clock.
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    if (!isOpen) return
+    const t = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(t)
+  }, [isOpen])
+  const todayIso = toLocalIso(now)
+
+  // Dates this center has marked closed (public holidays etc.). The backend
+  // rejects a booking on one of these regardless; this greys the day out first.
+  const [centerClosedDates, setCenterClosedDates] = useState<string[]>([])
+  const isSelectedDateClosed = centerClosedDates.includes(appointmentDate)
+
+  // Date-specific hours (migration 014): per-doctor overrides drive slots below;
+  // the centre label is informational only, shown as a caption under the date field.
+  const [centerDayHours, setCenterDayHours] = useState<{
+    centerHours: { openDate: string; hoursLabel: string; note: string }[]
+    doctorHours: { doctorId: string; workDate: string; isWorking: boolean; startTime: string | null; endTime: string | null }[]
+  }>({ centerHours: [], doctorHours: [] })
+  const centerHoursForDate = centerDayHours.centerHours.find(c => c.openDate === appointmentDate)
+
+  // How many days ahead this doctor accepts bookings (migration 013).
+  const [advanceBookingDays, setAdvanceBookingDays] = useState(7)
+  const maxBookableDate = addDaysIso(now, advanceBookingDays)
+  const isBeyondWindow = appointmentDate > maxBookableDate
+  const isDateInPast = appointmentDate < todayIso
+  /** An hour slot on today that has already started is gone. */
+  const slotIsPast = (hour: number) => appointmentDate === todayIso && hour <= now.getHours()
+  const selectedSlotIsPast = slotIsPast(slotHour)
 
   const [booking, setBooking] = useState(false)
   const [error, setError] = useState('')
@@ -65,10 +107,37 @@ export function BookAppointmentModal({
     }
   }, [isOpen, preselectedCenter, preselectedDoctor])
 
+  // Load this center's closed dates whenever the selected center changes.
+  useEffect(() => {
+    if (!isOpen || !selectedCenterId) { setCenterClosedDates([]); return }
+    let cancelled = false
+    fetchCenterClosures(selectedCenterId)
+      .then(dates => { if (!cancelled) setCenterClosedDates(dates) })
+      .catch(() => { if (!cancelled) setCenterClosedDates([]) })
+    return () => { cancelled = true }
+  }, [isOpen, selectedCenterId])
+
+  // Load this center's date-specific hours (migration 014) alongside closures.
+  useEffect(() => {
+    if (!isOpen || !selectedCenterId) { setCenterDayHours({ centerHours: [], doctorHours: [] }); return }
+    let cancelled = false
+    fetchCenterDayHours(selectedCenterId)
+      .then(res => { if (!cancelled) setCenterDayHours(res) })
+      .catch(() => { if (!cancelled) setCenterDayHours({ centerHours: [], doctorHours: [] }) })
+    return () => { cancelled = true }
+  }, [isOpen, selectedCenterId])
+
   // Fetch real-time Doctor Hours & live slot availability whenever doctor or date changes
   useEffect(() => {
     async function loadDynamicSlots() {
       if (!selectedDoctorId || !appointmentDate) return
+      // Center shut that day — no point pricing slots; the banner takes over.
+      if (centerClosedDates.includes(appointmentDate)) {
+        setDoctorOffDuty(false)
+        setDynamicSlots([])
+        setLoadingSlots(false)
+        return
+      }
       setLoadingSlots(true)
       try {
         const [hoursRes, apptsRes] = await Promise.all([
@@ -78,15 +147,33 @@ export function BookAppointmentModal({
 
         const limitPerHour = hoursRes.maxAppointmentsPerHour || 4
         setMaxCapacity(limitPerHour)
+        setAdvanceBookingDays(hoursRes.advanceBookingDays || 7)
 
         // Parse selected date to find Day of Week (0 = Sun, 1 = Mon, ..., 6 = Sat)
         const parts = appointmentDate.split('-').map(Number)
         const dateObj = new Date(parts[0], parts[1] - 1, parts[2])
         const dow = dateObj.getDay()
 
-        // Find doctor's configured hours for this day of week
-        const dayHours = (hoursRes.hours || []).find((h: any) => h.dayOfWeek === dow)
-        const isAvailable = dayHours ? dayHours.isAvailable : (dow >= 1 && dow <= 5)
+        // A date-specific override (migration 014) replaces the weekly hours
+        // entirely for this one date — it wins even over an otherwise-off weekday.
+        const dateOverride = centerDayHours.doctorHours.find(
+          h => h.doctorId === selectedDoctorId && h.workDate === appointmentDate,
+        )
+
+        let isAvailable: boolean
+        let startH: number
+        let endH: number
+        if (dateOverride) {
+          isAvailable = dateOverride.isWorking
+          startH = dateOverride.startTime ? parseInt(dateOverride.startTime.split(':')[0], 10) : 8
+          endH = dateOverride.endTime ? parseInt(dateOverride.endTime.split(':')[0], 10) : 17
+        } else {
+          // Find doctor's configured hours for this day of week
+          const dayHours = (hoursRes.hours || []).find((h: any) => h.dayOfWeek === dow)
+          isAvailable = dayHours ? dayHours.isAvailable : (dow >= 1 && dow <= 5)
+          startH = dayHours?.startTime ? parseInt(dayHours.startTime.split(':')[0], 10) : 8
+          endH = dayHours?.endTime ? parseInt(dayHours.endTime.split(':')[0], 10) : 17
+        }
 
         if (!isAvailable) {
           setDoctorOffDuty(true)
@@ -96,10 +183,6 @@ export function BookAppointmentModal({
         }
 
         setDoctorOffDuty(false)
-
-        // Parse start and end hours
-        const startH = dayHours?.startTime ? parseInt(dayHours.startTime.split(':')[0], 10) : 8
-        const endH = dayHours?.endTime ? parseInt(dayHours.endTime.split(':')[0], 10) : 17
 
         // Filter active booked appointments for this doctor & date
         const bookedForDocAndDate = (apptsRes || []).filter((a: any) => {
@@ -132,12 +215,17 @@ export function BookAppointmentModal({
 
         setDynamicSlots(slots)
 
-        // Auto select first available slot
+        // Auto-select the first slot that's open AND not already in the past today.
+        const nowLocal = new Date()
+        const selIsToday = appointmentDate === `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`
+        const notPast = (h: number) => !selIsToday || h > nowLocal.getHours()
         if (slots.length > 0) {
-          const validSelected = slots.find(s => s.hour === slotHour && s.rem > 0)
-          if (!validSelected) {
-            const firstAvailable = slots.find(s => s.rem > 0) || slots[0]
-            setSlotHour(firstAvailable.hour)
+          const stillValid = slots.find(s => s.hour === slotHour && s.rem > 0 && notPast(s.hour))
+          if (!stillValid) {
+            const firstOk = slots.find(s => s.rem > 0 && notPast(s.hour))
+              || slots.find(s => notPast(s.hour))
+              || slots[0]
+            setSlotHour(firstOk.hour)
           }
         }
       } catch (e) {
@@ -150,7 +238,7 @@ export function BookAppointmentModal({
     if (isOpen && selectedDoctorId) {
       loadDynamicSlots()
     }
-  }, [isOpen, selectedDoctorId, appointmentDate])
+  }, [isOpen, selectedDoctorId, appointmentDate, centerClosedDates, centerDayHours])
 
   if (!isOpen) return null
 
@@ -182,6 +270,22 @@ export function BookAppointmentModal({
     }
     if (doctorOffDuty) {
       setError('Doctor is off-duty on the selected date. Please select another date.')
+      return
+    }
+    if (isSelectedDateClosed) {
+      setError('This medical center is closed on the selected date. Please pick another day.')
+      return
+    }
+    if (isDateInPast) {
+      setError('That date is in the past. Please pick today or a later day.')
+      return
+    }
+    if (isBeyondWindow) {
+      setError(`This doctor is taking bookings up to ${advanceBookingDays} day${advanceBookingDays === 1 ? '' : 's'} ahead. Please pick an earlier date.`)
+      return
+    }
+    if (selectedSlotIsPast) {
+      setError('That time slot has already passed today. Please pick a later slot or another day.')
       return
     }
 
@@ -314,9 +418,20 @@ export function BookAppointmentModal({
               type="date"
               className="input"
               value={appointmentDate}
+              min={todayIso}
+              max={maxBookableDate}
               onChange={e => setAppointmentDate(e.target.value)}
               style={{ height: 42, fontSize: 13.5 }}
             />
+            <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginTop: 4 }}>
+              Bookings open through {maxBookableDate} ({advanceBookingDays} day{advanceBookingDays === 1 ? '' : 's'} ahead).
+            </div>
+            {centerHoursForDate?.hoursLabel && (
+              <div style={{ fontSize: 10.5, color: 'var(--blue-dark)', marginTop: 2, fontWeight: 600 }}>
+                🏥 {selectedCenter?.name || 'This centre'} is open {centerHoursForDate.hoursLabel} on this date
+                {centerHoursForDate.note ? ` — ${centerHoursForDate.note}` : ''}.
+              </div>
+            )}
           </div>
 
           {/* Dynamic Hourly Slot Selector */}
@@ -332,7 +447,19 @@ export function BookAppointmentModal({
               )}
             </div>
 
-            {doctorOffDuty ? (
+            {isDateInPast ? (
+              <div style={{ padding: 16, borderRadius: 10, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#D97706', fontSize: 12.5, textAlign: 'center', fontWeight: 600 }}>
+                🕓 That date has already passed. Please pick today or a later day.
+              </div>
+            ) : isBeyondWindow ? (
+              <div style={{ padding: 16, borderRadius: 10, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#D97706', fontSize: 12.5, textAlign: 'center', fontWeight: 600 }}>
+                📅 This doctor is taking bookings up to {advanceBookingDays} day{advanceBookingDays === 1 ? '' : 's'} ahead. Please pick an earlier date above.
+              </div>
+            ) : isSelectedDateClosed ? (
+              <div style={{ padding: 16, borderRadius: 10, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#D97706', fontSize: 12.5, textAlign: 'center', fontWeight: 600 }}>
+                🚫 This medical center is closed on the selected date. Please pick another day above.
+              </div>
+            ) : doctorOffDuty ? (
               <div style={{ padding: 16, borderRadius: 10, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#D97706', fontSize: 12.5, textAlign: 'center', fontWeight: 600 }}>
                 🚨 Doctor is Off-Duty / Not Available on this day of the week. Please select another date above.
               </div>
@@ -340,31 +467,37 @@ export function BookAppointmentModal({
               <div style={{ padding: 16, borderRadius: 10, background: '#f8fafc', border: '1px solid var(--border-md)', color: 'var(--text-4)', fontSize: 12, textAlign: 'center' }}>
                 No hours configured for this doctor on this day.
               </div>
+            ) : dynamicSlots.length > 0 && dynamicSlots.every(s => s.rem === 0 || slotIsPast(s.hour)) ? (
+              <div style={{ padding: 16, borderRadius: 10, background: '#f8fafc', border: '1px solid var(--border-md)', color: 'var(--text-4)', fontSize: 12, textAlign: 'center' }}>
+                No slots left for today — please pick another date above.
+              </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {dynamicSlots.map(s => {
                   const isSelected = slotHour === s.hour
                   const isFull = s.rem === 0
+                  const isPast = slotIsPast(s.hour)
+                  const disabled = isFull || isPast
                   return (
                     <button
                       key={s.hour}
                       type="button"
-                      disabled={isFull}
+                      disabled={disabled}
                       onClick={() => setSlotHour(s.hour)}
                       style={{
                         padding: '10px 12px', borderRadius: 8, textAlign: 'left',
-                        background: isSelected ? 'var(--blue)' : isFull ? '#f5f5f5' : '#ffffff',
-                        color: isSelected ? '#ffffff' : isFull ? '#a0a0a0' : 'var(--text-1)',
+                        background: isSelected ? 'var(--blue)' : disabled ? '#f5f5f5' : '#ffffff',
+                        color: isSelected ? '#ffffff' : disabled ? '#a0a0a0' : 'var(--text-1)',
                         border: '1px solid', borderColor: isSelected ? 'var(--blue)' : 'var(--border-md)',
-                        cursor: isFull ? 'not-allowed' : 'pointer', opacity: isFull ? 0.6 : 1,
+                        cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
                         transition: 'all 0.2s ease'
                       }}
                     >
                       <div style={{ fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Clock size={12} /> {s.label}
                       </div>
-                      <div style={{ fontSize: 10.5, marginTop: 2, color: isSelected ? '#e0f7f5' : isFull ? 'var(--crimson)' : 'var(--blue-dark)' }}>
-                        {isFull ? `❌ Slot Full (${s.maxLimit}/${s.maxLimit} booked)` : `● ${s.rem} of ${s.maxLimit} slots available`}
+                      <div style={{ fontSize: 10.5, marginTop: 2, color: isSelected ? '#e0f7f5' : isPast ? 'var(--text-4)' : isFull ? 'var(--crimson)' : 'var(--blue-dark)' }}>
+                        {isPast ? '⌛ Passed' : isFull ? `❌ Slot Full (${s.maxLimit}/${s.maxLimit} booked)` : `● ${s.rem} of ${s.maxLimit} slots available`}
                       </div>
                     </button>
                   )
@@ -379,7 +512,7 @@ export function BookAppointmentModal({
             <button
               type="button"
               onClick={handleConfirm}
-              disabled={booking || !selectedDoc?.id || !selectedCenter?.id || doctorOffDuty}
+              disabled={booking || !selectedDoc?.id || !selectedCenter?.id || doctorOffDuty || isSelectedDateClosed || isBeyondWindow || isDateInPast || selectedSlotIsPast}
               className="btn btn-primary"
               style={{ gap: 6 }}
             >

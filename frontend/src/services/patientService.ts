@@ -40,6 +40,51 @@ export async function fetchCentersList(): Promise<any[]> {
   return [];
 }
 
+/**
+ * Upcoming dates a center is closed (public holidays etc. — see backend
+ * center_closures). Returns the raw `YYYY-MM-DD` strings; `[]` on any failure so
+ * the booking form degrades to "nothing is closed" rather than blocking.
+ */
+export async function fetchCenterClosures(centerId: string): Promise<string[]> {
+  if (!centerId) return [];
+  try {
+    const res = await fetch(`${API_BASE}/centers/${centerId}/closures`);
+    if (res.ok) {
+      const data = await res.json();
+      return (data.closures ?? []).map((c: any) => c.closedDate).filter(Boolean);
+    }
+  } catch (e) {
+    console.warn('Center closures API error:', e);
+  }
+  return [];
+}
+
+/**
+ * Upcoming date-specific hours overrides for a center (migration 014):
+ * per-date doctor overrides (drive bookable slots) and a display-only centre
+ * opening-hours label. `{ centerHours: [], doctorHours: [] }` on any failure.
+ */
+export async function fetchCenterDayHours(centerId: string): Promise<{
+  centerHours: { openDate: string; hoursLabel: string; note: string }[]
+  doctorHours: { doctorId: string; workDate: string; isWorking: boolean; startTime: string | null; endTime: string | null }[]
+}> {
+  const empty = { centerHours: [], doctorHours: [] };
+  if (!centerId) return empty;
+  try {
+    const res = await fetch(`${API_BASE}/centers/${centerId}/day-hours`);
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        centerHours: data.centerHours ?? [],
+        doctorHours: data.doctorHours ?? [],
+      };
+    }
+  } catch (e) {
+    console.warn('Center day-hours API error:', e);
+  }
+  return empty;
+}
+
 export async function fetchPatientProfile(userId: string, defaultName?: string, defaultEmail?: string): Promise<PatientProfile> {
   try {
     const res = await fetch(`${API_BASE}/patient/profile/${userId}`);
@@ -324,17 +369,21 @@ export async function bookAppointment(booking: {
   };
 }
 
-export async function fetchDoctorHours(doctorId: string): Promise<{ hours: any[]; maxAppointmentsPerHour: number }> {
+export async function fetchDoctorHours(doctorId: string): Promise<{ hours: any[]; maxAppointmentsPerHour: number; advanceBookingDays: number }> {
   try {
     const res = await fetch(`${API_BASE}/doctors/${doctorId}/hours`);
     if (res.ok) {
       const data = await res.json();
-      return { hours: data.hours || [], maxAppointmentsPerHour: data.maxAppointmentsPerHour || 4 };
+      return {
+        hours: data.hours || [],
+        maxAppointmentsPerHour: data.maxAppointmentsPerHour || 4,
+        advanceBookingDays: data.advanceBookingDays || 7,
+      };
     }
   } catch (e) {
     console.warn('Fetch doctor hours API error:', e);
   }
-  return { hours: [], maxAppointmentsPerHour: 4 };
+  return { hours: [], maxAppointmentsPerHour: 4, advanceBookingDays: 7 };
 }
 
 export async function fetchAllAppointments(): Promise<any[]> {

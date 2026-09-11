@@ -71,6 +71,95 @@ export async function createAppointment(req, res, next) {
     if (!doctorRes.data) return res.status(404).json({ error: 'That doctor is no longer available.' });
     if (!centerRes.data) return res.status(404).json({ error: 'That medical center no longer exists.' });
 
+    // The date this booking is for (used again for token numbering below).
+    const dateStr = appointmentDate || new Date().toISOString().split('T')[0];
+
+    // 3b. Reject bookings on a day the center has marked closed (migration 012).
+    //     The Reception Desk sets these; the patient booking modal also greys the
+    //     date out, but the API is the authoritative gate.
+    const { data: closureRow } = await supabase
+      .from('center_closures')
+      .select('closed_date, reason')
+      .eq('center_id', targetCenterId)
+      .eq('closed_date', dateStr)
+      .maybeSingle();
+    if (closureRow) {
+      return res.status(400).json({
+        error: `This medical center is closed on ${dateStr}${closureRow.reason ? ` (${closureRow.reason})` : ''}. Please pick another date.`,
+        code: 'center_closed',
+      });
+    }
+
+    // 3c. Advance-booking window + past date/slot (migration 013). The patient
+    //     modal already constrains the date picker and greys passed slots; this
+    //     is the authoritative gate. Tolerant of a DB that predates the column.
+    const nowT = new Date();
+    const todayIso = `${nowT.getFullYear()}-${String(nowT.getMonth() + 1).padStart(2, '0')}-${String(nowT.getDate()).padStart(2, '0')}`;
+    const daysAhead = Math.round(
+      (new Date(`${dateStr}T00:00:00`).getTime() - new Date(`${todayIso}T00:00:00`).getTime()) / 86400000,
+    );
+    if (daysAhead < 0) {
+      return res.status(400).json({ error: 'That date is in the past.', code: 'date_in_past' });
+    }
+
+    let windowDays = 7;
+    const { data: winPosting } = await supabase
+      .from('doctor_center_assignments')
+      .select('advance_booking_days')
+      .eq('doctor_id', targetDoctorId)
+      .eq('center_id', targetCenterId)
+      .maybeSingle();
+    if (winPosting?.advance_booking_days != null) {
+      windowDays = winPosting.advance_booking_days;
+    } else {
+      const { data: winDoctor } = await supabase
+        .from('doctors')
+        .select('advance_booking_days')
+        .eq('id', targetDoctorId)
+        .maybeSingle();
+      if (winDoctor?.advance_booking_days != null) windowDays = winDoctor.advance_booking_days;
+    }
+
+    if (daysAhead > windowDays) {
+      return res.status(400).json({
+        error: `This doctor is taking bookings up to ${windowDays} day${windowDays === 1 ? '' : 's'} ahead. Please pick an earlier date.`,
+        code: 'beyond_booking_window',
+      });
+    }
+    if (dateStr === todayIso && Number(slotHour ?? 10) <= nowT.getHours()) {
+      return res.status(400).json({
+        error: 'That time slot has already passed today. Please pick a later slot or another day.',
+        code: 'slot_in_past',
+      });
+    }
+
+    // 3d. Date-specific doctor hours override (migration 014). Tolerant of an
+    //     un-migrated table (query error ⇒ ddh is null ⇒ skip).
+    const { data: ddh } = await supabase
+      .from('doctor_date_hours')
+      .select('is_working, start_time, end_time')
+      .eq('doctor_id', targetDoctorId)
+      .eq('center_id', targetCenterId)
+      .eq('work_date', dateStr)
+      .maybeSingle();
+    if (ddh) {
+      if (ddh.is_working === false) {
+        return res.status(400).json({
+          error: 'This doctor is not working on the selected date. Please pick another day.',
+          code: 'doctor_off_that_day',
+        });
+      }
+      const sh = parseInt(String(ddh.start_time || '').slice(0, 2), 10);
+      const eh = parseInt(String(ddh.end_time || '').slice(0, 2), 10);
+      const bookHour = Number(slotHour ?? 10);
+      if (Number.isFinite(sh) && Number.isFinite(eh) && (bookHour < sh || bookHour >= eh)) {
+        return res.status(400).json({
+          error: `On ${dateStr} this doctor is only available ${ddh.start_time}–${ddh.end_time}. Please pick a time in that range.`,
+          code: 'outside_doctor_hours',
+        });
+      }
+    }
+
     const { data: profileRow } = await supabase
       .from('patient_profiles')
       .select('nic, emergency_contact_phone')
@@ -88,8 +177,6 @@ export async function createAppointment(req, res, next) {
     // 5. Next sequential token, counting both tables so an online booking and a
     //    printed slip never collide. Scoped to this center: a doctor working at
     //    two clinics runs an independent number series at each.
-    const dateStr = appointmentDate || new Date().toISOString().split('T')[0];
-
     const [maxWalkinRes, maxApptRes] = await Promise.all([
       supabase
         .from('walk_in_queue')

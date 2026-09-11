@@ -68,6 +68,7 @@ CREATE TABLE public.doctors (
   center_id UUID REFERENCES public.medical_centers(id) ON DELETE SET NULL,
   specialization TEXT NOT NULL,
   max_appointments_per_hour INT DEFAULT 4,
+  advance_booking_days INT NOT NULL DEFAULT 7 CHECK (advance_booking_days BETWEEN 1 AND 30),
   current_status TEXT CHECK (current_status IN ('active', 'delayed', 'break', 'offline')) DEFAULT 'active',
   approval_status TEXT CHECK (approval_status IN ('pending', 'approved', 'rejected')) DEFAULT 'approved',
   requested_by_name TEXT,
@@ -140,6 +141,7 @@ CREATE TABLE public.doctor_center_assignments (
   room_number TEXT,
   series VARCHAR(5),
   max_appointments_per_hour INT DEFAULT 4,
+  advance_booking_days INT NOT NULL DEFAULT 7 CHECK (advance_booking_days BETWEEN 1 AND 30),
   current_status TEXT CHECK (current_status IN ('active', 'delayed', 'break', 'offline')) DEFAULT 'active',
   delay_minutes INT DEFAULT 0,
   available_hours JSONB DEFAULT '{}'::jsonb,
@@ -187,6 +189,53 @@ CREATE TABLE public.delay_alerts (
 CREATE INDEX idx_delay_alerts_doctor ON public.delay_alerts(doctor_id, created_at DESC);
 CREATE INDEX idx_delay_alerts_center ON public.delay_alerts(center_id, created_at DESC);
 CREATE INDEX idx_delay_alerts_live ON public.delay_alerts(created_at DESC) WHERE cleared_at IS NULL;
+
+-- 8c. Center Closures Table (one row per closed calendar day per center — see
+--     migration 012). Creating a row auto-cancels that day's appointments and
+--     SMSes the patients; deleting it re-opens the day for new bookings.
+CREATE TABLE public.center_closures (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  closed_date DATE NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  cancelled_count INT NOT NULL DEFAULT 0,
+  notified_count INT NOT NULL DEFAULT 0,
+  created_by_name TEXT,
+  created_by_role TEXT CHECK (created_by_role IN ('receptionist', 'admin', 'system')) DEFAULT 'receptionist',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (center_id, closed_date)
+);
+CREATE INDEX idx_center_closures_lookup ON public.center_closures(center_id, closed_date);
+
+-- 8d. Date-specific hours (migration 014). Per-doctor overrides drive bookable
+--     slots for a single date; the per-centre row is a display-only label.
+CREATE TABLE public.doctor_date_hours (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  doctor_id UUID NOT NULL REFERENCES public.doctors(id) ON DELETE CASCADE,
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  work_date DATE NOT NULL,
+  is_working BOOLEAN NOT NULL DEFAULT TRUE,
+  start_time TEXT,
+  end_time TEXT,
+  cancelled_count INT NOT NULL DEFAULT 0,
+  notified_count INT NOT NULL DEFAULT 0,
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (doctor_id, center_id, work_date)
+);
+CREATE INDEX idx_ddh_lookup ON public.doctor_date_hours(center_id, work_date);
+
+CREATE TABLE public.center_date_hours (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  open_date DATE NOT NULL,
+  hours_label TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (center_id, open_date)
+);
+CREATE INDEX idx_cdh_lookup ON public.center_date_hours(center_id, open_date);
 
 -- 9. Health Records Table
 CREATE TABLE public.health_records (
@@ -276,6 +325,9 @@ ALTER TABLE public.appointments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.walk_in_queue DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctor_subscriptions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.delay_alerts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.center_closures DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.doctor_date_hours DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.center_date_hours DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.health_records DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.patient_profiles DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.refresh_sessions DISABLE ROW LEVEL SECURITY;

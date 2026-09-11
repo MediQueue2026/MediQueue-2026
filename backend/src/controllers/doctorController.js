@@ -718,12 +718,19 @@ export async function rejectDoctor(req, res, next) {
 /** Resolves the posting to read/write hours against: the one for `centerId`, or
  *  the doctor's sole assignment. Returns null when it can't be pinned down. */
 async function resolveHoursAssignment(doctorId, centerId) {
-  let q = supabase
-    .from('doctor_center_assignments')
-    .select('id, available_hours, max_appointments_per_hour, center_id')
-    .eq('doctor_id', doctorId);
-  if (centerId) q = q.eq('center_id', String(centerId));
-  const { data } = await q;
+  // `advance_booking_days` is migration 013 — retry without it on a DB that
+  // hasn't run that migration yet, so hours reads/writes still work.
+  const cols = 'id, available_hours, max_appointments_per_hour, advance_booking_days, center_id';
+  const colsLegacy = 'id, available_hours, max_appointments_per_hour, center_id';
+  const run = (select) => {
+    let q = supabase.from('doctor_center_assignments').select(select).eq('doctor_id', doctorId);
+    if (centerId) q = q.eq('center_id', String(centerId));
+    return q;
+  };
+  let { data, error } = await run(cols);
+  if (error && (error.code === 'PGRST204' || /advance_booking_days/.test(error.message || ''))) {
+    ({ data } = await run(colsLegacy));
+  }
   if (!data || data.length === 0) return null;
   if (data.length === 1) return data[0];
   return centerId ? data[0] : null;
@@ -738,9 +745,11 @@ export async function getDoctorHours(req, res, next) {
 
     let maxPerHour = 4;
     let stored = {};
+    let advanceBookingDays = 7;
     if (assignment) {
       maxPerHour = assignment.max_appointments_per_hour ?? 4;
       stored = assignment.available_hours ?? {};
+      advanceBookingDays = assignment.advance_booking_days ?? 7;
     } else {
       // Legacy fallback: hours still on the doctors row (pre multi-center split).
       const { data, error } = await supabase
@@ -780,7 +789,7 @@ export async function getDoctorHours(req, res, next) {
       };
     });
 
-    res.json({ hours: allDays, maxAppointmentsPerHour: maxPerHour });
+    res.json({ hours: allDays, maxAppointmentsPerHour: maxPerHour, advanceBookingDays });
   } catch (err) {
     next(err);
   }
@@ -792,7 +801,7 @@ export async function getDoctorHours(req, res, next) {
 export async function upsertDoctorHours(req, res, next) {
   try {
     const { doctorId } = req.params;
-    const { hours, maxAppointmentsPerHour, centerId } = req.body;
+    const { hours, maxAppointmentsPerHour, advanceBookingDays, centerId } = req.body;
 
     if (!Array.isArray(hours) || hours.length === 0) {
       return res.status(400).json({ error: 'hours array is required' });
@@ -811,27 +820,41 @@ export async function upsertDoctorHours(req, res, next) {
     if (typeof maxAppointmentsPerHour === 'number' && maxAppointmentsPerHour > 0) {
       updates.max_appointments_per_hour = maxAppointmentsPerHour;
     }
+    // migration 013 — clamp to the same 1..30 the CHECK enforces.
+    const wantsWindow = typeof advanceBookingDays === 'number' && Number.isFinite(advanceBookingDays);
+    if (wantsWindow) {
+      updates.advance_booking_days = Math.min(30, Math.max(1, Math.round(advanceBookingDays)));
+    }
+
+    /** Runs the update; on a missing `advance_booking_days` column, retries
+     *  without it so hours still save on a DB that predates migration 013. */
+    const applyUpdate = async (table, matchCol, matchVal, extra = {}) => {
+      const doUpdate = (payload) => supabase
+        .from(table)
+        .update({ ...payload, ...extra })
+        .eq(matchCol, matchVal)
+        .select('available_hours, max_appointments_per_hour')
+        .single();
+      let { data, error } = await doUpdate(updates);
+      if (error && wantsWindow && (error.code === 'PGRST204' || /advance_booking_days/.test(error.message || ''))) {
+        const { advance_booking_days: _drop, ...rest } = updates;
+        ({ data, error } = await doUpdate(rest));
+      }
+      return { data, error };
+    };
 
     const assignment = await resolveHoursAssignment(doctorId, centerId);
 
     if (assignment) {
-      const { data, error } = await supabase
-        .from('doctor_center_assignments')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('id', assignment.id)
-        .select('available_hours, max_appointments_per_hour')
-        .single();
+      const { data, error } = await applyUpdate(
+        'doctor_center_assignments', 'id', assignment.id, { updated_at: new Date().toISOString() },
+      );
       if (error) return res.status(500).json({ error: error.message });
       return res.json({ message: 'Doctor hours updated successfully', available_hours: data?.available_hours });
     }
 
     // Legacy fallback: write back to the doctors row.
-    const { data, error } = await supabase
-      .from('doctors')
-      .update(updates)
-      .eq('id', doctorId)
-      .select('available_hours, max_appointments_per_hour')
-      .single();
+    const { data, error } = await applyUpdate('doctors', 'id', doctorId);
 
     if (error) {
       return res.status(500).json({ error: error.message });
