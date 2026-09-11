@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Clock, CheckCircle2, Save, Zap } from 'lucide-react'
+import { X, Clock, CheckCircle2, Save, Zap, CalendarDays } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiDoctor, ApiDoctorHour } from '../lib/api'
 
@@ -31,6 +31,8 @@ export default function DoctorHoursModal({
 }) {
   const [hours, setHours] = useState<ApiDoctorHour[]>([])
   const [maxPerHour, setMaxPerHour] = useState(4)
+  /** How many days ahead patients may book this doctor (migration 013). */
+  const [advanceDays, setAdvanceDays] = useState(7)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(false)
@@ -46,6 +48,7 @@ export default function DoctorHoursModal({
       .then(res => {
         setHours(res.hours)
         setMaxPerHour(res.maxAppointmentsPerHour)
+        setAdvanceDays(res.advanceBookingDays || 7)
       })
       .catch(() => {
         // Fall back to 7 default rows
@@ -57,6 +60,7 @@ export default function DoctorHoursModal({
         }))
         setHours(defaults)
         setMaxPerHour(doctor.maxAppointmentsPerHour ?? 4)
+        setAdvanceDays(7)
       })
       .finally(() => setLoading(false))
   }, [isOpen, doctor, centerId])
@@ -96,6 +100,7 @@ export default function DoctorHoursModal({
           isAvailable: h.isAvailable,
         })),
         maxPerHour,
+        advanceDays,
         centerId,
       )
       setDone(true)
@@ -180,23 +185,44 @@ export default function DoctorHoursModal({
               borderRadius: 12, padding: '14px 18px',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Zap size={15} color="var(--amber, #f59e0b)" />
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>
-                  Max appointments / hour
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={maxPerHour}
-                  onChange={e => recomputeCapacities(Number(e.target.value) || 1)}
-                  style={{
-                    width: 64, height: 34, borderRadius: 8, border: '1px solid var(--border-md)',
-                    padding: '0 10px', fontSize: 14, fontWeight: 700, textAlign: 'center',
-                    background: 'rgba(255,255,255,0.8)',
-                  }}
-                />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Zap size={15} color="var(--amber, #f59e0b)" />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>
+                    Max appointments / hour
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={maxPerHour}
+                    onChange={e => recomputeCapacities(Number(e.target.value) || 1)}
+                    style={{
+                      width: 64, height: 34, borderRadius: 8, border: '1px solid var(--border-md)',
+                      padding: '0 10px', fontSize: 14, fontWeight: 700, textAlign: 'center',
+                      background: 'rgba(255,255,255,0.8)',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <CalendarDays size={15} color="var(--amber, #f59e0b)" />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>
+                    Patients can book up to
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={7}
+                    value={advanceDays}
+                    onChange={e => setAdvanceDays(Math.min(7, Math.max(1, Math.round(Number(e.target.value) || 1))))}
+                    style={{
+                      width: 56, height: 34, borderRadius: 8, border: '1px solid var(--border-md)',
+                      padding: '0 10px', fontSize: 14, fontWeight: 700, textAlign: 'center',
+                      background: 'rgba(255,255,255,0.8)',
+                    }}
+                  />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>days ahead</span>
+                </div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-3)' }}>
                 Weekly capacity:&nbsp;

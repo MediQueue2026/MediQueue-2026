@@ -12,7 +12,7 @@ import {
 
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
-import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter } from '../controllers/centerController.js';
+import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter, getCenterClosures, createCenterClosure, deleteCenterClosure, getCenterDayHours, putCenterDateHours, deleteCenterDateHours, putDoctorDateHours, deleteDoctorDateHours } from '../controllers/centerController.js';
 import { createAppointment, getAppointments, getPatientAppointments, cancelAppointment } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary, getPendingDoctors, approveDoctor, rejectDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
@@ -132,6 +132,22 @@ router.get('/queue/board', getPublicBoard);
 // A signed-in receptionist may submit a new center (goes in 'pending'); only
 // an admin creates one that's immediately 'approved'.
 router.post('/centers', authMiddleware, requireRole(['receptionist', 'admin']), createCenter);
+
+// Per-date closures (migration 012). Read is public like GET /centers so the
+// patient booking modal can grey out closed days; writing is staff-only and a
+// receptionist is limited to their own center (enforced in the controller).
+router.get('/centers/:centerId/closures', getCenterClosures);
+router.post('/centers/:centerId/closures', authMiddleware, requireRole(['receptionist', 'admin']), createCenterClosure);
+router.delete('/centers/:centerId/closures/:date', authMiddleware, requireRole(['receptionist', 'admin']), deleteCenterClosure);
+
+// Date-specific hours (migration 014). Read is public like the closures read;
+// writes are staff-only and a receptionist is limited to their own center.
+router.get('/centers/:centerId/day-hours', getCenterDayHours);
+router.put('/centers/:centerId/center-hours', authMiddleware, requireRole(['receptionist', 'admin']), putCenterDateHours);
+router.delete('/centers/:centerId/center-hours/:date', authMiddleware, requireRole(['receptionist', 'admin']), deleteCenterDateHours);
+router.put('/centers/:centerId/doctor-hours', authMiddleware, requireRole(['receptionist', 'admin']), putDoctorDateHours);
+router.delete('/centers/:centerId/doctor-hours/:doctorId/:date', authMiddleware, requireRole(['receptionist', 'admin']), deleteDoctorDateHours);
+
 router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);
 router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
 router.patch('/centers/:id/approve', authMiddleware, requireRole(['admin']), approveCenter);
