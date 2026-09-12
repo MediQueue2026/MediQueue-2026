@@ -3,7 +3,7 @@ import React from 'react'
 export function Avatar({ name, size = 32, color = '#e2f9f7', text = '#0d968d' }: {
   name: string; size?: number; color?: string; text?: string
 }) {
-  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  const initials = name.replace(/^Dr\.?\s+/i, '').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',

@@ -1015,7 +1015,7 @@ export default function AdminPanel() {
               <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, padding: 28, background: '#ffffff', borderRadius: 16 }}>
                 <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)', marginBottom: 8 }}>Reject Doctor Registration</h3>
                 <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 14 }}>
-                  Provide an optional rejection reason for Dr. <strong>{rejectingDoctor.doctorName}</strong>.
+                  Provide an optional rejection reason for <strong>{rejectingDoctor.doctorName}</strong>.
                 </p>
                 <textarea
                   className="input"
