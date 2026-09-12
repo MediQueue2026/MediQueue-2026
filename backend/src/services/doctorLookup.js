@@ -7,6 +7,60 @@ export function isUuid(str) {
 }
 
 /**
+ * Canonicalizes a receptionist-typed doctor name before it hits the DB:
+ * title-cases every word and ensures a single "Dr. " prefix, regardless of
+ * how the name was capitalized or whether "Dr"/"Dr." was already typed.
+ * e.g. "dr john DOE" / "JOHN doe" / "Dr. john doe" all become "Dr. John Doe".
+ */
+export function formatDoctorFullName(rawName) {
+  if (!rawName || typeof rawName !== 'string') return rawName;
+
+  const withoutPrefix = rawName.trim().replace(/\s+/g, ' ').replace(/^dr\.?\s*/i, '');
+  const titleCased = withoutPrefix
+    .split(' ')
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+
+  return `Dr. ${titleCased}`;
+}
+
+/**
+ * Next unused token-series letter for a medical center: 'A', 'B', 'C', … —
+ * so every doctor posted to the same center gets a distinct series without a
+ * receptionist having to pick one. Falls back to two-letter combinations
+ * ('AA', 'AB', …) in the unlikely event a center already has 26 postings.
+ *
+ * Used wherever a *new* `doctor_center_assignments` row is created; an
+ * explicit series typed by the receptionist always takes priority over this.
+ */
+export async function nextSeriesLetterForCenter(centerId) {
+  const { data } = await supabase
+    .from('doctor_center_assignments')
+    .select('series')
+    .eq('center_id', centerId);
+
+  const used = new Set(
+    (data || [])
+      .map(row => String(row.series || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+
+  for (let n = 0; n < 26; n++) {
+    const letter = String.fromCharCode(65 + n);
+    if (!used.has(letter)) return letter;
+  }
+  for (let i = 0; i < 26; i++) {
+    for (let j = 0; j < 26; j++) {
+      const letter = String.fromCharCode(65 + i) + String.fromCharCode(65 + j);
+      if (!used.has(letter)) return letter;
+    }
+  }
+  // Unreachable in practice (676 postings at one center).
+  return 'A';
+}
+
+/**
  * Resolves whatever the frontend called a "doctor id" into the real
  * `doctors` row plus the posting the caller means.
  *

@@ -1,5 +1,5 @@
 import { supabase } from '../config/supabase.js';
-import { resolveDoctor } from '../services/doctorLookup.js';
+import { resolveDoctor, nextSeriesLetterForCenter, formatDoctorFullName } from '../services/doctorLookup.js';
 import { publishDelayAlert } from '../services/delayAlertService.js';
 import { genderInitial, parseNic } from '../services/nicService.js';
 
@@ -143,9 +143,13 @@ export async function updateDoctor(req, res, next) {
           .update({ ...posting, updated_at: new Date().toISOString() })
           .eq('id', existing.id);
       } else {
+        // A brand-new posting at this center gets a unique series letter
+        // unless one was typed explicitly — it used to default to nothing,
+        // which every reader then displayed as "?".
+        const series = posting.series || await nextSeriesLetterForCenter(centerId);
         await supabase
           .from('doctor_center_assignments')
-          .insert([{ doctor_id: doctorId, center_id: centerId, approval_status: 'approved', ...posting }]);
+          .insert([{ doctor_id: doctorId, center_id: centerId, approval_status: 'approved', ...posting, series }]);
       }
     } else if (Object.keys(posting).length === 0 && typeof req.body.specialization !== 'string') {
       return res.status(400).json({ error: 'No valid fields provided for update' });
@@ -467,7 +471,9 @@ export async function createDoctor(req, res, next) {
       return res.status(400).json({ error: 'fullName and specialization are required' });
     }
 
-    const stubEmail = email || `dr.${fullName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
+    const formattedFullName = formatDoctorFullName(fullName);
+    const plainName = formattedFullName.replace(/^Dr\.\s*/, '');
+    const stubEmail = email || `dr.${plainName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
 
     let userId = null;
     const { data: existingUser } = await supabase.from('users').select('id').eq('email', stubEmail).maybeSingle();
@@ -477,7 +483,7 @@ export async function createDoctor(req, res, next) {
     } else {
       const { data: userRow, error: userErr } = await supabase
         .from('users')
-        .insert([{ email: stubEmail, full_name: fullName, phone: phone || null, role: 'doctor' }])
+        .insert([{ email: stubEmail, full_name: formattedFullName, phone: phone || null, role: 'doctor' }])
         .select('id')
         .single();
 
@@ -532,7 +538,7 @@ export async function createDoctor(req, res, next) {
         actor_name: requesterName,
         actor_role: requesterRole,
         event_type: 'center_edit',
-        action: `Submitted registration for Dr. ${fullName} at ${centerName}`,
+        action: `Submitted registration for ${formattedFullName} at ${centerName}`,
         center_name: centerName,
         status: approvalStatus,
       }]);
@@ -544,7 +550,7 @@ export async function createDoctor(req, res, next) {
         : 'Doctor created successfully',
       doctor: {
         id: doctorRow?.id,
-        name: doctorRow?.users?.full_name ?? fullName,
+        name: doctorRow?.users?.full_name ?? formattedFullName,
         dept: doctorRow?.specialization ?? specialization,
         room: doctorRow?.room_number ?? '—',
         series: doctorRow?.series ?? '?',
@@ -644,7 +650,7 @@ export async function approveDoctor(req, res, next) {
         actor_name: adminName,
         actor_role: 'admin',
         event_type: 'doctor_approved',
-        action: `Approved Dr. ${updated.users?.full_name || 'Doctor'} at ${updated.medical_centers?.name || 'Center'}`,
+        action: `Approved ${updated.users?.full_name || 'Doctor'} at ${updated.medical_centers?.name || 'Center'}`,
         center_name: updated.medical_centers?.name || 'Center',
         status: 'approved',
       }]);
@@ -695,7 +701,7 @@ export async function rejectDoctor(req, res, next) {
         actor_name: adminName,
         actor_role: 'admin',
         event_type: 'doctor_rejected',
-        action: `Rejected Dr. ${updated.users?.full_name || 'Doctor'} registration (${reason || 'No reason'})`,
+        action: `Rejected ${updated.users?.full_name || 'Doctor'} registration (${reason || 'No reason'})`,
         center_name: updated.medical_centers?.name || 'Center',
         status: 'rejected',
       }]);
