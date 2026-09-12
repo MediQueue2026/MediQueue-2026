@@ -313,10 +313,10 @@ export default function ReceptionistDesk() {
   // A receptionist must submit their official center details before using the
   // desk. Other roles never enter this flow.
   useEffect(() => {
-    if (user?.role === 'receptionist' && !user.centerId && !user.isDemo) {
+    if (user?.role === 'receptionist' && !user.centerId && !user.rejectionReason && !user.isDemo) {
       setShowRequestCenter(true)
     }
-  }, [user?.role, user?.centerId, user?.isDemo])
+  }, [user?.role, user?.centerId, user?.rejectionReason, user?.isDemo])
 
   // Keeps the counter fast for back-to-back walk-ins: whichever field is
   // needed first is already focused after a source switch or a successful issue.
@@ -327,6 +327,7 @@ export default function ReceptionistDesk() {
   }, [tokenSource, activeTab])
 
   const { selectedDoctor, current, waiting, upNext, issuedNumbers } = queue
+  const centerAccessApproved = user?.centerApprovalStatus === 'approved' || user?.isDemo || !user?.centerId
 
   // Quick-pick candidates for a printed slip number — the lowest numbers not
   // already recorded today, so the receptionist taps a number instead of typing it.
@@ -883,13 +884,13 @@ export default function ReceptionistDesk() {
         {/* Nav Tabs */}
         <div style={{ padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, paddingLeft: 8 }}>Navigation</div>
-          <button onClick={() => { setActiveTab('checkin'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'checkin' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+          <button disabled={!centerAccessApproved} onClick={() => { setActiveTab('checkin'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'checkin' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Ticket size={16} /> Issue Tokens & Queue
           </button>
-          <button onClick={() => { setActiveTab('doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+          <button disabled={!centerAccessApproved} onClick={() => { setActiveTab('doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Stethoscope size={16} /> Doctors
           </button>
-          <button onClick={() => { setActiveTab('patients'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+          <button disabled={!centerAccessApproved} onClick={() => { setActiveTab('patients'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Users size={16} /> Patients
           </button>
           <button onClick={() => { setActiveTab('schedule'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'schedule' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
@@ -1032,7 +1033,7 @@ export default function ReceptionistDesk() {
         </div>
 
         {/* CONTENT SCROLL AREA */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
 
           {/* CLINIC-WIDE STAT RIBBON — one line, so it never competes with the live queue below */}
           <div style={{ padding: '18px 24px 0', display: 'flex', gap: 34, flexWrap: 'wrap' }}>
@@ -1057,23 +1058,49 @@ export default function ReceptionistDesk() {
             </div>
           )}
 
+          {user?.centerApprovalStatus === 'pending' && (
+            <div style={{ padding: '14px 24px 0' }}>
+              <div style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12.5, fontWeight: 600,
+                color: 'var(--amber)', background: 'var(--amber-dim)', border: '1px solid var(--amber-border)',
+                borderRadius: 9, padding: '12px 14px',
+              }}>
+                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  Your medical center request is awaiting Super Admin approval. You can sign in and view this page, but queue, doctor, patient, and token actions will be available after approval.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {user?.centerApprovalStatus === 'pending' && (
+            <div style={{
+              position: 'absolute', inset: 0, top: 92, zIndex: 20,
+              background: 'rgba(248, 250, 252, 0.62)', cursor: 'not-allowed',
+            }} aria-label="Receptionist actions are disabled while approval is pending" />
+          )}
+
           {!queue.offline && !queue.loading && !queue.centerId && (
             <div style={{ padding: '14px 24px 0' }}>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600,
-                color: 'var(--crimson)', background: 'var(--crimson-dim)', border: '1px solid var(--crimson-border)',
+                color: user?.rejectionReason ? 'var(--amber)' : 'var(--crimson)',
+                background: user?.rejectionReason ? 'var(--amber-dim)' : 'var(--crimson-dim)',
+                border: user?.rejectionReason ? '1px solid var(--amber-border)' : '1px solid var(--crimson-border)',
                 borderRadius: 9, padding: '9px 14px',
               }}>
                 <AlertCircle size={14} />
                 <span style={{ flex: 1 }}>
-                  Your account isn't linked to a medical center yet, so no doctors are shown. Request a medical center to get started.
+                  {user?.rejectionReason
+                    ? <>Your previous medical center request was rejected: <strong>{user.rejectionReason}</strong>. Submit a new request with corrected details.</>
+                    : "Your account isn't linked to a medical center yet, so no doctors are shown. Request a medical center to get started."}
                 </span>
                 <button
                   onClick={() => setShowRequestCenter(true)}
                   className="btn btn-primary btn-sm"
                   style={{ flexShrink: 0, gap: 6, whiteSpace: 'nowrap' }}
                 >
-                  <Building2 size={13} /> Request Medical Center
+                  <Building2 size={13} /> {user?.rejectionReason ? 'Resubmit Request' : 'Request Medical Center'}
                 </button>
               </div>
             </div>

@@ -14,7 +14,8 @@ UPDATE public.medical_centers SET approval_status = 'approved' WHERE approval_st
 
 -- 2. Link users to their assigned medical center
 ALTER TABLE public.users
-ADD COLUMN IF NOT EXISTS center_id UUID REFERENCES public.medical_centers(id) ON DELETE SET NULL;
+ADD COLUMN IF NOT EXISTS center_id UUID REFERENCES public.medical_centers(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 
 -- 3. Add approval and tracking columns to doctors
 ALTER TABLE public.doctors

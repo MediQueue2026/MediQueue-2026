@@ -81,10 +81,12 @@ function toPublicUser(row) {
     avatarUrl: row.avatar_url ?? null,
     isActive: row.is_active !== false,
     centerId: row.center_id ?? null,
+    rejectionReason: row.rejection_reason ?? null,
+    centerApprovalStatus: row.center_approval_status ?? (row.rejection_reason ? 'rejected' : 'none'),
   };
 }
 
-const USER_COLUMNS = 'id, email, full_name, phone, role, avatar_url, is_active, password_hash';
+const USER_COLUMNS = 'id, email, full_name, phone, role, avatar_url, is_active, password_hash, rejection_reason';
 /** Adds center_id — the medical center a receptionist manages (see migration 005). */
 const USER_COLUMNS_WITH_CENTER = `${USER_COLUMNS}, center_id`;
 
@@ -144,13 +146,9 @@ async function findUserByEmail(email) {
   return data ?? null;
 }
 
-/**
- * A receptionist is the manager of exactly one medical center (see migration
- * 005). Until that center is approved by the Super Admin, they may not sign
- * in — this is what "add a center as a receptionist" is gated by.
- */
-async function assertReceptionistCenterApproved(row) {
-  if (row.role !== 'receptionist' || !row.center_id) return;
+/** Add the center's moderation state to the session without blocking login. */
+async function addReceptionistCenterStatus(row) {
+  if (row.role !== 'receptionist' || !row.center_id) return row;
 
   const { data: center } = await supabase
     .from('medical_centers')
@@ -158,16 +156,7 @@ async function assertReceptionistCenterApproved(row) {
     .eq('id', row.center_id)
     .maybeSingle();
 
-  const approvalStatus = center?.approval_status ?? 'approved';
-  if (approvalStatus === 'approved') return;
-
-  const centerName = center?.name ?? 'Your medical center';
-  throw new AuthError(
-    approvalStatus === 'rejected'
-      ? `${centerName}'s registration was rejected by the Super Admin. Contact your administrator.`
-      : `${centerName} is awaiting Super Admin approval. You'll be able to sign in once it's approved.`,
-    403,
-  );
+  return { ...row, center_approval_status: center?.approval_status ?? 'none' };
 }
 
 async function recordLoginAttempt({ userId, email, role, status, failureReason, req }) {
@@ -272,17 +261,7 @@ export async function login({ email, password }, req) {
     throw new AuthError('This account has been suspended. Contact your administrator.', 403);
   }
 
-  try {
-    await assertReceptionistCenterApproved(row);
-  } catch (err) {
-    await recordLoginAttempt({
-      userId: row.id, email: normalisedEmail, role: row.role,
-      status: 'failed', failureReason: 'Center not approved', req,
-    });
-    throw err;
-  }
-
-  const user = toPublicUser(row);
+  const user = toPublicUser(await addReceptionistCenterStatus(row));
   await ensurePatientProfile(user);
   const tokens = await issueTokens(user, req);
 
@@ -514,17 +493,10 @@ export async function refresh(refreshToken, req) {
     throw new AuthError('This account has been suspended.', 403);
   }
 
-  try {
-    await assertReceptionistCenterApproved(row);
-  } catch (err) {
-    await supabase.from('refresh_sessions').delete().eq('user_id', row.id);
-    throw err;
-  }
-
   // Rotate: burn the used row, then issue a fresh pair.
   await supabase.from('refresh_sessions').delete().eq('id', session.id);
 
-  const user = toPublicUser(row);
+  const user = toPublicUser(await addReceptionistCenterStatus(row));
   const tokens = await issueTokens(user, req);
   return { user, ...tokens };
 }

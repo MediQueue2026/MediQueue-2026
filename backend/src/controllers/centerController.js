@@ -250,7 +250,10 @@ export async function createCenter(req, res, next) {
     // its manager (already confirmed above that they don't manage one yet).
     if (!isAdmin && req.user?.id && createdCenter?.id) {
       try {
-        await supabase.from('users').update({ center_id: createdCenter.id }).eq('id', req.user.id);
+        await supabase.from('users').update({
+          center_id: createdCenter.id,
+          rejection_reason: null,
+        }).eq('id', req.user.id);
       } catch (_) {
         // Non-critical — worst case the receptionist links manually via re-request.
       }
@@ -1018,16 +1021,19 @@ export async function rejectCenter(req, res, next) {
       }]);
     } catch (_) {}
 
-    // Remove the receptionist account created for this rejected registration
-    // so the same email can register again after correcting the details.
-    const { error: userDeleteError } = await supabase
+    // Keep the receptionist account so they can see the rejection reason and
+    // submit corrected center details without registering again.
+    const { error: userUpdateError } = await supabase
       .from('users')
-      .delete()
+      .update({
+        center_id: null,
+        rejection_reason: reason || 'Rejected by Admin',
+      })
       .eq('center_id', id)
       .eq('role', 'receptionist');
 
-    if (userDeleteError) {
-      return res.status(500).json({ error: userDeleteError.message });
+    if (userUpdateError) {
+      return res.status(500).json({ error: userUpdateError.message });
     }
 
     const { error: deleteError } = await supabase

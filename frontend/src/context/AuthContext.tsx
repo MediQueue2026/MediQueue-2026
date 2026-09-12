@@ -37,6 +37,9 @@ export interface User {
   role: UserRole
   /** The medical center a receptionist manages — null until assigned. */
   centerId?: string | null
+  /** Reason provided by an admin when the receptionist's center request was rejected. */
+  rejectionReason?: string | null
+  centerApprovalStatus?: 'none' | 'pending' | 'approved' | 'rejected'
   /** True when this session came from the offline demo fallback. */
   isDemo?: boolean
 }
@@ -70,7 +73,15 @@ const DEMO_USERS: Record<Exclude<UserRole, null>, { id: string; name: string; em
 }
 
 function fromApiUser(u: ApiUser): User {
-  return { id: u.id, name: u.fullName, email: u.email, role: u.role, centerId: u.centerId ?? null }
+  return {
+    id: u.id,
+    name: u.fullName,
+    email: u.email,
+    role: u.role,
+    centerId: u.centerId ?? null,
+    rejectionReason: u.rejectionReason ?? null,
+    centerApprovalStatus: u.centerApprovalStatus ?? (u.rejectionReason ? 'rejected' : 'none'),
+  }
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

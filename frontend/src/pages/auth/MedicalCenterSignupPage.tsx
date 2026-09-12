@@ -8,7 +8,7 @@ const MIN_PASSWORD_LENGTH = 8
 
 export default function MedicalCenterSignupPage() {
   const navigate = useNavigate()
-  const { register, logout } = useAuth()
+  const { register } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -31,11 +31,7 @@ export default function MedicalCenterSignupPage() {
     try {
       const name = email.trim().split('@')[0] || 'Medical Center Receptionist'
       await register({ email: email.trim(), password, fullName: name, role: 'receptionist' })
-      await logout()
-      navigate('/staff/login/receptionist', {
-        replace: true,
-        state: { message: 'Account created. Sign in to complete your medical center registration.' },
-      })
+      navigate('/receptionist', { replace: true })
     } catch (err) {
       if (err instanceof ApiOfflineError) setError('Cannot reach the MediQueue server. Start the backend and try again.')
       else setError(err instanceof ApiError ? err.message : 'Could not create your account.')
