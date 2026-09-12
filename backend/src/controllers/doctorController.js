@@ -475,15 +475,26 @@ export async function createDoctor(req, res, next) {
     const plainName = formattedFullName.replace(/^Dr\.\s*/, '');
     const stubEmail = email || `dr.${plainName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
 
+    const initialPassword = req.body.password || `DocPass${Math.floor(1000 + Math.random() * 9000)}!`;
+
     let userId = null;
-    const { data: existingUser } = await supabase.from('users').select('id').eq('email', stubEmail).maybeSingle();
+    const { data: existingUser } = await supabase.from('users').select('id, password_hash').eq('email', stubEmail).maybeSingle();
 
     if (existingUser) {
       userId = existingUser.id;
+      if (!existingUser.password_hash || req.body.password) {
+        await supabase.from('users').update({ password_hash: initialPassword }).eq('id', existingUser.id);
+      }
     } else {
       const { data: userRow, error: userErr } = await supabase
         .from('users')
-        .insert([{ email: stubEmail, full_name: formattedFullName, phone: phone || null, role: 'doctor' }])
+        .insert([{
+          email: stubEmail,
+          full_name: formattedFullName,
+          phone: phone || null,
+          role: 'doctor',
+          password_hash: initialPassword // Plain-text password for dev/testing
+        }])
         .select('id')
         .single();
 
@@ -548,6 +559,11 @@ export async function createDoctor(req, res, next) {
       message: approvalStatus === 'pending'
         ? 'Doctor registration submitted to Super Admin for approval'
         : 'Doctor created successfully',
+      credentials: {
+        email: stubEmail,
+        password: initialPassword,
+        phone: phone || null,
+      },
       doctor: {
         id: doctorRow?.id,
         name: doctorRow?.users?.full_name ?? formattedFullName,
