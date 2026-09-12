@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase.js';
 import bcrypt from 'bcryptjs';
 import { notificationProvider } from '../config/notification.js';
+import { nextSeriesLetterForCenter, formatDoctorFullName } from '../services/doctorLookup.js';
 
 // In-memory fallback array in case DB table is not yet created or running in offline mode
 const MEMORY_DOCTOR_REQUESTS = [];
@@ -46,7 +47,7 @@ export async function createDoctorRequest(req, res, next) {
       center_id: centerId,
       center_name: finalCenterName || 'Medical Center',
       doctor_id: doctorId || null,
-      doctor_name: doctorName,
+      doctor_name: formatDoctorFullName(doctorName),
       email: email || null,
       phone: phone || null,
       specialization,
@@ -158,7 +159,10 @@ export async function approveDoctorRequest(req, res, next) {
       doctorRow = data;
     } else {
       // REGISTER_NEW doctor
-      emailToUse = reqRecord.email || `dr.${reqRecord.doctor_name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
+      // Re-normalize in case this request predates the Dr./title-case formatting.
+      const doctorFullName = formatDoctorFullName(reqRecord.doctor_name);
+      const plainName = doctorFullName.replace(/^Dr\.\s*/, '');
+      emailToUse = reqRecord.email || `dr.${plainName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
       let userId = null;
 
       const { data: existingUser } = await supabase
@@ -174,7 +178,7 @@ export async function approveDoctorRequest(req, res, next) {
           .from('users')
           .insert([{
             email: emailToUse,
-            full_name: reqRecord.doctor_name,
+            full_name: doctorFullName,
             phone: reqRecord.phone || null,
             role: 'doctor',
             password_hash: passwordHash
@@ -187,7 +191,7 @@ export async function approveDoctorRequest(req, res, next) {
           if (reqRecord.phone) {
             await notificationProvider.sendSMS(
               reqRecord.phone,
-              `Welcome Dr. ${reqRecord.doctor_name}! Your MediQueue account is approved. Email: ${emailToUse} | Password: ${generatedPassword}. Login: Staff Portal.`
+              `Welcome ${doctorFullName}! Your MediQueue account is approved. Email: ${emailToUse} | Password: ${generatedPassword}. Login: Staff Portal.`
             );
           }
         }
@@ -208,9 +212,8 @@ export async function approveDoctorRequest(req, res, next) {
     // Upsert the per-center posting.
     let assignmentRow = null;
     if (doctorId && reqRecord.center_id) {
-      const postingFields = {
+      const basePosting = {
         room_number: reqRecord.room_number || null,
-        series: reqRecord.series || null,
         max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
         current_status: 'active',
         approval_status: 'approved',
@@ -224,6 +227,9 @@ export async function approveDoctorRequest(req, res, next) {
         .maybeSingle();
 
       if (existingAssignment) {
+        // Only touch series if this request actually named one — otherwise a
+        // re-approval with a blank series field would wipe out an existing one.
+        const postingFields = reqRecord.series ? { ...basePosting, series: reqRecord.series } : basePosting;
         const { data } = await supabase
           .from('doctor_center_assignments')
           .update(postingFields)
@@ -232,9 +238,13 @@ export async function approveDoctorRequest(req, res, next) {
           .maybeSingle();
         assignmentRow = data;
       } else {
+        // A brand-new posting at this center gets a unique series letter
+        // unless the receptionist already typed one — it used to default to
+        // null, which every reader then displayed as "?".
+        const series = reqRecord.series || await nextSeriesLetterForCenter(reqRecord.center_id);
         const { data } = await supabase
           .from('doctor_center_assignments')
-          .insert([{ doctor_id: doctorId, center_id: reqRecord.center_id, ...postingFields }])
+          .insert([{ doctor_id: doctorId, center_id: reqRecord.center_id, series, ...basePosting }])
           .select('*, medical_centers(name)')
           .maybeSingle();
         assignmentRow = data;
@@ -265,7 +275,7 @@ export async function approveDoctorRequest(req, res, next) {
         actor_name: adminName,
         actor_role: 'admin',
         event_type: 'doctor_approved',
-        action: `Approved request: Added Dr. ${reqRecord.doctor_name} to ${reqRecord.center_name}`,
+        action: `Approved request: Added ${formatDoctorFullName(reqRecord.doctor_name)} to ${reqRecord.center_name}`,
         center_name: reqRecord.center_name,
         status: 'approved',
       }]);
@@ -351,7 +361,7 @@ export async function rejectDoctorRequest(req, res, next) {
         actor_name: adminName,
         actor_role: 'admin',
         event_type: 'doctor_rejected',
-        action: `Rejected request for Dr. ${reqRecord.doctor_name} (${reason || 'No reason provided'})`,
+        action: `Rejected request for ${formatDoctorFullName(reqRecord.doctor_name)} (${reason || 'No reason provided'})`,
         center_name: reqRecord.center_name,
         status: 'rejected',
       }]);

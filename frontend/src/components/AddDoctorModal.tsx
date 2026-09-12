@@ -420,7 +420,7 @@ export default function AddDoctorModal({
                 <label style={labelStyle}>Token Series Letter (A–Z)</label>
                 <input
                   className="input"
-                  placeholder="e.g. A"
+                  placeholder="Auto-assigned if left blank"
                   value={series}
                   maxLength={1}
                   onChange={e => setSeries(e.target.value.toUpperCase())}
