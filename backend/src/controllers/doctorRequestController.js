@@ -168,7 +168,8 @@ export async function approveDoctorRequest(req, res, next) {
         userId = existingUser.id;
       } else {
         generatedPassword = `DocPass${Math.floor(1000 + Math.random() * 9000)}!`;
-        const passwordHash = await bcrypt.hash(generatedPassword, 12);
+        // Hashing temporarily disabled for development & testing
+        const passwordHash = generatedPassword;
         const { data: newUser, error: userErr } = await supabase
           .from('users')
           .insert([{
