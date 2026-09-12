@@ -41,6 +41,7 @@ CREATE TABLE public.users (
   phone TEXT,
   role TEXT CHECK (role IN ('patient', 'doctor', 'receptionist', 'admin')) NOT NULL DEFAULT 'patient',
   center_id UUID REFERENCES public.medical_centers(id) ON DELETE SET NULL,
+  rejection_reason TEXT,
   password_hash TEXT,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   avatar_url TEXT,

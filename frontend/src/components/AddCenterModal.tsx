@@ -1,12 +1,36 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { X, Building2, Plus, CheckCircle2, ShieldAlert } from 'lucide-react'
+import { X, Building2, Plus, CheckCircle2, ShieldAlert, LocateFixed } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiCenter } from '../lib/api'
 import ServiceMultiSelect from './ServiceMultiSelect'
 
-function LocationPickerMap({ lat, lng, onChange }: { lat: number; lng: number; onChange: (lat: number, lng: number) => void }) {
+const SRI_LANKAN_PROVINCES: Record<string, string[]> = {
+  'Western Province': ['Colombo', 'Gampaha', 'Kalutara'],
+  'Central Province': ['Kandy', 'Matale', 'Nuwara Eliya'],
+  'Southern Province': ['Galle', 'Matara', 'Hambantota'],
+  'Northern Province': ['Jaffna', 'Kilinochchi', 'Mannar', 'Mullaitivu', 'Vavuniya'],
+  'Eastern Province': ['Ampara', 'Batticaloa', 'Trincomalee'],
+  'North Western Province': ['Kurunegala', 'Puttalam'],
+  'North Central Province': ['Anuradhapura', 'Polonnaruwa'],
+  'Uva Province': ['Badulla', 'Monaragala'],
+  'Sabaragamuwa Province': ['Kegalle', 'Ratnapura'],
+}
+
+function LocationPickerMap({
+  lat,
+  lng,
+  onChange,
+  onTrackLocation,
+  trackingLocation,
+}: {
+  lat: number
+  lng: number
+  onChange: (lat: number, lng: number) => void
+  onTrackLocation: () => void
+  trackingLocation: boolean
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const markerRef = useRef<L.Marker | null>(null)
@@ -66,8 +90,18 @@ function LocationPickerMap({ lat, lng, onChange }: { lat: number; lng: number; o
   return (
     <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-md)', marginTop: 8 }}>
       <div ref={containerRef} style={{ height: 160, width: '100%', zIndex: 1 }} />
-      <div style={{ background: '#f8fafc', padding: '6px 12px', fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ background: '#f8fafc', padding: '7px 12px', fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
         <span>📍 <strong>Click map or drag pin</strong> to pick clinic location</span>
+        <button
+          type="button"
+          onClick={onTrackLocation}
+          disabled={trackingLocation}
+          className="btn btn-ghost btn-sm"
+          style={{ gap: 5, padding: '5px 8px', whiteSpace: 'nowrap', opacity: trackingLocation ? 0.65 : 1 }}
+        >
+          <LocateFixed size={13} />
+          {trackingLocation ? 'Locating…' : 'Use my location'}
+        </button>
         <span style={{ fontWeight: 700, color: '#0ea5e9' }}>{lat}, {lng}</span>
       </div>
     </div>
@@ -118,20 +152,35 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
   const [documentFile, setDocumentFile] = useState<File | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [trackingLocation, setTrackingLocation] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const cityCoordsMap: Record<string, { lat: number; lng: number }> = {
     'colombo': { lat: 6.9271, lng: 79.8612 },
+    'kalutara': { lat: 6.5854, lng: 79.9607 },
     'kandy': { lat: 7.2906, lng: 80.6337 },
+    'matale': { lat: 7.4675, lng: 80.6234 },
+    'nuwara eliya': { lat: 6.9497, lng: 80.7891 },
     'galle': { lat: 6.0535, lng: 80.2210 },
+    'hambantota': { lat: 6.1429, lng: 81.1212 },
     'jaffna': { lat: 9.6615, lng: 80.0255 },
+    'kilinochchi': { lat: 9.3803, lng: 80.3770 },
+    'mannar': { lat: 8.9810, lng: 79.9044 },
+    'mullaitivu': { lat: 9.2671, lng: 80.8128 },
+    'vavuniya': { lat: 8.7514, lng: 80.4971 },
+    'ampara': { lat: 7.2965, lng: 81.6820 },
     'negombo': { lat: 7.2008, lng: 79.8737 },
     'kurunegala': { lat: 7.4863, lng: 80.3647 },
+    'puttalam': { lat: 8.0362, lng: 79.8283 },
     'matara': { lat: 5.9549, lng: 80.5550 },
     'gampaha': { lat: 7.0840, lng: 79.9925 },
     'batticaloa': { lat: 7.7310, lng: 81.6747 },
     'trincomalee': { lat: 8.5874, lng: 81.2152 },
     'anuradhapura': { lat: 8.3114, lng: 80.4037 },
+    'polonnaruwa': { lat: 7.9403, lng: 81.0188 },
+    'badulla': { lat: 6.9934, lng: 81.0550 },
+    'monaragala': { lat: 6.8728, lng: 81.3507 },
+    'kegalle': { lat: 7.2513, lng: 80.3464 },
     'ratnapura': { lat: 6.6828, lng: 80.4016 },
   }
 
@@ -142,6 +191,110 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
       setLatitude(cityCoordsMap[matchedKey].lat.toString())
       setLongitude(cityCoordsMap[matchedKey].lng.toString())
     }
+  }
+
+  const handleProvinceChange = (val: string) => {
+    setProvince(val)
+    setCity('')
+  }
+
+  const handleTrackLocation = () => {
+    if (!navigator.geolocation) {
+      setError('Location tracking is not supported by this browser.')
+      return
+    }
+
+    setError(null)
+    setTrackingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      async position => {
+        const nextLat = Number(position.coords.latitude.toFixed(4))
+        const nextLng = Number(position.coords.longitude.toFixed(4))
+        setLatitude(nextLat.toString())
+        setLongitude(nextLng.toString())
+
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${nextLat}&lon=${nextLng}&zoom=10&addressdetails=1`,
+            { headers: { 'Accept-Language': 'en' } },
+          )
+          if (!response.ok) throw new Error('Location details could not be loaded.')
+
+          const data = await response.json() as {
+            address?: {
+              state?: string
+              province?: string
+              city?: string
+              city_district?: string
+              state_district?: string
+              district?: string
+              town?: string
+              village?: string
+              suburb?: string
+              municipality?: string
+              county?: string
+            }
+          }
+          const location = data.address
+          const addressText = Object.values(location ?? {}).join(' ').toLowerCase()
+          const provinceName = Object.keys(SRI_LANKAN_PROVINCES).find(name => {
+            const provinceKey = name.toLowerCase().replace(' province', '')
+            return addressText.includes(name.toLowerCase()) || addressText.includes(provinceKey)
+          })
+          const selectedProvince = provinceName ?? (province && SRI_LANKAN_PROVINCES[province] ? province : undefined)
+          const citySources = [
+            location?.city,
+            location?.city_district,
+            location?.state_district,
+            location?.district,
+            location?.town,
+            location?.municipality,
+            location?.village,
+            location?.county,
+            location?.suburb,
+          ].filter(Boolean).map(value => value!.toLowerCase())
+          const matchingCity = selectedProvince
+            ? SRI_LANKAN_PROVINCES[selectedProvince].find(name => {
+              const cityKey = name.toLowerCase()
+              return citySources.some(source => source.includes(cityKey) || cityKey.includes(source.replace(/\s+district$/i, '')))
+            })
+            : undefined
+
+          // GPS often resolves to a municipality or suburb rather than the
+          // district name used by the form, so use the nearest district center.
+          const nearestCity = selectedProvince && !matchingCity
+            ? SRI_LANKAN_PROVINCES[selectedProvince]
+              .map(name => {
+                const coords = cityCoordsMap[name.toLowerCase()]
+                if (!coords) return null
+                return { name, distance: Math.hypot(coords.lat - nextLat, coords.lng - nextLng) }
+              })
+              .filter((candidate): candidate is { name: string; distance: number } => candidate !== null)
+              .sort((a, b) => a.distance - b.distance)[0]
+            : undefined
+
+          if (selectedProvince) setProvince(selectedProvince)
+          if (matchingCity) setCity(matchingCity)
+          else if (nearestCity && nearestCity.distance < 0.75) setCity(nearestCity.name)
+          else if (selectedProvince) setCity('')
+          if (!selectedProvince || (!matchingCity && (!nearestCity || nearestCity.distance >= 0.75))) {
+            setError('Location found, but the province or city could not be matched. Please select them manually.')
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Location found, but address details could not be loaded.')
+        } finally {
+          setTrackingLocation(false)
+        }
+      },
+      geolocationError => {
+        setTrackingLocation(false)
+        const message = geolocationError.code === geolocationError.PERMISSION_DENIED
+          ? 'Location permission was denied. Allow access and try again.'
+          : 'Could not determine your current location. Please try again.'
+        setError(message)
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    )
   }
 
   if (!isOpen) return null
@@ -212,6 +365,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         setStatus('operational')
         setRequestComment('')
         setDocumentFile(null)
+        setTrackingLocation(false)
         onClose()
       }, 800)
     } catch (err) {
@@ -342,18 +496,34 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                     </select>
                   </div>
                 </div>
+
+                <LocationPickerMap
+                  lat={Number(latitude) || 6.9271}
+                  lng={Number(longitude) || 79.8612}
+                  trackingLocation={trackingLocation}
+                  onTrackLocation={handleTrackLocation}
+                  onChange={(nLat, nLng) => {
+                    setLatitude(nLat.toString())
+                    setLongitude(nLng.toString())
+                  }}
+                />
+
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
                     Province
                   </label>
-                  <input
+                  <select
                     required
                     className="input"
-                    placeholder="e.g. Western Province"
                     value={province}
-                    onChange={e => setProvince(e.target.value)}
-                    style={{ height: 44, fontSize: 14 }}
-                  />
+                    onChange={e => handleProvinceChange(e.target.value)}
+                    style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
+                  >
+                    <option value="">Select province</option>
+                    {Object.keys(SRI_LANKAN_PROVINCES).map(provinceName => (
+                      <option key={provinceName} value={provinceName}>{provinceName}</option>
+                    ))}
+                  </select>
                 </div>
               </>
             )}
@@ -363,14 +533,30 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
                   City / District
                 </label>
-                <input
-                  required
-                  className="input"
-                  placeholder="e.g. Colombo 07"
-                  value={city}
-                  onChange={e => handleCityChange(e.target.value)}
-                  style={{ height: 44, fontSize: 14 }}
-                />
+                {isRequest ? (
+                  <select
+                    required
+                    className="input"
+                    value={city}
+                    disabled={!province}
+                    onChange={e => handleCityChange(e.target.value)}
+                    style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff', opacity: province ? 1 : 0.65 }}
+                  >
+                    <option value="">{province ? 'Select city / district' : 'Select a province first'}</option>
+                    {(SRI_LANKAN_PROVINCES[province] ?? []).map(cityName => (
+                      <option key={cityName} value={cityName}>{cityName}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    required
+                    className="input"
+                    placeholder="e.g. Colombo 07"
+                    value={city}
+                    onChange={e => handleCityChange(e.target.value)}
+                    style={{ height: 44, fontSize: 14 }}
+                  />
+                )}
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
@@ -417,15 +603,6 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                 />
               </div>
             </div>
-
-            <LocationPickerMap
-              lat={Number(latitude) || 6.9271}
-              lng={Number(longitude) || 79.8612}
-              onChange={(nLat, nLng) => {
-                setLatitude(nLat.toString())
-                setLongitude(nLng.toString())
-              }}
-            />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>

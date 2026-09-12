@@ -157,6 +157,9 @@ export interface ApiUser {
   createdAt?: string | null
   /** The medical center this receptionist manages — null until they've requested/been assigned one. */
   centerId?: string | null
+  /** Reason provided by an admin when the receptionist's center request was rejected. */
+  rejectionReason?: string | null
+  centerApprovalStatus?: 'none' | 'pending' | 'approved' | 'rejected'
 }
 
 export interface AuthSessionResponse {
