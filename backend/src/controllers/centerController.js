@@ -433,7 +433,8 @@ export async function approveCenter(req, res, next) {
 
         if (!existingUser) {
           const initialPassword = `ClinicPass${Math.floor(1000 + Math.random() * 9000)}!`;
-          const passwordHash = await bcrypt.hash(initialPassword, 12);
+          // Hashing temporarily disabled for development & testing
+          const passwordHash = initialPassword;
           const { data: newUser } = await supabase
             .from('users')
             .insert([{

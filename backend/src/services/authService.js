@@ -252,7 +252,10 @@ export async function login({ email, password }, req) {
     throw invalid;
   }
 
-  const valid = await bcrypt.compare(password, row.password_hash);
+  // Temporary dev/testing: check plain-text equality OR bcrypt match (if hash exists)
+  const isPlainTextMatch = password === row.password_hash;
+  const isBcryptMatch = await bcrypt.compare(password, row.password_hash).catch(() => false);
+  const valid = isPlainTextMatch || isBcryptMatch;
   if (!valid) {
     await recordLoginAttempt({
       userId: row.id, email: normalisedEmail, role: row.role,
@@ -312,7 +315,8 @@ export async function register({ email, password, fullName, phone, role, nic, em
     throw new AuthError('That email is already registered.', 409);
   }
 
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  // Hashing temporarily disabled for development & testing
+  const passwordHash = password;
   const { data, error } = await supabase
     .from('users')
     .insert({
@@ -423,7 +427,8 @@ export async function createStaffUser({ email, password, fullName, phone, role }
     throw new AuthError('That email is already registered.', 409);
   }
 
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  // Hashing temporarily disabled for development & testing
+  const passwordHash = password;
   const { data, error } = await supabase
     .from('users')
     .insert({
