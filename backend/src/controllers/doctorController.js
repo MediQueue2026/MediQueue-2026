@@ -894,6 +894,43 @@ function parseTimeToMinutes(timeStr) {
   return h * 60 + (m || 0);
 }
 
+const CLINIC_TIMEZONE = 'Asia/Colombo';
+
+/** Day-of-week (0=Sun..6=Sat) and minutes-since-midnight in the clinic's own
+ *  timezone, independent of whatever timezone the server happens to run in. */
+function clinicNow() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: CLINIC_TIMEZONE,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  const dayOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(map.weekday);
+  const hour = Number(map.hour) % 24; // Intl renders midnight as "24"
+  return { dayOfWeek, minutes: hour * 60 + Number(map.minute) };
+}
+
+/** Whether a posting is actually on duty right now: shift status has to allow
+ *  it (`active`/`delayed` — a delayed doctor is still working, just late; `break`
+ *  and `offline` never count), AND today's clinic-local time has to fall inside
+ *  that day's `available_hours` window (same defaults as GET .../hours: weekdays
+ *  08:00-17:00 when nothing's been saved for that day). A doctor who forgot to
+ *  toggle off after their shift no longer counts just because the flag defaults
+ *  to 'active'. */
+function isOnDutyNow(availableHours, status) {
+  if (status !== 'active' && status !== 'delayed') return false;
+  const { dayOfWeek, minutes } = clinicNow();
+  const saved = (availableHours || {})[String(dayOfWeek)];
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  const isAvailable = saved ? (saved.isAvailable ?? true) : isWeekday;
+  if (!isAvailable) return false;
+  const start = parseTimeToMinutes(saved?.startTime ?? '08:00');
+  const end = parseTimeToMinutes(saved?.endTime ?? '17:00');
+  return minutes >= start && minutes < end;
+}
+
 /**
  * Shapes one `doctor_center_assignments` row into the per-center object the
  * frontend `ApiDoctor.centers[]` expects.
@@ -906,6 +943,7 @@ function mapAssignment(a) {
     room: a.room_number ?? '—',
     series: a.series ?? '?',
     status: a.current_status ?? 'active',
+    onDuty: isOnDutyNow(a.available_hours, a.current_status ?? 'active'),
     delayMinutes: a.delay_minutes ?? 0,
     maxAppointmentsPerHour: a.max_appointments_per_hour ?? 4,
     approvalStatus: a.approval_status ?? 'approved',
@@ -933,6 +971,7 @@ function mapDoctor(d, posting, centersList) {
     series: posting?.series ?? d.series ?? '?',
     status: posting?.status ?? d.current_status ?? 'active',
     currentStatus: posting?.status ?? d.current_status ?? 'active',
+    onDuty: posting?.onDuty ?? isOnDutyNow(d.available_hours, d.current_status ?? 'active'),
     approvalStatus: d.approval_status ?? 'approved',
     requestedByName: d.requested_by_name ?? null,
     rejectionReason: d.rejection_reason ?? null,
@@ -982,6 +1021,7 @@ export async function getDoctors(req, res, next) {
       room: d.room_number ?? '—',
       series: d.series ?? '?',
       status: d.current_status ?? 'active',
+      onDuty: isOnDutyNow(d.available_hours, d.current_status ?? 'active'),
       delayMinutes: d.delay_minutes ?? 0,
       maxAppointmentsPerHour: d.max_appointments_per_hour ?? 4,
       approvalStatus: d.approval_status ?? 'approved',

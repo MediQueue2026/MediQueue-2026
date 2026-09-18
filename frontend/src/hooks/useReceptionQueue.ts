@@ -38,6 +38,7 @@ function fromApiDoctor(d: ApiDoctor): ReceptionDoctor {
     room: d.room,
     series: d.series,
     status: d.status,
+    onDuty: d.onDuty,
     avgConsultMinutes: d.avgConsultMinutes,
     maxAppointmentsPerHour: d.maxAppointmentsPerHour,
     delayMinutes: (d as ApiDoctor & { delayMinutes?: number }).delayMinutes ?? 0,

@@ -68,18 +68,18 @@ export async function getPublicBoard(req, res, next) {
     const { data: queueRows, error } = await supabase
       .from('walk_in_queue')
       .select('*, doctors(specialization, room_number, series, center_id, user_id, medical_centers(name), users(full_name))')
-      .or(`queue_date.eq.${date},status.in.(waiting,called,in_progress)`)
+      .eq('queue_date', date)
       .order('queue_number', { ascending: true });
 
     if (error && error.code === TABLE_MISSING) {
       return res.json({ doctors: [], board: [], migrationPending: true });
     }
 
-    // 2. Query online appointments
+    // 2. Query online appointments for today only
     const { data: aptRows } = await supabase
       .from('appointments')
       .select('*, doctors(specialization, room_number, series, center_id, user_id, medical_centers(name), users(full_name)), users:patient_id(full_name)')
-      .or(`appointment_date.eq.${date},status.eq.booked`);
+      .eq('appointment_date', date);
 
     // 3. Fetch all registered doctors
     const { data: doctorsData } = await supabase
@@ -218,11 +218,13 @@ export async function getQueue(req, res, next) {
     // shows an independent queue per desk.
     const centerFilter = req.query.centerId ? String(req.query.centerId) : null;
 
-    // Query walk-in tokens for today OR active/cancelled/left tokens
+    // Query walk-in tokens for today only. Tokens are always created with
+    // today's queue_date, so scoping strictly to `date` is what keeps stale
+    // (e.g. never-completed) tokens from prior days off the desk.
     let walkinQuery = supabase
       .from('walk_in_queue')
       .select('*, doctors(series, user_id)')
-      .or(`queue_date.eq.${date},status.in.(waiting,called,in_progress,cancelled,left)`)
+      .eq('queue_date', date)
       .order('queue_number', { ascending: true });
     if (centerFilter) walkinQuery = walkinQuery.eq('center_id', centerFilter);
     const { data: queueData, error } = await walkinQuery;
