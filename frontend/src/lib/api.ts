@@ -157,6 +157,9 @@ export interface ApiUser {
   createdAt?: string | null
   /** The medical center this receptionist manages — null until they've requested/been assigned one. */
   centerId?: string | null
+  /** Reason provided by an admin when the receptionist's center request was rejected. */
+  rejectionReason?: string | null
+  centerApprovalStatus?: 'none' | 'pending' | 'approved' | 'rejected'
 }
 
 export interface AuthSessionResponse {
@@ -173,6 +176,9 @@ export interface ApiDoctorCenter {
   room: string
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
+  /** Shift status AND today's available_hours window both say this doctor is
+   *  working right now — not just that the shift flag defaults to 'active'. */
+  onDuty?: boolean
   delayMinutes?: number
   maxAppointmentsPerHour?: number
   approvalStatus?: 'pending' | 'approved' | 'rejected'
@@ -185,6 +191,7 @@ export interface ApiDoctor {
   room: string
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
+  onDuty?: boolean
   approvalStatus?: 'pending' | 'approved' | 'rejected'
   requestedByName?: string | null
   rejectionReason?: string | null

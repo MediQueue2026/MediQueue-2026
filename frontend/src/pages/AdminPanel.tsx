@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 
 import {
@@ -1269,7 +1270,7 @@ export default function AdminPanel() {
 
               {/* Center Request Rejection Modal */}
               {rejectingCenterRequest && (
-                <div style={{
+                createPortal(<div style={{
                   position: 'fixed', inset: 0, zIndex: 10000,
                   background: 'rgba(6, 35, 33, 0.65)', backdropFilter: 'blur(10px)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
@@ -1293,7 +1294,7 @@ export default function AdminPanel() {
                       </button>
                     </div>
                   </div>
-                </div>
+                </div>, document.body)
               )}
 
               {centersLoading && (
