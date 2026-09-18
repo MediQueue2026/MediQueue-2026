@@ -16,7 +16,7 @@ import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
   STATUS_BADGE, STATUS_LABEL, currentFor, entryToken, fmtTime, formatToken,
-  averageWaitMinutes, minutesSince, validateNic, validatePhone, waitingFor
+  minutesSince, validateNic, validatePhone, waitingFor
 } from '../lib/receptionQueue'
 import type { QueueEntry, TokenSource } from '../lib/receptionQueue'
 import { api, type ApiAppointmentRow, type ApiCenterClosure, type ApiCenterDateHours, type ApiDoctorDateHours, type ApiDoctor } from '../lib/api'
@@ -342,12 +342,7 @@ export default function ReceptionistDesk() {
 
   // Clinic-wide numbers for the header strip.
   const issuedToday = queue.entries.length
-  const waitingInLobby = useMemo(
-    () => queue.entries.filter(e => e.status === 'waiting').length,
-    [queue.entries],
-  )
-  const avgWait = useMemo(() => averageWaitMinutes(queue.entries, queue.doctors), [queue.entries, queue.doctors])
-  const activeDoctors = useMemo(() => queue.doctors.filter(d => d.status === 'active').length, [queue.doctors])
+  const activeDoctors = useMemo(() => queue.doctors.filter(d => d.onDuty).length, [queue.doctors])
 
   const resetForm = () => {
     setFormName(''); setFormNic(''); setFormPhone(''); setPhysicalToken('')
@@ -1038,8 +1033,6 @@ export default function ReceptionistDesk() {
           {/* CLINIC-WIDE STAT RIBBON — one line, so it never competes with the live queue below */}
           <div style={{ padding: '18px 24px 0', display: 'flex', gap: 34, flexWrap: 'wrap' }}>
             <StatPill icon={<Ticket size={15} />} label="Issued Today" value={String(issuedToday)} />
-            <StatPill icon={<Users size={15} />} label="Waiting Clinic-wide" value={String(waitingInLobby)} accent="var(--amber)" />
-            <StatPill icon={<Clock size={15} />} label="Avg. Wait" value={`${avgWait} min`} accent="var(--blue)" />
             <StatPill icon={<Activity size={15} />} label="Doctors On Duty" value={`${activeDoctors}/${queue.doctors.length}`} accent="#10B981" />
           </div>
 

@@ -55,6 +55,9 @@ export interface ReceptionDoctor {
   /** Token series this doctor issues under at this center. */
   series: string
   status: 'active' | 'break' | 'delayed' | 'offline'
+  /** `status` allows it AND today's available_hours window says they're working
+   *  right now — not just that the shift flag defaults to 'active'. */
+  onDuty?: boolean
   /** Drives the estimated-wait projection. */
   avgConsultMinutes: number
   /** DB: doctor_center_assignments.max_appointments_per_hour */
