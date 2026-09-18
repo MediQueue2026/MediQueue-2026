@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import LandingPage from './pages/LandingPage'
 import PatientDashboard from './pages/PatientDashboard'
 import DoctorPanel from './pages/DoctorPanel'
@@ -21,10 +21,21 @@ export default function App() {
   return (
     <AuthProvider>
       <Router>
-        <div style={{ paddingTop: 46 }}>
-          <DevNavbar />
-          <GlobalMaintenanceGate>
-            <Routes>
+        <AppFrame />
+      </Router>
+    </AuthProvider>
+  )
+}
+
+function AppFrame() {
+  const location = useLocation()
+  const isLandingPage = location.pathname === '/'
+
+  return (
+    <div style={{ paddingTop: isLandingPage ? 0 : 46 }}>
+      {!isLandingPage && <DevNavbar />}
+      <GlobalMaintenanceGate>
+        <Routes>
               <Route path="/" element={<LandingPage />} />
 
               {/* Patient Auth Portals */}
@@ -81,10 +92,8 @@ export default function App() {
 
               {/* Waiting-room board TV display */}
               <Route path="/tv-display" element={<TvDisplayPage />} />
-            </Routes>
-          </GlobalMaintenanceGate>
-        </div>
-      </Router>
-    </AuthProvider>
+        </Routes>
+      </GlobalMaintenanceGate>
+    </div>
   )
 }
