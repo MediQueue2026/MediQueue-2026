@@ -148,3 +148,13 @@ FROM public.doctors d
 JOIN public.users u ON u.id = d.user_id
 WHERE LOWER(u.email) = 'dr.carr@mediqueue.io'
 ON CONFLICT (doctor_id, center_id) DO NOTHING;
+
+-- ── Doctor Self-Approval: target_doctor_user_id ──────────────────────────────
+-- Routes a join request to the specific doctor's dashboard instead of admin.
+ALTER TABLE public.doctor_requests
+  ADD COLUMN IF NOT EXISTS target_doctor_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+
+-- Index so the doctor's inbox query is fast
+CREATE INDEX IF NOT EXISTS idx_doctor_requests_target_user
+  ON public.doctor_requests(target_doctor_user_id)
+  WHERE target_doctor_user_id IS NOT NULL;

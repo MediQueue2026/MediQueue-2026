@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertCircle, AlertTriangle, Bell, Check, CheckCheck, Clock, Eye, FileText, Phone,
-  Repeat, Search, ShieldAlert, SkipForward, Ticket, Timer, Users, UserCheck, Inbox
+  AlertCircle, AlertTriangle, Bell, Building2, Check, CheckCheck, Clock, Eye, FileText, Phone,
+  Repeat, Search, ShieldAlert, SkipForward, Ticket, Timer, Users, UserCheck, Inbox, X
 } from 'lucide-react'
 import AccountMenu from '../components/AccountMenu'
 import PatientHistoryDrawer from '../components/PatientHistoryDrawer'
@@ -10,7 +10,7 @@ import DelayAlertModal from '../components/DelayAlertModal'
 import { Badge, Dot, StatusBadge } from '../components/UIPrimitives'
 import { useAuth } from '../context/AuthContext'
 import { ApiError, api } from '../lib/api'
-import type { ApiDelayAlert, ApiDoctorQueueItem, ApiDoctorSummary } from '../lib/api'
+import type { ApiDelayAlert, ApiDoctorQueueItem, ApiDoctorSummary, ApiDoctorRequest } from '../lib/api'
 
 /** The three states a doctor can put themselves in from the top bar. */
 type Shift = 'online' | 'break' | 'offline'
@@ -65,6 +65,54 @@ export default function DoctorPanel() {
 
   /** This doctor's own delay notices, newest first. */
   const [delayAlerts, setDelayAlerts] = useState<ApiDelayAlert[]>([])
+
+  /** Pending join requests from receptionists */
+  const [joinRequests, setJoinRequests] = useState<ApiDoctorRequest[]>([])
+  const [joiningId, setJoiningId] = useState<string | null>(null)
+
+  const fetchJoinRequests = useCallback(async () => {
+    try {
+      const res = await api.getMyDoctorRequests()
+      setJoinRequests(res.requests || [])
+    } catch {
+      // non-critical — silently ignore if endpoint not yet deployed
+    }
+  }, [])
+
+  useEffect(() => { fetchJoinRequests() }, [fetchJoinRequests])
+
+  // Poll join requests every 15 seconds
+  useEffect(() => {
+    const t = setInterval(() => fetchJoinRequests(), 15_000)
+    return () => clearInterval(t)
+  }, [fetchJoinRequests])
+
+  const handleAcceptJoinRequest = async (reqId: string) => {
+    setJoiningId(reqId)
+    try {
+      const res = await api.acceptDoctorRequest(reqId)
+      showToast(res.message)
+      setJoinRequests(prev => prev.filter(r => r.id !== reqId))
+      await load({ silent: true }) // refresh doctor summary to show new center
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Could not accept the request.')
+    } finally {
+      setJoiningId(null)
+    }
+  }
+
+  const handleDeclineJoinRequest = async (reqId: string) => {
+    setJoiningId(reqId)
+    try {
+      await api.declineDoctorRequest(reqId)
+      showToast('Join request declined.')
+      setJoinRequests(prev => prev.filter(r => r.id !== reqId))
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Could not decline the request.')
+    } finally {
+      setJoiningId(null)
+    }
+  }
 
   /**
    * Urgent flags are session-local: there is no column on `walk_in_queue` to
@@ -377,12 +425,18 @@ export default function DoctorPanel() {
               aria-expanded={showNotifications}
               style={{ padding: '5px 7px', position: 'relative' }}
             >
-              <Bell size={16} color={activeDelay ? '#B45309' : 'var(--text-3)'} />
-              {activeDelay && (
+              <Bell size={16} color={activeDelay || joinRequests.length > 0 ? '#B45309' : 'var(--text-3)'} />
+              {(activeDelay || joinRequests.length > 0) && (
                 <span style={{
-                  position: 'absolute', top: 1, right: 1, width: 7, height: 7,
-                  background: 'var(--crimson)', borderRadius: '50%',
-                }} />
+                  position: 'absolute', top: 1, right: 1,
+                  minWidth: 14, height: 14, borderRadius: 7,
+                  background: joinRequests.length > 0 ? '#3B82F6' : 'var(--crimson)',
+                  fontSize: 9, fontWeight: 800, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 3px',
+                }}>
+                  {joinRequests.length > 0 ? joinRequests.length : ''}
+                </span>
               )}
             </button>
             {showNotifications && (
@@ -446,6 +500,114 @@ export default function DoctorPanel() {
               {activeDelay.skippedCount > 0 && ` · ${activeDelay.skippedCount} opted out`}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* ── JOIN REQUESTS BANNER ── */}
+      {joinRequests.length > 0 && (
+        <div style={{ margin: '14px 24px 0' }}>
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.07)', border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 14, overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 9, padding: '10px 16px',
+              borderBottom: '1px solid rgba(59, 130, 246, 0.15)',
+            }}>
+              <Inbox size={15} color="#3B82F6" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 800, color: '#1D4ED8' }}>
+                {joinRequests.length} Pending Center Join Request{joinRequests.length > 1 ? 's' : ''}
+              </span>
+              <span style={{ fontSize: 12, color: '#64748B' }}>— A receptionist wants you to join their medical center</span>
+            </div>
+            {/* Request cards */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {joinRequests.map((req, idx) => (
+                <div key={req.id} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  gap: 12, padding: '12px 16px', flexWrap: 'wrap',
+                  borderBottom: idx < joinRequests.length - 1 ? '1px solid rgba(59,130,246,0.1)' : 'none',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                      background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.2)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Building2 size={18} color="#3B82F6" />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {req.centerName}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 1 }}>
+                        Requested by {req.receptionistName}
+                        {req.roomNumber && ` · Room ${req.roomNumber}`}
+                        {req.series && ` · Series ${req.series}`}
+                        {req.specialization && ` · ${req.specialization}`}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                    <button
+                      className="btn btn-sm"
+                      disabled={joiningId === req.id}
+                      onClick={() => handleDeclineJoinRequest(req.id)}
+                      style={{
+                        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                        color: '#DC2626', gap: 5, padding: '5px 12px', fontSize: 12, fontWeight: 700,
+                      }}
+                    >
+                      <X size={12} /> Decline
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      disabled={joiningId === req.id}
+                      onClick={() => handleAcceptJoinRequest(req.id)}
+                      style={{
+                        background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)',
+                        color: '#047857', gap: 5, padding: '5px 12px', fontSize: 12, fontWeight: 700,
+                      }}
+                    >
+                      {joiningId === req.id
+                        ? <span style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid rgba(4,120,87,0.3)', borderTopColor: '#047857', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+                        : <Check size={12} />
+                      }
+                      {joiningId === req.id ? 'Joining…' : 'Accept'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ASSIGNED CENTERS STRIP ── */}
+      {summary.doctor.assignedCenters && summary.doctor.assignedCenters.length > 0 && (
+        <div style={{
+          margin: '14px 24px 0', padding: '12px 18px',
+          background: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(12px)',
+          border: '1px solid var(--border-md)', borderRadius: 14,
+          display: 'flex', alignItems: 'center', gap: 14,
+          overflowX: 'auto'
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
+            My Centers
+          </div>
+          <div style={{ width: 1, height: 20, background: 'var(--border-md)' }} />
+          {summary.doctor.assignedCenters.map(center => (
+            <div key={center.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, padding: '4px 10px', background: 'rgba(255,255,255,0.7)', border: '1px solid var(--border-md)', borderRadius: 8 }}>
+              <Building2 size={14} color="var(--text-3)" />
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{center.centerName}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-4)' }}>
+                  Room {center.roomNumber || '—'} · Series {center.series || '—'}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

@@ -19,7 +19,7 @@ import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueu
 import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser, getSystemStats, getSettings, setMaintenanceMode } from '../controllers/adminController.js';
 import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
-import { createDoctorRequest, getDoctorRequests, approveDoctorRequest, rejectDoctorRequest } from '../controllers/doctorRequestController.js';
+import { createDoctorRequest, getDoctorRequests, getMyDoctorRequests, acceptDoctorRequest, declineDoctorRequest } from '../controllers/doctorRequestController.js';
 import { createDelayAlert, getDelayAlerts, clearDelayAlert } from '../controllers/delayAlertController.js';
 import { uploadFile } from '../controllers/uploadController.js';
 import multer from 'multer';
@@ -213,11 +213,13 @@ router.put('/admin/settings/maintenance', authMiddleware, requireRole(['admin'])
 router.patch('/doctors/:doctorId/approve', authMiddleware, requireRole(['admin']), approveDoctor);
 router.patch('/doctors/:doctorId/reject', authMiddleware, requireRole(['admin']), rejectDoctor);
 
-// ── Doctor Requests Routes (Receptionist -> Super Admin Approval) ──────────
+// ── Doctor Requests Routes (Receptionist → Doctor self-approval) ─────────────
+// NOTE: /doctor-requests/mine MUST be before /doctor-requests/:id to avoid param clash
+router.get('/doctor-requests/mine', authMiddleware, requireRole(['doctor']), getMyDoctorRequests);
 router.post('/doctor-requests', authMiddleware, requireRole(['receptionist', 'admin']), createDoctorRequest);
-router.get('/doctor-requests', authMiddleware, requireRole(['admin']), getDoctorRequests);
-router.patch('/doctor-requests/:id/approve', authMiddleware, requireRole(['admin']), approveDoctorRequest);
-router.patch('/doctor-requests/:id/reject', authMiddleware, requireRole(['admin']), rejectDoctorRequest);
+router.get('/doctor-requests', authMiddleware, requireRole(['admin']), getDoctorRequests);  // read-only audit
+router.patch('/doctor-requests/:id/accept', authMiddleware, requireRole(['doctor']), acceptDoctorRequest);
+router.patch('/doctor-requests/:id/decline', authMiddleware, requireRole(['doctor']), declineDoctorRequest);
 
 // ── Upload Routes ────────────────────────────────────────────────────────────
 router.post('/uploads', upload.single('file'), uploadFile);

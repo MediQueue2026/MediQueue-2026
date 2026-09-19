@@ -332,6 +332,15 @@ export async function getDoctorSummary(req, res, next) {
         centerId: resolved.centerId,
         centerName: resolved.centerName,
         maxAppointmentsPerHour: maxPerHour,
+        assignedCenters: (resolved.assignments || []).map(a => ({
+          id: a.id,
+          centerId: a.center_id,
+          centerName: a.medical_centers?.name || 'Medical Center',
+          roomNumber: a.room_number,
+          series: a.series,
+          currentStatus: a.current_status || 'active',
+          delayMinutes: a.delay_minutes || 0,
+        })),
       },
       stats: {
         totalToday,
