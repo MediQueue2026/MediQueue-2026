@@ -790,22 +790,33 @@ export async function getDoctorHours(req, res, next) {
       const key = String(dow);
       const saved = stored[key];
       if (saved) {
-        const hrs = Math.max(0, parseTimeToMinutes(saved.endTime) - parseTimeToMinutes(saved.startTime)) / 60;
+        const sessions = Array.isArray(saved.sessions) && saved.sessions.length > 0
+          ? saved.sessions
+          : [{ startTime: saved.startTime ?? '08:00', endTime: saved.endTime ?? '17:00' }];
+
+        let totalHrs = 0;
+        for (const s of sessions) {
+          totalHrs += Math.max(0, parseTimeToMinutes(s.endTime) - parseTimeToMinutes(s.startTime)) / 60;
+        }
+
         return {
           doctorId,
           dayOfWeek: dow,
-          startTime: saved.startTime ?? '08:00',
-          endTime: saved.endTime ?? '17:00',
+          startTime: sessions[0]?.startTime ?? saved.startTime ?? '08:00',
+          endTime: sessions[sessions.length - 1]?.endTime ?? saved.endTime ?? '17:00',
+          sessions,
           isAvailable: saved.isAvailable ?? (dow >= 1 && dow <= 5),
-          dailyCapacity: (saved.isAvailable ?? true) ? Math.round(hrs * maxPerHour) : 0,
+          dailyCapacity: (saved.isAvailable ?? true) ? Math.round(totalHrs * maxPerHour) : 0,
         };
       }
       const isWeekday = dow >= 1 && dow <= 5;
+      const defaultSessions = [{ startTime: '08:00', endTime: '17:00' }];
       return {
         doctorId,
         dayOfWeek: dow,
         startTime: '08:00',
         endTime: '17:00',
+        sessions: defaultSessions,
         isAvailable: isWeekday,
         dailyCapacity: isWeekday ? 9 * maxPerHour : 0,
       };
@@ -831,10 +842,15 @@ export async function upsertDoctorHours(req, res, next) {
 
     const available_hours = {};
     for (const h of hours) {
+      const sessions = Array.isArray(h.sessions) && h.sessions.length > 0
+        ? h.sessions
+        : [{ startTime: h.startTime || '08:00', endTime: h.endTime || '17:00' }];
+
       available_hours[String(h.dayOfWeek)] = {
-        startTime: h.startTime,
-        endTime: h.endTime,
+        startTime: sessions[0].startTime,
+        endTime: sessions[sessions.length - 1].endTime,
         isAvailable: h.isAvailable ?? true,
+        sessions,
       };
     }
 
