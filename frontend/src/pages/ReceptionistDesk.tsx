@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Activity, AlertCircle, Bell, BellRing, Building2, CheckCircle2, Clock, Hash, Plus, Radio,
-  Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, CalendarOff, Pencil, Menu, X,
+  Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, Pencil, Menu, X,
   ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -19,7 +19,7 @@ import {
   minutesSince, validateNic, validatePhone, waitingFor
 } from '../lib/receptionQueue'
 import type { QueueEntry, TokenSource } from '../lib/receptionQueue'
-import { api, type ApiAppointmentRow, type ApiCenterClosure, type ApiCenterDateHours, type ApiDoctorDateHours, type ApiDoctor } from '../lib/api'
+import { api, type ApiAppointmentRow, type ApiDoctor } from '../lib/api'
 
 /**
  * Identity key for a patient — their name plus phone number. Used to collapse
@@ -269,7 +269,7 @@ export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
   const { user } = useAuth()
 
-  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'schedule'>('checkin')
+  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
@@ -379,62 +379,13 @@ export default function ReceptionistDesk() {
    */
   const [allAppointments, setAllAppointments] = useState<ApiAppointmentRow[]>([])
 
-  /** Center closures (migration 012) — drives the Schedule tab's CLOSED badges. */
-  const [closures, setClosures] = useState<ApiCenterClosure[]>([])
-  /** Bumped after a close/re-open so both lists refetch. */
-  const [scheduleReloadKey, setScheduleReloadKey] = useState(0)
-
   useEffect(() => {
-    // Loaded for the Patients tab's tables, the check-in tab's name
-    // autocomplete, and the Schedule tab's day list — all read the same
-    // center-scoped appointment list.
-    if (activeTab !== 'patients' && activeTab !== 'checkin' && activeTab !== 'schedule') return
+    // Loaded for the Patients tab's tables and the check-in tab's name autocomplete
+    if (activeTab !== 'patients' && activeTab !== 'checkin') return
     let cancelled = false
     api.getAppointments(queue.centerId ? { centerId: queue.centerId } : undefined)
       .then(res => { if (!cancelled) setAllAppointments(res.appointments) })
       .catch(() => { if (!cancelled) setAllAppointments([]) })
-    return () => { cancelled = true }
-  }, [activeTab, queue.centerId, scheduleReloadKey])
-
-  useEffect(() => {
-    if (activeTab !== 'schedule' || !queue.centerId) { setClosures([]); return }
-    let cancelled = false
-    api.getCenterClosures(queue.centerId)
-      .then(res => { if (!cancelled) setClosures(res.closures) })
-      .catch(() => { if (!cancelled) setClosures([]) })
-    return () => { cancelled = true }
-  }, [activeTab, queue.centerId, scheduleReloadKey])
-
-  /** Date-specific hours (migration 014) — per-doctor overrides + the centre's
-   *  display-only label, both keyed by date on the Schedule tab. */
-  const [centerDateHours, setCenterDateHours] = useState<ApiCenterDateHours[]>([])
-  const [doctorDateHours, setDoctorDateHours] = useState<ApiDoctorDateHours[]>([])
-  /** This centre's usual opening-hours string — the placeholder when no date override exists. */
-  const [centerDefaultHours, setCenterDefaultHours] = useState('')
-
-  useEffect(() => {
-    if (activeTab !== 'schedule' || !queue.centerId) { setCenterDateHours([]); setDoctorDateHours([]); return }
-    let cancelled = false
-    api.getCenterDayHours(queue.centerId)
-      .then(res => {
-        if (cancelled) return
-        setCenterDateHours(res.centerHours)
-        setDoctorDateHours(res.doctorHours)
-      })
-      .catch(() => { if (!cancelled) { setCenterDateHours([]); setDoctorDateHours([]) } })
-    return () => { cancelled = true }
-  }, [activeTab, queue.centerId, scheduleReloadKey])
-
-  useEffect(() => {
-    if (activeTab !== 'schedule' || !queue.centerId) return
-    let cancelled = false
-    api.getCenters()
-      .then(res => {
-        if (cancelled) return
-        const mine = res.centers.find(c => c.id === queue.centerId)
-        setCenterDefaultHours(mine?.opening_hours ?? '')
-      })
-      .catch(() => {})
     return () => { cancelled = true }
   }, [activeTab, queue.centerId])
 
@@ -587,198 +538,7 @@ export default function ReceptionistDesk() {
     showDelayToast(res.message)
   }
 
-  // ── Schedule tab ─────────────────────────────────────────────────────────
 
-  /** The 7 local ISO dates from today (inclusive). */
-  const next7Days = useMemo(() => {
-    const base = queue.now
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i)
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    })
-  }, [queue.now])
-
-  const closureByDate = useMemo(() => {
-    const m = new Map<string, ApiCenterClosure>()
-    for (const c of closures) m.set(c.closedDate, c)
-    return m
-  }, [closures])
-
-  const apptsByDate = useMemo(() => {
-    const m = new Map<string, ApiAppointmentRow[]>()
-    for (const a of allAppointments) {
-      const list = m.get(a.appointmentDate)
-      if (list) list.push(a)
-      else m.set(a.appointmentDate, [a])
-    }
-    return m
-  }, [allAppointments])
-
-  const centerHoursByDate = useMemo(() => {
-    const m = new Map<string, ApiCenterDateHours>()
-    for (const c of centerDateHours) m.set(c.openDate, c)
-    return m
-  }, [centerDateHours])
-
-  /** date -> doctorId -> that doctor's override for that date. */
-  const doctorHoursByDate = useMemo(() => {
-    const m = new Map<string, Map<string, ApiDoctorDateHours>>()
-    for (const d of doctorDateHours) {
-      if (!m.has(d.workDate)) m.set(d.workDate, new Map())
-      m.get(d.workDate)!.set(d.doctorId, d)
-    }
-    return m
-  }, [doctorDateHours])
-
-  /** Which day a closure is being confirmed for, plus the reason draft. */
-  const [closingDate, setClosingDate] = useState<string | null>(null)
-  const [closingReason, setClosingReason] = useState('')
-  const [scheduleBusy, setScheduleBusy] = useState(false)
-
-  const confirmCloseDay = async () => {
-    if (!closingDate || !queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      const res = await api.createCenterClosure(queue.centerId, {
-        date: closingDate,
-        reason: closingReason.trim(),
-      })
-      showDelayToast(
-        res.alreadyClosed
-          ? `${closingDate} was already marked closed.`
-          : `${closingDate} closed · ${res.cancelledCount} appointment${res.cancelledCount === 1 ? '' : 's'} cancelled · ${res.notifiedCount} patient${res.notifiedCount === 1 ? '' : 's'} notified`,
-      )
-      setClosingDate(null)
-      setClosingReason('')
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not close this day.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const reopenDay = async (date: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      const res = await api.deleteCenterClosure(queue.centerId, date)
-      showDelayToast(res.message)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not re-open this day.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  // ── Date-specific hours editor (migration 014) ──────────────────────────
-  interface DoctorHoursDraft { isWorking: boolean; startTime: string; endTime: string }
-
-  /** The day whose "Edit hours" panel is open, plus its working copies. */
-  const [editingHoursDate, setEditingHoursDate] = useState<string | null>(null)
-  const [centerLabelDraft, setCenterLabelDraft] = useState('')
-  const [centerNoteDraft, setCenterNoteDraft] = useState('')
-  const [doctorHoursDraft, setDoctorHoursDraft] = useState<Record<string, DoctorHoursDraft>>({})
-
-  const openHoursEditor = (date: string) => {
-    setEditingHoursDate(prev => (prev === date ? null : date))
-    const ch = centerHoursByDate.get(date)
-    setCenterLabelDraft(ch?.hoursLabel ?? '')
-    setCenterNoteDraft(ch?.note ?? '')
-    const perDoctor = doctorHoursByDate.get(date)
-    const draft: Record<string, DoctorHoursDraft> = {}
-    for (const d of queue.doctors) {
-      const existing = perDoctor?.get(d.id)
-      draft[d.id] = {
-        isWorking: existing?.isWorking ?? true,
-        startTime: existing?.startTime ?? '08:00',
-        endTime: existing?.endTime ?? '17:00',
-      }
-    }
-    setDoctorHoursDraft(draft)
-  }
-
-  const saveCenterHours = async (date: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      await api.putCenterDateHours(queue.centerId, {
-        date, hoursLabel: centerLabelDraft.trim(), note: centerNoteDraft.trim(),
-      })
-      showDelayToast(`Centre hours for ${date} updated.`)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not save the centre hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const resetCenterHours = async (date: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      await api.deleteCenterDateHours(queue.centerId, date)
-      setCenterLabelDraft('')
-      setCenterNoteDraft('')
-      showDelayToast(`Centre hours for ${date} reverted to the default.`)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not reset the centre hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const saveDoctorHours = async (date: string, doctorId: string) => {
-    if (!queue.centerId) return
-    const draft = doctorHoursDraft[doctorId]
-    if (!draft) return
-    if (draft.isWorking && draft.startTime >= draft.endTime) {
-      showDelayToast('End time must be after start time.')
-      return
-    }
-    setScheduleBusy(true)
-    try {
-      const res = await api.putDoctorDateHours(queue.centerId, {
-        doctorId,
-        date,
-        isWorking: draft.isWorking,
-        startTime: draft.isWorking ? draft.startTime : undefined,
-        endTime: draft.isWorking ? draft.endTime : undefined,
-      })
-      const doctorName = queue.doctors.find(d => d.id === doctorId)?.name ?? 'This doctor'
-      const newHours = draft.isWorking ? `${draft.startTime}–${draft.endTime}` : 'not working'
-      // A widened or unchanged window cancels nothing — saying "0 cancelled ·
-      // 0 notified" there reads like an error or a no-op instead of the
-      // successful save it is, so that case gets its own, plainer sentence.
-      showDelayToast(
-        res.cancelledCount > 0
-          ? `${doctorName}'s hours on ${date} set to ${newHours}: ${res.cancelledCount} appointment${res.cancelledCount === 1 ? '' : 's'} no longer fit and ${res.cancelledCount === 1 ? 'was' : 'were'} cancelled · ${res.notifiedCount} patient${res.notifiedCount === 1 ? '' : 's'} notified.`
-          : `${doctorName}'s hours on ${date} set to ${newHours}. No existing appointments were affected.`,
-      )
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not save these hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const resetDoctorHours = async (date: string, doctorId: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      const res = await api.deleteDoctorDateHours(queue.centerId, doctorId, date)
-      showDelayToast(res.message)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not reset these hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
 
   return (
     // App.tsx wraps every route in `paddingTop: 46` to clear the fixed
@@ -887,9 +647,6 @@ export default function ReceptionistDesk() {
           </button>
           <button disabled={!centerAccessApproved} onClick={() => { setActiveTab('patients'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Users size={16} /> Patients
-          </button>
-          <button onClick={() => { setActiveTab('schedule'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'schedule' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
-            <CalendarClock size={16} /> Schedule
           </button>
         </div>
 
@@ -1717,268 +1474,6 @@ export default function ReceptionistDesk() {
             </div>
           )}
 
-          {/* SCHEDULE TAB — the next 7 days for this center, and the control to
-              mark a day closed (which cancels that day's appointments and SMSes
-              the patients — see backend center_closures / migration 012). */}
-          {activeTab === 'schedule' && (
-            <div style={{ padding: '18px 24px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {!queue.centerId ? (
-                <div className="card glass-form-card" style={{ padding: 26, textAlign: 'center', color: 'var(--text-4)', fontSize: 13 }}>
-                  Your account isn't linked to a medical center yet, so there's no schedule to manage.
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Schedule</h2>
-                    <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
-                      The next 7 days at {deskCenterName ?? 'this center'}. Mark a day closed to cancel its
-                      appointments and text the affected patients.
-                    </div>
-                  </div>
-
-                  {next7Days.map(date => {
-                    const closure = closureByDate.get(date)
-                    const dayAppts = (apptsByDate.get(date) ?? [])
-                      .slice()
-                      .sort((a, b) => a.queueToken.localeCompare(b.queueToken))
-                    const activeAppts = dayAppts.filter(a => {
-                      const s = (a.status || '').toLowerCase()
-                      return s !== 'cancelled' && s !== 'completed' && s !== 'no_show'
-                    })
-                    const d = new Date(`${date}T00:00:00`)
-                    const heading = d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
-                    const isToday = date === todayIso
-                    const confirming = closingDate === date
-                    const editingHours = editingHoursDate === date
-                    const dayCenterHours = centerHoursByDate.get(date)
-                    const dayDoctorHours = doctorHoursByDate.get(date)
-                    const hasHourOverrides = !!dayCenterHours?.hoursLabel || (dayDoctorHours?.size ?? 0) > 0
-
-                    return (
-                      <div key={date} className="card glass-form-card" style={{ padding: 20, opacity: closure ? 0.92 : 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>{heading}</span>
-                            {isToday && <Badge cls="badge-blue">Today</Badge>}
-                            {closure ? (
-                              <Badge cls="badge-crimson"><CalendarOff size={11} /> Closed</Badge>
-                            ) : (
-                              <span style={{ fontSize: 12, color: 'var(--text-4)' }}>
-                                {activeAppts.length} appointment{activeAppts.length === 1 ? '' : 's'}
-                              </span>
-                            )}
-                            {closure?.reason && <span style={{ fontSize: 12, color: 'var(--text-4)' }}>· {closure.reason}</span>}
-                          </div>
-
-                          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                            {!closure && (
-                              <button
-                                onClick={() => openHoursEditor(date)}
-                                disabled={scheduleBusy}
-                                className={`btn btn-ghost btn-sm ${editingHours ? 'btn-primary' : ''}`}
-                                style={editingHours ? { gap: 5 } : { gap: 5, color: 'var(--blue)', border: '1px solid var(--blue-border)' }}
-                              >
-                                <Clock size={12} /> Edit hours
-                              </button>
-                            )}
-                            {closure ? (
-                              <button
-                                onClick={() => reopenDay(date)}
-                                disabled={scheduleBusy}
-                                className="btn btn-ghost btn-sm"
-                                style={{ gap: 5, color: '#047857', border: '1px solid var(--emerald-border)' }}
-                              >
-                                <CheckCircle2 size={12} /> Re-open day
-                              </button>
-                            ) : !confirming ? (
-                              <button
-                                onClick={() => { setClosingDate(date); setClosingReason('') }}
-                                disabled={scheduleBusy}
-                                className="btn btn-ghost btn-sm"
-                                style={{ gap: 5, color: 'var(--crimson)', border: '1px solid var(--crimson-border)' }}
-                              >
-                                <CalendarOff size={12} /> Close this day
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        {/* Collapsed summary of any date-specific hours, so the
-                            override is visible without opening the editor. */}
-                        {!editingHours && hasHourOverrides && (
-                          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-4)', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                            {dayCenterHours?.hoursLabel && (
-                              <span>🏥 Centre {dayCenterHours.hoursLabel}</span>
-                            )}
-                            {queue.doctors.map(doc => {
-                              const ov = dayDoctorHours?.get(doc.id)
-                              if (!ov) return null
-                              return (
-                                <span key={doc.id}>
-                                  · {doc.name} {ov.isWorking ? `${ov.startTime}–${ov.endTime}` : 'off'}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        )}
-
-                        {editingHours && (
-                          <div style={{
-                            marginTop: 12, padding: 14, borderRadius: 10,
-                            background: 'var(--blue-dim)', border: '1px solid var(--blue-border)',
-                            display: 'flex', flexDirection: 'column', gap: 12,
-                          }}>
-                            {/* Centre hours — display-only label shown to patients */}
-                            <div>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-                                Centre hours <span style={{ fontWeight: 500, textTransform: 'none' }}>(shown to patients only — doesn't restrict bookings)</span>
-                              </div>
-                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                                <input
-                                  className="input"
-                                  placeholder={centerDefaultHours || 'e.g. 10:00 - 14:00'}
-                                  value={centerLabelDraft}
-                                  onChange={e => setCenterLabelDraft(e.target.value)}
-                                  style={{ height: 36, fontSize: 12.5, width: 180 }}
-                                />
-                                <input
-                                  className="input"
-                                  placeholder="Note (optional)"
-                                  value={centerNoteDraft}
-                                  onChange={e => setCenterNoteDraft(e.target.value)}
-                                  style={{ height: 36, fontSize: 12.5, flex: 1, minWidth: 140 }}
-                                />
-                                <button onClick={() => saveCenterHours(date)} disabled={scheduleBusy} className="btn btn-primary btn-sm">Save</button>
-                                {dayCenterHours && (
-                                  <button onClick={() => resetCenterHours(date)} disabled={scheduleBusy} className="btn btn-ghost btn-sm">Reset</button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Per-doctor working hours — this is what actually gates bookable slots */}
-                            <div>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-                                Doctor hours for {heading}
-                              </div>
-                              {queue.doctors.length === 0 ? (
-                                <div style={{ fontSize: 12, color: 'var(--text-4)' }}>No doctors on this roster.</div>
-                              ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                  {queue.doctors.map(doc => {
-                                    const draft = doctorHoursDraft[doc.id] ?? { isWorking: true, startTime: '08:00', endTime: '17:00' }
-                                    const hasOverride = !!dayDoctorHours?.get(doc.id)
-                                    return (
-                                      <div key={doc.id} style={{
-                                        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                                        padding: '8px 10px', borderRadius: 8, background: '#ffffff', border: '1px solid var(--border-md)',
-                                      }}>
-                                        <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-1)', minWidth: 130 }}>{doc.name}</span>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-3)', cursor: 'pointer' }}>
-                                          <input
-                                            type="checkbox"
-                                            checked={draft.isWorking}
-                                            onChange={e => setDoctorHoursDraft(prev => ({ ...prev, [doc.id]: { ...draft, isWorking: e.target.checked } }))}
-                                          />
-                                          Working
-                                        </label>
-                                        {draft.isWorking && (
-                                          <>
-                                            <input
-                                              type="time"
-                                              value={draft.startTime}
-                                              onChange={e => setDoctorHoursDraft(prev => ({ ...prev, [doc.id]: { ...draft, startTime: e.target.value } }))}
-                                              style={{ height: 32, borderRadius: 6, border: '1px solid var(--border-md)', padding: '0 8px', fontSize: 12.5 }}
-                                            />
-                                            <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>to</span>
-                                            <input
-                                              type="time"
-                                              value={draft.endTime}
-                                              onChange={e => setDoctorHoursDraft(prev => ({ ...prev, [doc.id]: { ...draft, endTime: e.target.value } }))}
-                                              style={{ height: 32, borderRadius: 6, border: '1px solid var(--border-md)', padding: '0 8px', fontSize: 12.5 }}
-                                            />
-                                          </>
-                                        )}
-                                        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-                                          <button onClick={() => saveDoctorHours(date, doc.id)} disabled={scheduleBusy} className="btn btn-primary btn-sm">Save</button>
-                                          {hasOverride && (
-                                            <button onClick={() => resetDoctorHours(date, doc.id)} disabled={scheduleBusy} className="btn btn-ghost btn-sm">Reset</button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {confirming && (
-                          <div style={{
-                            marginTop: 12, padding: 14, borderRadius: 10,
-                            background: 'var(--crimson-dim)', border: '1px solid var(--crimson-border)',
-                            display: 'flex', flexDirection: 'column', gap: 10,
-                          }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--crimson)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <TriangleAlert size={14} />
-                              Close {heading}? {activeAppts.length} appointment{activeAppts.length === 1 ? '' : 's'} will be cancelled
-                              and {activeAppts.length === 1 ? 'that patient' : 'those patients'} texted.
-                            </div>
-                            <input
-                              className="input"
-                              placeholder="Reason (optional) — e.g. Public holiday"
-                              value={closingReason}
-                              onChange={e => setClosingReason(e.target.value)}
-                              style={{ height: 38, fontSize: 13 }}
-                            />
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <button
-                                onClick={confirmCloseDay}
-                                disabled={scheduleBusy}
-                                className="btn btn-sm"
-                                style={{ background: 'var(--crimson)', color: '#fff', gap: 5 }}
-                              >
-                                <CalendarOff size={12} /> {scheduleBusy ? 'Closing…' : 'Confirm closure'}
-                              </button>
-                              <button
-                                onClick={() => { setClosingDate(null); setClosingReason('') }}
-                                disabled={scheduleBusy}
-                                className="btn btn-ghost btn-sm"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {dayAppts.length > 0 ? (
-                          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {dayAppts.map(a => {
-                              const b = apptStatusBadge(a.status)
-                              return (
-                                <div key={a.id} style={{
-                                  display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-                                  padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff',
-                                }}>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 800, color: 'var(--blue)', minWidth: 64 }}>{a.queueToken}</span>
-                                  <span style={{ flex: 1, minWidth: 140, fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>{a.patientName}</span>
-                                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{a.doctorName || '—'}</span>
-                                  <Badge cls={b.cls}>{b.label}</Badge>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        ) : (
-                          <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text-4)' }}>No appointments.</div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </>
-              )}
-            </div>
-          )}
-
           {/* UNIFIED DOCTORS TAB — Roster + Management merged */}
           {activeTab === 'doctors' && (() => {
             const filteredDoctors = queue.doctors.filter(d => {
@@ -2054,13 +1549,13 @@ export default function ReceptionistDesk() {
                     No doctors match "{doctorSearch}".
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 18 }}>
                     {filteredDoctors.map(d => {
                       const serving = currentFor(queue.entries, d.id)
                       const docWaiting = waitingFor(queue.entries, d.id)
                       const accentColor = d.status === 'active' ? '#10B981' : d.status === 'delayed' ? 'var(--amber, #f59e0b)' : d.status === 'break' ? 'var(--blue)' : '#94a3b8'
                       return (
-                        <div key={d.id} className="card glass-form-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14, position: 'relative', overflow: 'hidden' }}>
+                        <div key={d.id} className="card glass-form-card" style={{ padding: '24px 22px', display: 'flex', flexDirection: 'column', gap: 14, position: 'relative', overflow: 'hidden' }}>
                           {/* Status accent stripe */}
                           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, borderRadius: '16px 16px 0 0', background: accentColor }} />
 
@@ -2103,27 +1598,27 @@ export default function ReceptionistDesk() {
                           </div>
 
                           {/* Action buttons */}
-                          <div style={{ display: 'flex', gap: 7 }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
                             <button
                               onClick={() => { queue.setSelectedDoctorId(d.id); setActiveTab('checkin'); queue.clearError() }}
                               className="btn btn-primary btn-sm"
-                              style={{ flex: 2, justifyContent: 'center', gap: 5, fontSize: 12 }}
+                              style={{ flex: '1 1 auto', justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
                             >
                               <Ticket size={12} /> Queue
                             </button>
                             <button
                               onClick={() => setEditingDoctor(d)}
                               className="btn btn-ghost btn-sm"
-                              style={{ flex: 1, justifyContent: 'center', gap: 5, fontSize: 12 }}
+                              style={{ flex: '0.8 1 auto', justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
                             >
                               <Pencil size={12} /> Edit
                             </button>
                             <button
                               onClick={() => setHoursDoctor(d)}
                               className="btn btn-ghost btn-sm"
-                              style={{ flex: 1, justifyContent: 'center', gap: 5, fontSize: 12, color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
+                              style={{ flex: '1.4 1 auto', justifyContent: 'center', gap: 4, fontSize: 11.5, padding: '0 8px', whiteSpace: 'nowrap', color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
                             >
-                              <CalendarClock size={12} /> Hours
+                              <CalendarClock size={12} /> Available Hours
                             </button>
                           </div>
                         </div>

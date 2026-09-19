@@ -212,6 +212,7 @@ export interface ApiDoctorHour {
   dayOfWeek: number      // 0=Sun … 6=Sat
   startTime: string      // "HH:MM"
   endTime: string        // "HH:MM"
+  sessions?: { startTime: string; endTime: string }[]
   isAvailable: boolean
   dailyCapacity: number  // derived: hours × maxAppointmentsPerHour
 }
@@ -738,7 +739,7 @@ export const api = {
     ),
 
   /** `advanceBookingDays` — how many days ahead patients may book this doctor (migration 013). */
-  upsertDoctorHours: (doctorId: string, hours: Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'>[], maxAppointmentsPerHour?: number, advanceBookingDays?: number, centerId?: string | null) =>
+  upsertDoctorHours: (doctorId: string, hours: (Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'> & { sessions?: { startTime: string; endTime: string }[] })[], maxAppointmentsPerHour?: number, advanceBookingDays?: number, centerId?: string | null) =>
     request<{ message: string; hours: ApiDoctorHour[] }>(`/doctors/${doctorId}/hours`, {
       method: 'PUT',
       body: JSON.stringify({ hours, maxAppointmentsPerHour, advanceBookingDays, centerId }),

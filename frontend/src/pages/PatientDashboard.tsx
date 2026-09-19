@@ -146,31 +146,57 @@ export default function PatientDashboard() {
   const firstName = displayName.split(' ')[0]
 
   // Find active appointment / token dynamically
-  const activeAppointment = myAppointments.find(a => a.status === 'waiting' || a.status === 'booked' || a.status === 'in_consultation') || myAppointments[0]
+  const activeAppointment = (myAppointments || []).find(a => a && (a.status === 'waiting' || a.status === 'booked' || a.status === 'in_consultation')) || (myAppointments || [])[0]
+
+  // Keep profile synced with logged-in user credentials
+  useEffect(() => {
+    if (user) {
+      setProfile(prev => ({
+        ...prev,
+        id: user.id || prev.id,
+        email: user.email || prev.email,
+        fullName: prev.fullName && prev.fullName !== 'Patient User' ? prev.fullName : (user.name || prev.fullName),
+      }))
+    }
+  }, [user?.id, user?.name, user?.email])
 
   useEffect(() => {
     let cancelled = false
     async function loadDynamicData() {
-      if (!user) return
-      // Parallel: these are independent reads and the page has six of them.
-      const [pData, rData, aData, dData, cData, sData, alertData] = await Promise.all([
-        fetchPatientProfile(user.id, user.name, user.email),
-        fetchHealthRecords(user.id),
-        fetchPatientAppointments(user.id),
-        fetchDoctorsList(),
-        fetchCentersList(),
-        fetchPatientSubscriptions(user.id),
-        fetchPatientDelayAlerts(user.id),
-      ])
-      if (cancelled) return
-      setProfile(pData)
-      setRecords(rData)
-      setMyAppointments(aData)
-      setDoctors(dData)
-      setCenters(cData)
-      if (cData.length > 0) setSelectedMapCenterId(prev => prev || cData[0].id)
-      setSubscribedIds(sData)
-      setDelayAlerts(alertData)
+      if (!user || !user.id) return
+      try {
+        const [pData, rData, aData, dData, cData, sData, alertData] = await Promise.all([
+          fetchPatientProfile(user.id, user.name, user.email).catch(() => null),
+          fetchHealthRecords(user.id).catch(() => []),
+          fetchPatientAppointments(user.id).catch(() => []),
+          fetchDoctorsList().catch(() => []),
+          fetchCentersList().catch(() => []),
+          fetchPatientSubscriptions(user.id).catch(() => []),
+          fetchPatientDelayAlerts(user.id).catch(() => []),
+        ])
+        if (cancelled) return
+        if (pData) {
+          setProfile(prev => ({
+            ...prev,
+            ...pData,
+            email: pData.email || prev.email || user?.email || '',
+            fullName: pData.fullName || prev.fullName || user?.name || 'Patient User',
+            smsAlertsEnabled: pData.smsAlertsEnabled ?? prev.smsAlertsEnabled ?? true,
+            delayAlertsEnabled: pData.delayAlertsEnabled ?? prev.delayAlertsEnabled ?? true,
+          }))
+        }
+        if (rData) setRecords(rData)
+        if (aData) setMyAppointments(aData)
+        if (dData) setDoctors(dData)
+        if (cData) {
+          setCenters(cData)
+          if (cData.length > 0) setSelectedMapCenterId(prev => prev || cData[0].id)
+        }
+        if (sData) setSubscribedIds(sData)
+        if (alertData) setDelayAlerts(alertData)
+      } catch (err) {
+        console.warn('PatientDashboard load error:', err)
+      }
     }
     loadDynamicData()
     return () => { cancelled = true }
