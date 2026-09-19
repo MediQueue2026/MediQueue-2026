@@ -371,6 +371,7 @@ export interface ApiDoctorRequest {
   maxAppointmentsPerHour?: number
   status: 'pending' | 'approved' | 'rejected'
   rejectionReason?: string | null
+  targetDoctorUserId?: string | null
   createdAt: string
 }
 
@@ -411,6 +412,15 @@ export interface ApiDoctorSummary {
     centerId: string | null
     centerName: string | null
     maxAppointmentsPerHour: number
+    assignedCenters: {
+      id: string
+      centerId: string
+      centerName: string
+      roomNumber: string | null
+      series: string | null
+      currentStatus: string
+      delayMinutes: number
+    }[]
   }
   stats: {
     totalToday: number
@@ -617,20 +627,22 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  // ── Doctor Requests (Receptionist -> Super Admin Approvals) ──
+  // ── Doctor Requests (Receptionist → Doctor self-approval) ──────────────────
   getDoctorRequests: (params?: { status?: string }) => {
     const query = params?.status ? `?status=${encodeURIComponent(params.status)}` : ''
     return request<{ requests: ApiDoctorRequest[] }>(`/doctor-requests${query}`)
   },
 
+  /** Doctor fetches their own incoming join requests */
+  getMyDoctorRequests: () =>
+    request<{ requests: ApiDoctorRequest[] }>('/doctor-requests/mine'),
+
   createDoctorRequest: (input: {
-    requestType: 'ASSIGN_EXISTING' | 'REGISTER_NEW'
+    requestType: 'ASSIGN_EXISTING'
     centerId: string
     centerName?: string
-    doctorId?: string | null
+    doctorId: string
     doctorName: string
-    email?: string
-    phone?: string
     specialization: string
     roomNumber?: string
     series?: string
@@ -641,13 +653,15 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  approveDoctorRequest: (id: string) =>
-    request<{ message: string; requestId: string; status: 'approved'; doctor?: ApiDoctor }>(`/doctor-requests/${id}/approve`, {
+  /** Doctor accepts a join request → immediately creates their center assignment */
+  acceptDoctorRequest: (id: string) =>
+    request<{ message: string; requestId: string; status: 'approved'; assignment?: { centerId: string; centerName: string; roomNumber?: string; series?: string } }>(`/doctor-requests/${id}/accept`, {
       method: 'PATCH',
     }),
 
-  rejectDoctorRequest: (id: string, reason?: string) =>
-    request<{ message: string; requestId: string; status: 'rejected'; reason?: string }>(`/doctor-requests/${id}/reject`, {
+  /** Doctor declines a join request */
+  declineDoctorRequest: (id: string, reason?: string) =>
+    request<{ message: string; requestId: string; status: 'rejected'; reason?: string }>(`/doctor-requests/${id}/decline`, {
       method: 'PATCH',
       body: JSON.stringify({ reason }),
     }),

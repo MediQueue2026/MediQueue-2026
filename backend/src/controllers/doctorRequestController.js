@@ -1,381 +1,218 @@
-import { supabase } from '../config/supabase.js';
-import bcrypt from 'bcryptjs';
+﻿import { supabase } from '../config/supabase.js';
 import { notificationProvider } from '../config/notification.js';
 import { nextSeriesLetterForCenter, formatDoctorFullName } from '../services/doctorLookup.js';
 
-// In-memory fallback array in case DB table is not yet created or running in offline mode
-const MEMORY_DOCTOR_REQUESTS = [];
-
+// RECEPTIONIST: Create a join request targeted at a specific registered doctor
 export async function createDoctorRequest(req, res, next) {
   try {
-    const {
-      requestType,
-      centerId,
-      centerName,
-      doctorId,
-      doctorName,
-      email,
-      phone,
-      specialization,
-      roomNumber,
-      series,
-      maxAppointmentsPerHour,
-    } = req.body;
+    const { requestType, centerId, centerName, doctorId, doctorName, email, phone, specialization, roomNumber, series, maxAppointmentsPerHour } = req.body;
 
     if (!requestType || !centerId || !doctorName || !specialization) {
       return res.status(400).json({ error: 'requestType, centerId, doctorName, and specialization are required' });
     }
 
+    if (requestType !== 'ASSIGN_EXISTING' || !doctorId) {
+      return res.status(400).json({ error: 'Only existing registered doctors can be invited via this flow. Select a doctor from the list.' });
+    }
+
     const receptionistName = req.user?.fullName || req.user?.email || 'Receptionist';
     const receptionistId = req.user?.id || null;
 
-    // Fetch center name if not provided
     let finalCenterName = centerName;
     if (!finalCenterName && centerId) {
-      const { data: centerRow } = await supabase
-        .from('medical_centers')
-        .select('name')
-        .eq('id', centerId)
-        .maybeSingle();
+      const { data: centerRow } = await supabase.from('medical_centers').select('name').eq('id', centerId).maybeSingle();
       if (centerRow) finalCenterName = centerRow.name;
     }
 
+    const { data: doctorRow } = await supabase.from('doctors').select('id, user_id, users(full_name, email)').eq('id', doctorId).maybeSingle();
+    if (!doctorRow) return res.status(404).json({ error: 'Doctor not found in the system.' });
+
+    const { data: existing } = await supabase.from('doctor_requests').select('id, status').eq('doctor_id', doctorId).eq('center_id', centerId).eq('status', 'pending').maybeSingle();
+    if (existing) return res.status(409).json({ error: 'A pending join request for this doctor at this center already exists.' });
+
     const newRequestData = {
-      request_type: requestType,
+      request_type: 'ASSIGN_EXISTING',
       receptionist_id: receptionistId,
       receptionist_name: receptionistName,
       center_id: centerId,
       center_name: finalCenterName || 'Medical Center',
-      doctor_id: doctorId || null,
-      doctor_name: formatDoctorFullName(doctorName),
-      email: email || null,
+      doctor_id: doctorId,
+      doctor_name: formatDoctorFullName(doctorRow.users?.full_name || doctorName),
+      email: doctorRow.users?.email || email || null,
       phone: phone || null,
       specialization,
       room_number: roomNumber || null,
       series: series || null,
       max_appointments_per_hour: maxAppointmentsPerHour || 4,
-      status: 'pending',
+      status: 'pending'
     };
 
-    let createdRecord = null;
-    const { data, error } = await supabase
-      .from('doctor_requests')
-      .insert([newRequestData])
-      .select()
-      .single();
+    const { data, error } = await supabase.from('doctor_requests').insert([newRequestData]).select().single();
 
     if (error) {
-      console.warn('doctor_requests DB insert fallback:', error.message);
-      // Fallback in-memory creation
-      createdRecord = {
-        id: `req-${Date.now()}`,
-        ...newRequestData,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      MEMORY_DOCTOR_REQUESTS.unshift(createdRecord);
-    } else {
-      createdRecord = data;
+      console.error('DB insert error:', error.message);
+      return res.status(500).json({ error: 'Failed to save request to the database. ' + error.message });
     }
 
     res.status(201).json({
-      message: 'Doctor request submitted successfully to Super Admin',
-      request: mapDbRequestToPublic(createdRecord),
+      message: `Join request sent to ${formatDoctorFullName(doctorRow.users?.full_name || doctorName)}. They will see it in their dashboard.`,
+      request: mapDbRequestToPublic(data),
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
+// DOCTOR: Get pending join requests sent to ME
+export async function getMyDoctorRequests(req, res, next) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    // 1. Find the doctor row for this user
+    const { data: doctorRow, error: doctorError } = await supabase.from('doctors').select('id').eq('user_id', userId).maybeSingle();
+    if (doctorError) {
+      console.warn('[getMyDoctorRequests] Doctor lookup error:', doctorError.message);
+      return res.json({ requests: [] });
+    }
+    
+    if (!doctorRow) {
+      // User is not a registered doctor yet
+      return res.json({ requests: [] });
+    }
+
+    // 2. Fetch requests targeting this doctor_id
+    const { data, error } = await supabase.from('doctor_requests')
+      .select('*')
+      .eq('doctor_id', doctorRow.id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('[getMyDoctorRequests] DB error:', error.message);
+      return res.json({ requests: [] });
+    }
+
+    res.json({ requests: (data || []).map(mapDbRequestToPublic) });
+  } catch (err) { next(err); }
+}
+
+// ADMIN: Read-only audit view of all doctor requests
 export async function getDoctorRequests(req, res, next) {
   try {
     const { status } = req.query;
-
-    let query = supabase
-      .from('doctor_requests')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (status) {
-      query = query.eq('status', status);
-    }
+    let query = supabase.from('doctor_requests').select('*').order('created_at', { ascending: false });
+    if (status) query = query.eq('status', status);
 
     const { data, error } = await query;
-
     if (error || !data) {
-      let memoryList = MEMORY_DOCTOR_REQUESTS;
-      if (status) {
-        memoryList = memoryList.filter(r => r.status === status);
-      }
-      return res.json({ requests: memoryList.map(mapDbRequestToPublic) });
+      return res.json({ requests: [] });
     }
-
     res.json({ requests: data.map(mapDbRequestToPublic) });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-export async function approveDoctorRequest(req, res, next) {
+// DOCTOR: Accept a join request
+export async function acceptDoctorRequest(req, res, next) {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
 
-    let reqRecord = null;
-    const { data: dbReq } = await supabase
-      .from('doctor_requests')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (dbReq) {
-      reqRecord = dbReq;
-    } else {
-      reqRecord = MEMORY_DOCTOR_REQUESTS.find(r => r.id === id);
-    }
-
-    if (!reqRecord) {
-      return res.status(404).json({ error: 'Doctor request not found' });
-    }
-
-    if (reqRecord.status === 'approved') {
-      return res.status(400).json({ error: 'Request is already approved' });
-    }
-
-    // The person: an existing doctors row for ASSIGN_EXISTING, or a fresh
-    // identity row for REGISTER_NEW. The posting (room / series / capacity for
-    // THIS center) always goes into doctor_center_assignments below.
-    let doctorId = null;
-    let doctorRow = null;
-    let emailToUse = null;
-    let generatedPassword = null;
-
-    if (reqRecord.request_type === 'ASSIGN_EXISTING' && reqRecord.doctor_id) {
-      doctorId = reqRecord.doctor_id;
-      if (reqRecord.specialization) {
-        await supabase.from('doctors').update({ specialization: reqRecord.specialization }).eq('id', doctorId);
-      }
-      const { data } = await supabase
-        .from('doctors').select('*, users(full_name)').eq('id', doctorId).maybeSingle();
-      doctorRow = data;
-    } else {
-      // REGISTER_NEW doctor
-      // Re-normalize in case this request predates the Dr./title-case formatting.
-      const doctorFullName = formatDoctorFullName(reqRecord.doctor_name);
-      const plainName = doctorFullName.replace(/^Dr\.\s*/, '');
-      emailToUse = reqRecord.email || `dr.${plainName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')}.${Date.now()}@mediqueue.internal`;
-      let userId = null;
-
-      const { data: existingUser } = await supabase
-        .from('users').select('id').eq('email', emailToUse).maybeSingle();
-
-      if (existingUser) {
-        userId = existingUser.id;
-      } else {
-        generatedPassword = `DocPass${Math.floor(1000 + Math.random() * 9000)}!`;
-        // Hashing temporarily disabled for development & testing
-        const passwordHash = generatedPassword;
-        const { data: newUser, error: userErr } = await supabase
-          .from('users')
-          .insert([{
-            email: emailToUse,
-            full_name: doctorFullName,
-            phone: reqRecord.phone || null,
-            role: 'doctor',
-            password_hash: passwordHash
-          }])
-          .select('id')
-          .single();
-
-        if (!userErr && newUser) {
-          userId = newUser.id;
-          if (reqRecord.phone) {
-            await notificationProvider.sendSMS(
-              reqRecord.phone,
-              `Welcome ${doctorFullName}! Your MediQueue account is approved. Email: ${emailToUse} | Password: ${generatedPassword}. Login: Staff Portal.`
-            );
-          }
-        }
-      }
-
-      if (userId) {
-        // Identity row only — no center/room/series on doctors anymore.
-        const { data: newDocProfile } = await supabase
-          .from('doctors')
-          .insert([{ user_id: userId, specialization: reqRecord.specialization, approval_status: 'approved' }])
-          .select('*, users(full_name)')
-          .single();
-        doctorRow = newDocProfile;
-        doctorId = newDocProfile?.id ?? null;
-      }
-    }
-
-    // Upsert the per-center posting.
-    let assignmentRow = null;
-    if (doctorId && reqRecord.center_id) {
-      const basePosting = {
-        room_number: reqRecord.room_number || null,
-        max_appointments_per_hour: reqRecord.max_appointments_per_hour || 4,
-        current_status: 'active',
-        approval_status: 'approved',
-        requested_by_name: reqRecord.receptionist_name || null,
-        updated_at: new Date().toISOString(),
-      };
-      const { data: existingAssignment } = await supabase
-        .from('doctor_center_assignments')
-        .select('id')
-        .eq('doctor_id', doctorId).eq('center_id', reqRecord.center_id)
-        .maybeSingle();
-
-      if (existingAssignment) {
-        // Only touch series if this request actually named one — otherwise a
-        // re-approval with a blank series field would wipe out an existing one.
-        const postingFields = reqRecord.series ? { ...basePosting, series: reqRecord.series } : basePosting;
-        const { data } = await supabase
-          .from('doctor_center_assignments')
-          .update(postingFields)
-          .eq('id', existingAssignment.id)
-          .select('*, medical_centers(name)')
-          .maybeSingle();
-        assignmentRow = data;
-      } else {
-        // A brand-new posting at this center gets a unique series letter
-        // unless the receptionist already typed one — it used to default to
-        // null, which every reader then displayed as "?".
-        const series = reqRecord.series || await nextSeriesLetterForCenter(reqRecord.center_id);
-        const { data } = await supabase
-          .from('doctor_center_assignments')
-          .insert([{ doctor_id: doctorId, center_id: reqRecord.center_id, series, ...basePosting }])
-          .select('*, medical_centers(name)')
-          .maybeSingle();
-        assignmentRow = data;
-      }
-    }
-
-    const createdDoctor = doctorRow ? { ...doctorRow, __assignment: assignmentRow } : null;
-
-    // Update status in DB / memory
-    if (dbReq) {
-      await supabase
-        .from('doctor_requests')
-        .update({ status: 'approved', updated_at: new Date().toISOString() })
-        .eq('id', id);
-    }
+    // 1. Check if it exists
+    const { data: dbReq } = await supabase.from('doctor_requests').select('*').eq('id', id).maybeSingle();
+    if (!dbReq) return res.status(404).json({ error: 'Doctor request not found' });
     
-    // Also update in-memory record if exists
-    const memMatch = MEMORY_DOCTOR_REQUESTS.find(r => r.id === id);
-    if (memMatch) {
-      memMatch.status = 'approved';
-      memMatch.updated_at = new Date().toISOString();
+    // 2. Verify ownership (the doctor_id must belong to this user)
+    const doctorId = dbReq.doctor_id;
+    if (!doctorId) return res.status(400).json({ error: 'Invalid request: missing doctor reference.' });
+    
+    const { data: myDoctor } = await supabase.from('doctors').select('id').eq('user_id', userId).maybeSingle();
+    if (!myDoctor || myDoctor.id !== doctorId) {
+      return res.status(403).json({ error: 'This request was not sent to you.' });
     }
 
-    // Create Audit Log
-    const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
+    if (dbReq.status === 'approved') return res.status(400).json({ error: 'Request is already accepted' });
+
+    if (dbReq.specialization) {
+      await supabase.from('doctors').update({ specialization: dbReq.specialization }).eq('id', doctorId);
+    }
+
+    let assignmentRow = null;
+    const basePosting = {
+      room_number: dbReq.room_number || null,
+      max_appointments_per_hour: dbReq.max_appointments_per_hour || 4,
+      current_status: 'active',
+      approval_status: 'approved',
+      requested_by_name: dbReq.receptionist_name || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: existingAssignment } = await supabase.from('doctor_center_assignments').select('id').eq('doctor_id', doctorId).eq('center_id', dbReq.center_id).maybeSingle();
+
+    if (existingAssignment) {
+      const postingFields = dbReq.series ? { ...basePosting, series: dbReq.series } : basePosting;
+      const { data } = await supabase.from('doctor_center_assignments').update(postingFields).eq('id', existingAssignment.id).select('*, medical_centers(name)').maybeSingle();
+      assignmentRow = data;
+    } else {
+      const series = dbReq.series || await nextSeriesLetterForCenter(dbReq.center_id);
+      const { data } = await supabase.from('doctor_center_assignments').insert([{ doctor_id: doctorId, center_id: dbReq.center_id, series, ...basePosting }]).select('*, medical_centers(name)').maybeSingle();
+      assignmentRow = data;
+    }
+
+    await supabase.from('doctor_requests').update({ status: 'approved', updated_at: new Date().toISOString() }).eq('id', id);
+
+    const doctorName = req.user?.fullName || req.user?.email || 'Doctor';
     try {
       await supabase.from('audit_logs').insert([{
-        actor_name: adminName,
-        actor_role: 'admin',
-        event_type: 'doctor_approved',
-        action: `Approved request: Added ${formatDoctorFullName(reqRecord.doctor_name)} to ${reqRecord.center_name}`,
-        center_name: reqRecord.center_name,
-        status: 'approved',
+        actor_name: doctorName, actor_role: 'doctor', event_type: 'doctor_approved',
+        action: `Dr. ${doctorName} accepted join request for ${dbReq.center_name}`,
+        center_name: dbReq.center_name, status: 'approved',
       }]);
     } catch (_) {}
 
     res.json({
-      message: 'Doctor request approved successfully',
-      requestId: id,
-      status: 'approved',
-      credentials: generatedPassword ? {
-        email: emailToUse,
-        password: generatedPassword,
-        phone: reqRecord.phone || null,
-        message: 'Credentials sent via SMS and logged to system audit logs.'
+      message: `You have joined ${dbReq.center_name}. Your dashboard will update shortly.`,
+      requestId: id, status: 'approved',
+      assignment: assignmentRow ? {
+        centerId: assignmentRow.center_id,
+        centerName: assignmentRow.medical_centers?.name ?? dbReq.center_name,
+        roomNumber: assignmentRow.room_number,
+        series: assignmentRow.series,
       } : null,
-      doctor: createdDoctor ? (() => {
-        const a = createdDoctor.__assignment;
-        const maxPerHour = a?.max_appointments_per_hour ?? reqRecord.max_appointments_per_hour ?? 4;
-        return {
-          id: createdDoctor.id,
-          name: createdDoctor.users?.full_name ?? reqRecord.doctor_name,
-          dept: createdDoctor.specialization,
-          room: a?.room_number ?? reqRecord.room_number ?? '—',
-          series: a?.series ?? reqRecord.series ?? '?',
-          status: a?.current_status ?? 'active',
-          approvalStatus: 'approved',
-          avgConsultMinutes: Math.max(1, Math.round(60 / (maxPerHour || 4))),
-          maxAppointmentsPerHour: maxPerHour,
-          centerId: a?.center_id ?? reqRecord.center_id,
-          centerName: a?.medical_centers?.name ?? reqRecord.center_name,
-        };
-      })() : null,
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-export async function rejectDoctorRequest(req, res, next) {
+// DOCTOR: Decline a join request
+export async function declineDoctorRequest(req, res, next) {
   try {
     const { id } = req.params;
     const { reason } = req.body;
+    const userId = req.user?.id;
 
-    let reqRecord = null;
-    const { data: dbReq } = await supabase
-      .from('doctor_requests')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (dbReq) {
-      reqRecord = dbReq;
-    } else {
-      reqRecord = MEMORY_DOCTOR_REQUESTS.find(r => r.id === id);
-    }
-
-    if (!reqRecord) {
-      return res.status(404).json({ error: 'Doctor request not found' });
-    }
-
-    if (dbReq) {
-      await supabase
-        .from('doctor_requests')
-        .update({
-          status: 'rejected',
-          rejection_reason: reason || 'Rejected by Admin',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-    }
+    const { data: dbReq } = await supabase.from('doctor_requests').select('*').eq('id', id).maybeSingle();
+    if (!dbReq) return res.status(404).json({ error: 'Doctor request not found' });
     
-    const memMatch = MEMORY_DOCTOR_REQUESTS.find(r => r.id === id);
-    if (memMatch) {
-      memMatch.status = 'rejected';
-      memMatch.rejection_reason = reason || 'Rejected by Admin';
-      memMatch.updated_at = new Date().toISOString();
+    // Verify ownership
+    const doctorId = dbReq.doctor_id;
+    if (doctorId) {
+       const { data: myDoctor } = await supabase.from('doctors').select('id').eq('user_id', userId).maybeSingle();
+       if (!myDoctor || myDoctor.id !== doctorId) {
+         return res.status(403).json({ error: 'This request was not sent to you.' });
+       }
     }
 
-    // Create Audit Log
-    const adminName = req.user?.fullName || req.user?.email || 'Super Admin';
+    await supabase.from('doctor_requests').update({ status: 'rejected', rejection_reason: reason || 'Declined by doctor', updated_at: new Date().toISOString() }).eq('id', id);
+
+    const doctorName = req.user?.fullName || req.user?.email || 'Doctor';
     try {
       await supabase.from('audit_logs').insert([{
-        actor_name: adminName,
-        actor_role: 'admin',
-        event_type: 'doctor_rejected',
-        action: `Rejected request for ${formatDoctorFullName(reqRecord.doctor_name)} (${reason || 'No reason provided'})`,
-        center_name: reqRecord.center_name,
-        status: 'rejected',
+        actor_name: doctorName, actor_role: 'doctor', event_type: 'doctor_rejected',
+        action: `Dr. ${doctorName} declined join request for ${dbReq.center_name}`,
+        center_name: dbReq.center_name, status: 'rejected',
       }]);
     } catch (_) {}
 
-    res.json({
-      message: 'Doctor request rejected',
-      requestId: id,
-      status: 'rejected',
-      reason: reason || 'Rejected by Admin',
-    });
-  } catch (err) {
-    next(err);
-  }
+    res.json({ message: 'Join request declined.', requestId: id, status: 'rejected', reason: reason || 'Declined by doctor' });
+  } catch (err) { next(err); }
 }
 
 function mapDbRequestToPublic(row) {
