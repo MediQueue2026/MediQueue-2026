@@ -158,3 +158,19 @@ ALTER TABLE public.doctor_requests
 CREATE INDEX IF NOT EXISTS idx_doctor_requests_target_user
   ON public.doctor_requests(target_doctor_user_id)
   WHERE target_doctor_user_id IS NOT NULL;
+
+-- ── Medical Center Profile: image (migration 015) ────────────────────────────
+ALTER TABLE public.medical_centers
+  ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- ── Notices & Promotions (migration 016) ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.center_notices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  image_url TEXT,
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_center_notices_center ON public.center_notices(center_id);

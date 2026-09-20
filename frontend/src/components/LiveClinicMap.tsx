@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Navigation, Phone, Calendar, Compass } from 'lucide-react'
+import { MapPin, Navigation, Phone, Calendar, Compass, Megaphone } from 'lucide-react'
+import { api } from '../lib/api'
+import type { ApiCenterNotice } from '../lib/api'
 
 // Fix default Leaflet icon paths in React Vite
 const defaultIcon = L.icon({
@@ -50,9 +52,23 @@ export function LiveClinicMap({
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [geoLocating, setGeoLocating] = useState(false)
   const [geoError, setGeoError] = useState<string | null>(null)
+  const [notices, setNotices] = useState<ApiCenterNotice[]>([])
 
-  const approvedCenters = (centers || []).filter(c => (!c.approval_status || c.approval_status === 'approved') && c.approval_status !== 'pending' && c.approval_status !== 'rejected')
+  // `mapDbCenterToPublic` (backend) returns this field as `approvalStatus`
+  // (camelCase) — filtering on `approval_status` here always fell through to
+  // "approved" and never actually excluded a pending/rejected center.
+  const approvedCenters = (centers || []).filter(c => (c.approvalStatus ?? 'approved') === 'approved')
   const selectedCenter = approvedCenters.find(c => c.id === selectedCenterId) || approvedCenters[0]
+
+  // Notices/promotions the selected center's receptionist has posted.
+  useEffect(() => {
+    if (!selectedCenter?.id) { setNotices([]); return }
+    let cancelled = false
+    api.getCenterNotices(selectedCenter.id)
+      .then(res => { if (!cancelled) setNotices(res.notices) })
+      .catch(() => { if (!cancelled) setNotices([]) })
+    return () => { cancelled = true }
+  }, [selectedCenter?.id])
 
   // Initialize Map
   useEffect(() => {
@@ -311,6 +327,32 @@ export function LiveClinicMap({
               ))}
             </div>
           </div>
+
+          {notices.length > 0 && (
+            <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Megaphone size={12} color="var(--blue)" /> Notices &amp; Promotions
+              </div>
+              {notices.map(notice => (
+                <div key={notice.id} style={{
+                  display: 'flex', gap: 10, padding: 10, borderRadius: 10,
+                  background: 'var(--blue-dim)', border: '1px solid var(--blue-border)',
+                }}>
+                  {notice.imageUrl && (
+                    <img
+                      src={notice.imageUrl}
+                      alt=""
+                      style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }}
+                    />
+                  )}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--blue-dark)' }}>{notice.title}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2, lineHeight: 1.45 }}>{notice.message}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <button
             type="button"

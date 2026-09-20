@@ -12,7 +12,7 @@ import {
 
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
-import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter, getCenterClosures, createCenterClosure, deleteCenterClosure, getCenterDayHours, putCenterDateHours, deleteCenterDateHours, putDoctorDateHours, deleteDoctorDateHours } from '../controllers/centerController.js';
+import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter, getCenterClosures, createCenterClosure, deleteCenterClosure, getCenterDayHours, putCenterDateHours, deleteCenterDateHours, putDoctorDateHours, deleteDoctorDateHours, getCenterNotices, createCenterNotice, deleteCenterNotice } from '../controllers/centerController.js';
 import { createAppointment, getAppointments, getPatientAppointments, cancelAppointment } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary, getPendingDoctors, approveDoctor, rejectDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
@@ -140,6 +140,12 @@ router.get('/centers/:centerId/closures', getCenterClosures);
 router.post('/centers/:centerId/closures', authMiddleware, requireRole(['receptionist', 'admin']), createCenterClosure);
 router.delete('/centers/:centerId/closures/:date', authMiddleware, requireRole(['receptionist', 'admin']), deleteCenterClosure);
 
+// Notices & promotions (migration 016). Read is public so patients see them;
+// writing is staff-only and a receptionist is limited to their own center.
+router.get('/centers/:centerId/notices', getCenterNotices);
+router.post('/centers/:centerId/notices', authMiddleware, requireRole(['receptionist', 'admin']), createCenterNotice);
+router.delete('/centers/:centerId/notices/:noticeId', authMiddleware, requireRole(['receptionist', 'admin']), deleteCenterNotice);
+
 // Date-specific hours (migration 014). Read is public like the closures read;
 // writes are staff-only and a receptionist is limited to their own center.
 router.get('/centers/:centerId/day-hours', getCenterDayHours);
@@ -148,7 +154,7 @@ router.delete('/centers/:centerId/center-hours/:date', authMiddleware, requireRo
 router.put('/centers/:centerId/doctor-hours', authMiddleware, requireRole(['receptionist', 'admin']), putDoctorDateHours);
 router.delete('/centers/:centerId/doctor-hours/:doctorId/:date', authMiddleware, requireRole(['receptionist', 'admin']), deleteDoctorDateHours);
 
-router.put('/centers/:id', authMiddleware, requireRole(['admin']), updateCenter);
+router.put('/centers/:id', authMiddleware, requireRole(['receptionist', 'admin']), updateCenter);
 router.delete('/centers/:id', authMiddleware, requireRole(['admin']), deleteCenter);
 router.patch('/centers/:id/approve', authMiddleware, requireRole(['admin']), approveCenter);
 router.patch('/centers/:id/reject', authMiddleware, requireRole(['admin']), rejectCenter);
