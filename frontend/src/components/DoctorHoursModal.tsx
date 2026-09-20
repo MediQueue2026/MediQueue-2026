@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Clock, CheckCircle2, Save, Zap, CalendarDays } from 'lucide-react'
+import { X, Clock, CheckCircle2, Save, Zap, CalendarDays, Plus, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiDoctor, ApiDoctorHour } from '../lib/api'
 
@@ -9,10 +9,18 @@ const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 /** Returns hours between two "HH:MM" strings (can be negative if end < start). */
 function hoursBetween(start: string, end: string): number {
   const toMins = (t: string) => {
-    const [h, m] = t.split(':').map(Number)
+    const [h, m] = (t || '00:00').split(':').map(Number)
     return h * 60 + (m || 0)
   }
   return (toMins(end) - toMins(start)) / 60
+}
+
+function calcTotalSessionHours(sessions: { startTime: string; endTime: string }[]): number {
+  let sum = 0
+  for (const s of sessions) {
+    sum += Math.max(0, hoursBetween(s.startTime, s.endTime))
+  }
+  return sum
 }
 
 export default function DoctorHoursModal({
@@ -46,7 +54,13 @@ export default function DoctorHoursModal({
     setError(null)
     api.getDoctorHours(doctor.id, centerId)
       .then(res => {
-        setHours(res.hours)
+        const formatted = (res.hours || []).map(h => ({
+          ...h,
+          sessions: (h.sessions && h.sessions.length > 0)
+            ? h.sessions
+            : [{ startTime: h.startTime || '08:00', endTime: h.endTime || '17:00' }]
+        }))
+        setHours(formatted)
         setMaxPerHour(res.maxAppointmentsPerHour)
         setAdvanceDays(res.advanceBookingDays || 7)
       })
@@ -55,6 +69,7 @@ export default function DoctorHoursModal({
         const defaults: ApiDoctorHour[] = Array.from({ length: 7 }, (_, dow) => ({
           id: null, doctorId: doctor.id, dayOfWeek: dow,
           startTime: '08:00', endTime: '17:00',
+          sessions: [{ startTime: '08:00', endTime: '17:00' }],
           isAvailable: dow >= 1 && dow <= 5,
           dailyCapacity: dow >= 1 && dow <= 5 ? 9 * (doctor.maxAppointmentsPerHour ?? 4) : 0,
         }))
@@ -67,25 +82,96 @@ export default function DoctorHoursModal({
 
   if (!isOpen || !doctor) return null
 
-  const updateDay = (dow: number, patch: Partial<ApiDoctorHour>) => {
-    setHours(prev => prev.map(h => {
+  const updateSession = (dow: number, index: number, patch: Partial<{ startTime: string; endTime: string }>) => {
+    setHours((prev: ApiDoctorHour[]) => prev.map((h: ApiDoctorHour) => {
       if (h.dayOfWeek !== dow) return h
-      const updated = { ...h, ...patch }
-      const hrs = Math.max(0, hoursBetween(updated.startTime, updated.endTime))
-      updated.dailyCapacity = updated.isAvailable ? Math.round(hrs * maxPerHour) : 0
-      return updated
+      const currentSessions = (h.sessions && h.sessions.length > 0)
+        ? h.sessions
+        : [{ startTime: h.startTime, endTime: h.endTime }]
+      const updatedSessions = currentSessions.map((s, idx) => idx === index ? { ...s, ...patch } : s)
+      const totalHrs = calcTotalSessionHours(updatedSessions)
+      return {
+        ...h,
+        sessions: updatedSessions,
+        startTime: updatedSessions[0]?.startTime || '08:00',
+        endTime: updatedSessions[updatedSessions.length - 1]?.endTime || '17:00',
+        dailyCapacity: h.isAvailable ? Math.round(totalHrs * maxPerHour) : 0,
+      }
+    }))
+  }
+
+  const addSession = (dow: number) => {
+    setHours((prev: ApiDoctorHour[]) => prev.map((h: ApiDoctorHour) => {
+      if (h.dayOfWeek !== dow) return h
+      const currentSessions = (h.sessions && h.sessions.length > 0)
+        ? [...h.sessions]
+        : [{ startTime: h.startTime, endTime: h.endTime }]
+      const lastEnd = currentSessions[currentSessions.length - 1]?.endTime || '12:00'
+      const lastEndH = parseInt(lastEnd.split(':')[0], 10)
+      const nextStartH = Math.min(22, Math.max(lastEndH + 1, 14))
+      const nextEndH = Math.min(23, nextStartH + 3)
+      const newSession = {
+        startTime: `${String(nextStartH).padStart(2, '0')}:00`,
+        endTime: `${String(nextEndH).padStart(2, '0')}:00`,
+      }
+      const updatedSessions = [...currentSessions, newSession]
+      const totalHrs = calcTotalSessionHours(updatedSessions)
+      return {
+        ...h,
+        sessions: updatedSessions,
+        startTime: updatedSessions[0].startTime,
+        endTime: updatedSessions[updatedSessions.length - 1].endTime,
+        dailyCapacity: h.isAvailable ? Math.round(totalHrs * maxPerHour) : 0,
+      }
+    }))
+  }
+
+  const removeSession = (dow: number, index: number) => {
+    setHours((prev: ApiDoctorHour[]) => prev.map((h: ApiDoctorHour) => {
+      if (h.dayOfWeek !== dow) return h
+      const currentSessions = (h.sessions && h.sessions.length > 0)
+        ? [...h.sessions]
+        : [{ startTime: h.startTime, endTime: h.endTime }]
+      if (currentSessions.length <= 1) return h
+      currentSessions.splice(index, 1)
+      const totalHrs = calcTotalSessionHours(currentSessions)
+      return {
+        ...h,
+        sessions: currentSessions,
+        startTime: currentSessions[0].startTime,
+        endTime: currentSessions[currentSessions.length - 1].endTime,
+        dailyCapacity: h.isAvailable ? Math.round(totalHrs * maxPerHour) : 0,
+      }
+    }))
+  }
+
+  const updateDayAvailability = (dow: number, isAvailable: boolean) => {
+    setHours((prev: ApiDoctorHour[]) => prev.map((h: ApiDoctorHour) => {
+      if (h.dayOfWeek !== dow) return h
+      const currentSessions = (h.sessions && h.sessions.length > 0)
+        ? h.sessions
+        : [{ startTime: h.startTime, endTime: h.endTime }]
+      const totalHrs = calcTotalSessionHours(currentSessions)
+      return {
+        ...h,
+        isAvailable,
+        dailyCapacity: isAvailable ? Math.round(totalHrs * maxPerHour) : 0,
+      }
     }))
   }
 
   const recomputeCapacities = (mph: number) => {
     setMaxPerHour(mph)
-    setHours(prev => prev.map(h => {
-      const hrs = Math.max(0, hoursBetween(h.startTime, h.endTime))
-      return { ...h, dailyCapacity: h.isAvailable ? Math.round(hrs * mph) : 0 }
+    setHours((prev: ApiDoctorHour[]) => prev.map((h: ApiDoctorHour) => {
+      const currentSessions = (h.sessions && h.sessions.length > 0)
+        ? h.sessions
+        : [{ startTime: h.startTime, endTime: h.endTime }]
+      const totalHrs = calcTotalSessionHours(currentSessions)
+      return { ...h, dailyCapacity: h.isAvailable ? Math.round(totalHrs * mph) : 0 }
     }))
   }
 
-  const totalWeeklyCapacity = hours.reduce((sum, h) => sum + h.dailyCapacity, 0)
+  const totalWeeklyCapacity = hours.reduce((sum: number, h: ApiDoctorHour) => sum + h.dailyCapacity, 0)
 
   const handleSave = async () => {
     setSaving(true)
@@ -98,6 +184,7 @@ export default function DoctorHoursModal({
           startTime: h.startTime,
           endTime: h.endTime,
           isAvailable: h.isAvailable,
+          sessions: h.sessions,
         })),
         maxPerHour,
         advanceDays,
@@ -123,7 +210,7 @@ export default function DoctorHoursModal({
       padding: 16,
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 640, maxHeight: '94vh',
+        width: '100%', maxWidth: 780, maxHeight: '94vh',
         background: 'rgba(255,255,255,0.95)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
@@ -232,19 +319,20 @@ export default function DoctorHoursModal({
             </div>
 
             {/* Day rows */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {hours.map(h => {
-                const hrs = Math.max(0, hoursBetween(h.startTime, h.endTime))
-                const invalid = h.isAvailable && hrs <= 0
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {hours.map((h: ApiDoctorHour) => {
+                const daySessions = (h.sessions && h.sessions.length > 0)
+                  ? h.sessions
+                  : [{ startTime: h.startTime, endTime: h.endTime }]
 
                 return (
                   <div key={h.dayOfWeek} style={{
                     display: 'grid',
-                    gridTemplateColumns: '90px 1fr auto',
-                    alignItems: 'center',
+                    gridTemplateColumns: '100px 1fr auto',
+                    alignItems: 'start',
                     gap: 12,
-                    padding: '12px 14px',
-                    borderRadius: 12,
+                    padding: '14px 16px',
+                    borderRadius: 14,
                     background: h.isAvailable
                       ? 'rgba(16, 185, 129, 0.05)'
                       : 'rgba(0,0,0,0.02)',
@@ -253,12 +341,12 @@ export default function DoctorHoursModal({
                   }}>
                     {/* Day toggle */}
                     <label style={{
-                      display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', paddingTop: 6,
                     }}>
                       <input
                         type="checkbox"
                         checked={h.isAvailable}
-                        onChange={e => updateDay(h.dayOfWeek, { isAvailable: e.target.checked })}
+                        onChange={e => updateDayAvailability(h.dayOfWeek, e.target.checked)}
                         style={{ width: 16, height: 16, accentColor: '#10B981', cursor: 'pointer' }}
                       />
                       <span style={{
@@ -270,39 +358,80 @@ export default function DoctorHoursModal({
                       </span>
                     </label>
 
-                    {/* Time inputs */}
+                    {/* Sessions list */}
                     {h.isAvailable ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <input
-                          type="time"
-                          value={h.startTime}
-                          onChange={e => updateDay(h.dayOfWeek, { startTime: e.target.value })}
-                          style={timeInputStyle(invalid)}
-                        />
-                        <span style={{ fontSize: 12, color: 'var(--text-4)', flexShrink: 0 }}>to</span>
-                        <input
-                          type="time"
-                          value={h.endTime}
-                          onChange={e => updateDay(h.dayOfWeek, { endTime: e.target.value })}
-                          style={timeInputStyle(invalid)}
-                        />
-                        {invalid && (
-                          <span style={{ fontSize: 11, color: '#dc2626', whiteSpace: 'nowrap' }}>
-                            end must be after start
-                          </span>
-                        )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {daySessions.map((s, idx) => {
+                          const hrs = Math.max(0, hoursBetween(s.startTime, s.endTime))
+                          const invalid = hrs <= 0
+                          return (
+                            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', width: 62 }}>
+                                Session {idx + 1}:
+                              </span>
+                              <input
+                                type="time"
+                                value={s.startTime}
+                                onChange={e => updateSession(h.dayOfWeek, idx, { startTime: e.target.value })}
+                                style={timeInputStyle(invalid)}
+                              />
+                              <span style={{ fontSize: 12, color: 'var(--text-4)', flexShrink: 0 }}>to</span>
+                              <input
+                                type="time"
+                                value={s.endTime}
+                                onChange={e => updateSession(h.dayOfWeek, idx, { endTime: e.target.value })}
+                                style={timeInputStyle(invalid)}
+                              />
+                              {daySessions.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeSession(h.dayOfWeek, idx)}
+                                  title="Remove session"
+                                  style={{
+                                    background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                                    borderRadius: 6, width: 30, height: 30, display: 'flex', alignItems: 'center',
+                                    justifyContent: 'center', color: '#ef4444', cursor: 'pointer', flexShrink: 0,
+                                  }}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                              {invalid && (
+                                <span style={{ fontSize: 11, color: '#dc2626', whiteSpace: 'nowrap' }}>
+                                  end must be after start
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })}
+                        <div style={{ marginTop: 2 }}>
+                          <button
+                            type="button"
+                            onClick={() => addSession(h.dayOfWeek)}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              padding: '3px 10px', fontSize: 11.5, fontWeight: 700,
+                              color: '#059669', background: 'rgba(16,185,129,0.1)',
+                              border: '1px solid rgba(16,185,129,0.25)', borderRadius: 6,
+                              cursor: 'pointer', transition: 'all 0.15s',
+                            }}
+                          >
+                            <Plus size={13} /> Add Session
+                          </button>
+                        </div>
                       </div>
                     ) : (
-                      <span style={{ fontSize: 12.5, color: 'var(--text-4)', fontStyle: 'italic' }}>
+                      <span style={{ fontSize: 12.5, color: 'var(--text-4)', fontStyle: 'italic', paddingTop: 6 }}>
                         Not available
                       </span>
                     )}
 
                     {/* Capacity chip */}
                     <div style={{
-                      minWidth: 72, textAlign: 'right',
+                      minWidth: 76, textAlign: 'right',
                       fontSize: 12, fontWeight: 700,
                       color: h.isAvailable ? '#10B981' : 'var(--text-4)',
+                      paddingTop: 6,
                     }}>
                       {h.isAvailable
                         ? `${h.dailyCapacity} slots`
@@ -317,14 +446,21 @@ export default function DoctorHoursModal({
             <div style={{
               fontSize: 10.5, color: 'var(--text-4)', display: 'flex', gap: 6, flexWrap: 'wrap',
             }}>
-              {hours.map(h => h.isAvailable && (
-                <span key={h.dayOfWeek} style={{
-                  background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)',
-                  borderRadius: 6, padding: '2px 8px', fontWeight: 600,
-                }}>
-                  {DAY_NAMES[h.dayOfWeek]}: {h.startTime} – {h.endTime} ({h.dailyCapacity} slots)
-                </span>
-              ))}
+              {hours.map((h: ApiDoctorHour) => {
+                if (!h.isAvailable) return null
+                const daySessions = (h.sessions && h.sessions.length > 0)
+                  ? h.sessions
+                  : [{ startTime: h.startTime, endTime: h.endTime }]
+                const sessionStr = daySessions.map(s => `${s.startTime}–${s.endTime}`).join(', ')
+                return (
+                  <span key={h.dayOfWeek} style={{
+                    background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)',
+                    borderRadius: 6, padding: '2px 8px', fontWeight: 600,
+                  }}>
+                    {DAY_NAMES[h.dayOfWeek]}: {sessionStr} ({h.dailyCapacity} slots)
+                  </span>
+                )
+              })}
             </div>
 
             {error && (

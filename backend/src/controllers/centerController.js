@@ -28,6 +28,7 @@ function mapDbCenterToPublic(row) {
     phone: row.phone ?? null,
     email: row.email ?? null,
     website: row.website ?? null,
+    imageUrl: row.image_url ?? null,
     status: row.status ?? 'operational',
     approvalStatus: row.approval_status ?? 'approved',
     requestedByName: row.requested_by_name ?? null,
@@ -281,19 +282,46 @@ export async function createCenter(req, res, next) {
   }
 }
 
+/**
+ * PUT /centers/:id
+ * A receptionist maintains their own center's public profile (photo,
+ * location, contact number, opening hours, services); a Super Admin can
+ * additionally change identity/compliance fields (city) and operational
+ * status.
+ */
 export async function updateCenter(req, res, next) {
   try {
     const { id } = req.params;
+    const isAdmin = req.user?.role === 'admin';
+
+    // A receptionist may only maintain the one center they manage — without
+    // this, guessing another center's id would let them overwrite its profile.
+    if (req.user?.role === 'receptionist' && req.user?.centerId !== id) {
+      return res.status(403).json({ error: 'You can only edit your own medical center profile.' });
+    }
+
     const updates = {};
 
     if (typeof req.body.name === 'string') updates.name = req.body.name;
-    if (typeof req.body.city === 'string') updates.city = req.body.city;
     if (typeof req.body.address === 'string') updates.address = req.body.address;
     if (typeof req.body.openingHours === 'string') updates.opening_hours = req.body.openingHours;
     if (Array.isArray(req.body.services)) updates.services = req.body.services;
     if (typeof req.body.phone === 'string') updates.phone = req.body.phone;
     if (typeof req.body.email === 'string') updates.email = req.body.email;
-    if (typeof req.body.status === 'string') updates.status = req.body.status;
+    if (typeof req.body.website === 'string') updates.website = req.body.website;
+    if (typeof req.body.imageUrl === 'string' || req.body.imageUrl === null) updates.image_url = req.body.imageUrl;
+    if (req.body.latitude !== undefined && req.body.latitude !== null && Number.isFinite(Number(req.body.latitude))) {
+      updates.latitude = Number(req.body.latitude);
+    }
+    if (req.body.longitude !== undefined && req.body.longitude !== null && Number.isFinite(Number(req.body.longitude))) {
+      updates.longitude = Number(req.body.longitude);
+    }
+
+    // Identity/compliance and operational status stay admin-only.
+    if (isAdmin) {
+      if (typeof req.body.city === 'string') updates.city = req.body.city;
+      if (typeof req.body.status === 'string') updates.status = req.body.status;
+    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No valid fields provided for update' });
@@ -305,19 +333,27 @@ export async function updateCenter(req, res, next) {
       .eq('id', id)
       .select();
 
-    if (error && (error.message?.includes('status') || error.code === 'PGRST204')) {
-      const { status: _, ...updatesWithoutStatus } = updates;
-      if (Object.keys(updatesWithoutStatus).length > 0) {
-        const retry = await supabase
-          .from('medical_centers')
-          .update(updatesWithoutStatus)
-          .eq('id', id)
-          .select();
-        data = retry.data;
-        error = retry.error;
-      } else {
+    // Older databases predating a given migration (e.g. `image_url`, before
+    // 015) reject the whole update on the missing column — drop columns one
+    // at a time and retry so the fields that DO exist still get saved.
+    while (error && isMissingColumnError(error) && Object.keys(updates).length > 0) {
+      const missingKey = Object.keys(updates).find(k => (error.message || '').includes(k))
+        ?? Object.keys(updates)[Object.keys(updates).length - 1];
+      delete updates[missingKey];
+
+      if (Object.keys(updates).length === 0) {
         error = null;
+        data = [];
+        break;
       }
+
+      const retry = await supabase
+        .from('medical_centers')
+        .update(updates)
+        .eq('id', id)
+        .select();
+      data = retry.data;
+      error = retry.error;
     }
 
     if (error) {
@@ -326,12 +362,21 @@ export async function updateCenter(req, res, next) {
 
     const updated = data && data[0] ? mapDbCenterToPublic(data[0]) : { id, ...updates };
 
-    if (typeof req.body.status === 'string') {
+    if (isAdmin && typeof req.body.status === 'string') {
       await writeAuditLog({
         actorName: req.user?.fullName || req.user?.email || 'System Admin',
         actorRole: req.user?.role || 'admin',
         eventType: req.body.status === 'maintenance' ? 'center_suspend' : 'center_edit',
         action: `Medical center ${req.body.status === 'maintenance' ? 'suspended' : 'updated'}: ${updated.name || 'Center'}`,
+        centerName: updated.name || 'Center',
+        status: 'completed',
+      });
+    } else if (!isAdmin) {
+      await writeAuditLog({
+        actorName: req.user?.fullName || req.user?.email || 'Receptionist',
+        actorRole: req.user?.role || 'receptionist',
+        eventType: 'center_edit',
+        action: `Medical center profile updated: ${updated.name || 'Center'}`,
         centerName: updated.name || 'Center',
         status: 'completed',
       });
@@ -797,6 +842,120 @@ export async function deleteCenterClosure(req, res, next) {
     res.json({
       message: `${date} re-opened for new bookings. Appointments already cancelled were not restored.`,
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── Notices & Promotions (migration 016) ────────────────────────────────────
+
+function mapNotice(row) {
+  return {
+    id: row.id,
+    centerId: row.center_id,
+    title: row.title,
+    message: row.message,
+    imageUrl: row.image_url ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * GET /centers/:centerId/notices
+ * Public, like getCenterClosures — patients read a center's notices without
+ * being signed in. Degrades to an empty list rather than 500 on a database
+ * that predates migration 016.
+ */
+export async function getCenterNotices(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const { data, error } = await supabase
+      .from('center_notices')
+      .select('*')
+      .eq('center_id', centerId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('getCenterNotices notice:', error.message);
+      return res.json({ notices: [] });
+    }
+
+    res.json({ notices: (data || []).map(mapNotice) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /centers/:centerId/notices  { title, message, imageUrl? }
+ * A receptionist posts a notice/promotion for their own center; an admin may
+ * post to any center. The image is optional — upload it first via /uploads
+ * and pass the resulting URL.
+ */
+export async function createCenterNotice(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const title = String(req.body.title || '').trim();
+    const message = String(req.body.message || '').trim();
+    if (!title || !message) {
+      return res.status(400).json({ error: 'A title and message are required.' });
+    }
+
+    const { data: center } = await supabase
+      .from('medical_centers')
+      .select('id, name')
+      .eq('id', centerId)
+      .maybeSingle();
+    if (!center) return res.status(404).json({ error: 'That medical center no longer exists.' });
+
+    const { data, error } = await supabase
+      .from('center_notices')
+      .insert([{
+        center_id: centerId,
+        title,
+        message,
+        image_url: req.body.imageUrl || null,
+        created_by: req.user?.id || null,
+      }])
+      .select();
+    if (error) return res.status(500).json({ error: error.message });
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'Receptionist',
+      actorRole: req.user?.role || 'receptionist',
+      eventType: 'center_edit',
+      action: `Posted notice "${title}" for ${center.name}`,
+      centerName: center.name,
+      status: 'completed',
+    });
+
+    res.status(201).json({ message: 'Notice posted', notice: mapNotice(data[0]) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /centers/:centerId/notices/:noticeId
+ * Receptionist may only remove notices from their own center.
+ */
+export async function deleteCenterNotice(req, res, next) {
+  try {
+    const { centerId, noticeId } = req.params;
+    const authErr = closureAuthError(req, centerId);
+    if (authErr) return res.status(403).json({ error: authErr });
+
+    const { error } = await supabase
+      .from('center_notices')
+      .delete()
+      .eq('id', noticeId)
+      .eq('center_id', centerId);
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ message: 'Notice removed' });
   } catch (err) {
     next(err);
   }

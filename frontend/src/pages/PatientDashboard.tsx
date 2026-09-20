@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  Bell, Calendar, ClipboardList, Download, Eye, FileText, FileUp, Heart, Home, LogOut,
-  Map, MapPin, Menu, Plus, Search, Settings, ShieldCheck, Ticket, User, X
+  Bell, Building2, Calendar, ClipboardList, Download, Eye, FileText, FileUp, Heart, Home, LogOut,
+  Map as MapIcon, MapPin, Menu, Plus, Search, Settings, ShieldCheck, Ticket, User, X
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -12,6 +12,7 @@ import { UploadReportModal } from '../components/UploadReportModal'
 import { BookAppointmentModal } from '../components/BookAppointmentModal'
 import { ViewReportModal, downloadRecordFile, isRealFileUrl } from '../components/ViewReportModal'
 import { LiveClinicMap } from '../components/LiveClinicMap'
+import CenterProfilePage from '../components/CenterProfilePage'
 import {
   fetchPatientProfile,
   savePatientProfile,
@@ -40,7 +41,7 @@ function timeAgo(iso: string): string {
 
 const NAV_PATIENT = [
   { id: 'overview',      icon: <Home size={15} />,         label: 'Overview' },
-  { id: 'doctors',       icon: <Search size={15} />,       label: 'Browse Doctors' },
+  { id: 'centers',       icon: <Building2 size={15} />,    label: 'Browse Medical Centers' },
   { id: 'subscriptions', icon: <Heart size={15} />,        label: 'Subscribed Doctors' },
   { id: 'token',         icon: <Ticket size={15} />,       label: 'Live Token' },
   { id: 'history',       icon: <ClipboardList size={15} />,label: 'Medical History & Reports' },
@@ -50,12 +51,12 @@ const NAV_PATIENT = [
 export default function PatientDashboard() {
   const [nav, setNav] = useState('overview')
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [docSearch, setDocSearch] = useState('')
-  const [selectedSpec, setSelectedSpec] = useState('All')
+  const [centerSearch, setCenterSearch] = useState('')
 
   // Dynamic state loaded from Supabase / REST API
   const [doctors, setDoctors] = useState<any[]>([])
   const [centers, setCenters] = useState<any[]>([])
+  const [centersLoaded, setCentersLoaded] = useState(false)
   const [selectedMapCenterId, setSelectedMapCenterId] = useState<string>('')
   const [subscribedIds, setSubscribedIds] = useState<string[]>([])
   const [signingOut, setSigningOut] = useState(false)
@@ -68,11 +69,30 @@ export default function PatientDashboard() {
   const [showBookModal, setShowBookModal] = useState(false)
   const [showViewReportModal, setShowViewReportModal] = useState(false)
   const [selectedReport, setSelectedReport] = useState<HealthRecordItem | null>(null)
-  const [selectedDoctorForBooking, setSelectedDoctorForBooking] = useState('')
   const [selectedCenterForBooking, setSelectedCenterForBooking] = useState('')
+  const [selectedDoctorForBooking, setSelectedDoctorForBooking] = useState('')
 
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // A patient must never see a center still awaiting (or denied) Super Admin
+  // approval — the backend already filters `GET /centers` to approved-only,
+  // but a missing `approvalStatus` on an older row reads as undefined, so
+  // this is checked explicitly rather than assumed approved.
+  const approvedCenters = centers.filter(c => (c.approvalStatus ?? 'approved') === 'approved')
+
+  /** `/patient/centers/:id` is a routed page (not a popup) — matched here since
+   *  this dashboard doesn't otherwise use nested `<Routes>` for its tabs. */
+  const routedCenterId = location.pathname.match(/^\/patient\/centers\/([^/]+)\/?$/)?.[1] ?? null
+  const routedCenter = routedCenterId ? approvedCenters.find(c => c.id === routedCenterId) ?? null : null
+  const activeNav = routedCenterId ? 'centers' : nav
+
+  const openPatientPage = (page: string) => {
+    setNav(page)
+    setSidebarOpen(false)
+    if (routedCenterId) navigate('/patient')
+  }
 
   // Empty, not 'demo-patient'. That literal was sent to the API as a patient
   // id, and the booking endpoint used to accept any non-UUID by substituting
@@ -146,31 +166,58 @@ export default function PatientDashboard() {
   const firstName = displayName.split(' ')[0]
 
   // Find active appointment / token dynamically
-  const activeAppointment = myAppointments.find(a => a.status === 'waiting' || a.status === 'booked' || a.status === 'in_consultation') || myAppointments[0]
+  const activeAppointment = (myAppointments || []).find(a => a && (a.status === 'waiting' || a.status === 'booked' || a.status === 'in_consultation')) || (myAppointments || [])[0]
+
+  // Keep profile synced with logged-in user credentials
+  useEffect(() => {
+    if (user) {
+      setProfile(prev => ({
+        ...prev,
+        id: user.id || prev.id,
+        email: user.email || prev.email,
+        fullName: prev.fullName && prev.fullName !== 'Patient User' ? prev.fullName : (user.name || prev.fullName),
+      }))
+    }
+  }, [user?.id, user?.name, user?.email])
 
   useEffect(() => {
     let cancelled = false
     async function loadDynamicData() {
-      if (!user) return
-      // Parallel: these are independent reads and the page has six of them.
-      const [pData, rData, aData, dData, cData, sData, alertData] = await Promise.all([
-        fetchPatientProfile(user.id, user.name, user.email),
-        fetchHealthRecords(user.id),
-        fetchPatientAppointments(user.id),
-        fetchDoctorsList(),
-        fetchCentersList(),
-        fetchPatientSubscriptions(user.id),
-        fetchPatientDelayAlerts(user.id),
-      ])
-      if (cancelled) return
-      setProfile(pData)
-      setRecords(rData)
-      setMyAppointments(aData)
-      setDoctors(dData)
-      setCenters(cData)
-      if (cData.length > 0) setSelectedMapCenterId(prev => prev || cData[0].id)
-      setSubscribedIds(sData)
-      setDelayAlerts(alertData)
+      if (!user || !user.id) return
+      try {
+        const [pData, rData, aData, dData, cData, sData, alertData] = await Promise.all([
+          fetchPatientProfile(user.id, user.name, user.email).catch(() => null),
+          fetchHealthRecords(user.id).catch(() => []),
+          fetchPatientAppointments(user.id).catch(() => []),
+          fetchDoctorsList().catch(() => []),
+          fetchCentersList().catch(() => []),
+          fetchPatientSubscriptions(user.id).catch(() => []),
+          fetchPatientDelayAlerts(user.id).catch(() => []),
+        ])
+        if (cancelled) return
+        if (pData) {
+          setProfile(prev => ({
+            ...prev,
+            ...pData,
+            email: pData.email || prev.email || user?.email || '',
+            fullName: pData.fullName || prev.fullName || user?.name || 'Patient User',
+            smsAlertsEnabled: pData.smsAlertsEnabled ?? prev.smsAlertsEnabled ?? true,
+            delayAlertsEnabled: pData.delayAlertsEnabled ?? prev.delayAlertsEnabled ?? true,
+          }))
+        }
+        if (rData) setRecords(rData)
+        if (aData) setMyAppointments(aData)
+        if (dData) setDoctors(dData)
+        if (cData) {
+          setCenters(cData)
+          if (cData.length > 0) setSelectedMapCenterId(prev => prev || cData[0].id)
+        }
+        setCentersLoaded(true)
+        if (sData) setSubscribedIds(sData)
+        if (alertData) setDelayAlerts(alertData)
+      } catch (err) {
+        console.warn('PatientDashboard load error:', err)
+      }
     }
     loadDynamicData()
     return () => { cancelled = true }
@@ -239,17 +286,37 @@ export default function PatientDashboard() {
     showToast('✅ Patient Profile & Preferences saved to database!')
   }
 
-  const openBookingForCenter = (centerId: string) => {
+  const openBookingForCenter = (centerId: string, doctorId?: string) => {
     setSelectedCenterForBooking(centerId)
+    setSelectedDoctorForBooking(doctorId ?? '')
     setShowBookModal(true)
   }
 
-  const filteredDoctors = doctors.filter(d => {
-    const docName = d.name || ''
-    const docSpec = d.spec || d.specialization || ''
-    const matchesSearch = docName.toLowerCase().includes(docSearch.toLowerCase()) || docSpec.toLowerCase().includes(docSearch.toLowerCase())
-    const matchesSpec = selectedSpec === 'All' || docSpec.toLowerCase().includes(selectedSpec.toLowerCase())
-    return matchesSearch && matchesSpec
+  const centerQuery = centerSearch.trim().toLowerCase()
+  const matchingDoctorsByCenter = new Map<string, Set<string>>()
+  if (centerQuery) {
+    for (const doctor of doctors) {
+      if (!(doctor.name || '').toLowerCase().includes(centerQuery)) continue
+      const centerIds = new Set<string>([
+        doctor.centerId,
+        ...(Array.isArray(doctor.centers) ? doctor.centers.map((assignment: { centerId: string }) => assignment.centerId) : []),
+      ].filter(Boolean))
+      for (const centerId of centerIds) {
+        const names = matchingDoctorsByCenter.get(centerId) ?? new Set<string>()
+        names.add(doctor.name)
+        matchingDoctorsByCenter.set(centerId, names)
+      }
+    }
+  }
+
+  const filteredCenters = approvedCenters.filter(c => {
+    const q = centerQuery
+    if (!q) return true
+    return (c.name || '').toLowerCase().includes(q)
+      || (c.city || '').toLowerCase().includes(q)
+      || (c.address || '').toLowerCase().includes(q)
+      || (Array.isArray(c.services) && c.services.some((s: string) => s.toLowerCase().includes(q)))
+      || matchingDoctorsByCenter.has(c.id)
   })
 
   const filteredRecords = records.filter(r => {
@@ -286,8 +353,8 @@ export default function PatientDashboard() {
         isOpen={showBookModal}
         onClose={() => setShowBookModal(false)}
         patientId={activeUserId}
-        preselectedDoctor={selectedDoctorForBooking}
         preselectedCenter={selectedCenterForBooking}
+        preselectedDoctor={selectedDoctorForBooking}
         onBookingSuccess={newApt => {
           setMyAppointments([newApt, ...myAppointments])
           showToast(`🎉 Appointment booked! Queue Token assigned: ${newApt.queueToken}`)
@@ -298,7 +365,6 @@ export default function PatientDashboard() {
         onClose={() => setShowViewReportModal(false)}
         record={selectedReport}
       />
-
       {/* Toast Notification */}
       {toastMessage && (
         <div style={{
@@ -338,10 +404,10 @@ export default function PatientDashboard() {
           {NAV_PATIENT.map(item => (
             <button
               key={item.id}
-              className={`nav-link ${nav === item.id ? 'active' : ''}`}
-              onClick={() => { setNav(item.id); setSidebarOpen(false) }}
+              className={`nav-link ${activeNav === item.id ? 'active' : ''}`}
+              onClick={() => openPatientPage(item.id)}
             >
-              <span style={{ color: nav === item.id ? 'var(--blue)' : 'var(--text-4)' }}>{item.icon}</span>
+              <span style={{ color: activeNav === item.id ? 'var(--blue)' : 'var(--text-4)' }}>{item.icon}</span>
               {item.label}
             </button>
           ))}
@@ -392,7 +458,7 @@ export default function PatientDashboard() {
                 'No active appointment for today. Click "Book Doctor" to schedule.'
               )}
             </span>
-            <button onClick={() => { setNav('token'); setSidebarOpen(false) }} className="btn btn-sm" style={{ marginLeft: 'auto', flexShrink: 0, background: 'var(--blue-dim)', color: 'var(--blue)', border: '1px solid var(--blue-border)', fontWeight: 600, fontSize: 11, padding: '4px 10px' }}>View Token</button>
+            <button onClick={() => openPatientPage('token')} className="btn btn-sm" style={{ marginLeft: 'auto', flexShrink: 0, background: 'var(--blue-dim)', color: 'var(--blue)', border: '1px solid var(--blue-border)', fontWeight: 600, fontSize: 11, padding: '4px 10px' }}>View Token</button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
@@ -403,15 +469,25 @@ export default function PatientDashboard() {
               compact
               phone={profile.phone}
               nic={profile.nic}
-              onEditProfile={() => {
-                setNav('settings')
-                setSidebarOpen(false)
-              }}
+              onEditProfile={() => openPatientPage('settings')}
             />
           </div>
         </div>
 
         <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {routedCenterId ? (
+            <CenterProfilePage
+              center={routedCenter}
+              loading={!centersLoaded}
+              doctors={doctors}
+              subscribedIds={subscribedIds}
+              onToggleSubscribe={toggleSubscribe}
+              onBook={openBookingForCenter}
+              onBack={() => openPatientPage('centers')}
+            />
+          ) : (
+          <>
 
           {/* OVERVIEW TAB & LIVE TOKEN TAB */}
           {(nav === 'overview' || nav === 'token') && (
@@ -579,7 +655,7 @@ export default function PatientDashboard() {
                 <div className="card glass-form-card" style={{ padding: 24, textAlign: 'center' }}>
                   <Ticket size={32} color="var(--text-4)" style={{ margin: '0 auto 8px' }} />
                   <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>No Active Token for Today</div>
-                  <p style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 4, marginBottom: 14 }}>Browse doctors below or click 'Book Appointment' to schedule a consultation slot.</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 4, marginBottom: 14 }}>Browse medical centers below or click 'Book Appointment' to schedule a consultation slot.</p>
                   <button onClick={() => setShowBookModal(true)} className="btn btn-primary btn-sm" style={{ margin: '0 auto' }}>
                     <Plus size={14} /> Book Doctor Appointment
                   </button>
@@ -593,7 +669,7 @@ export default function PatientDashboard() {
                 <div className="card glass-form-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Map size={16} color="var(--blue)" />
+                      <MapIcon size={16} color="var(--blue)" />
                       <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>Interactive Live Clinic Navigator & Locator</span>
                     </div>
                     <StatusBadge status="active" />
@@ -659,79 +735,84 @@ export default function PatientDashboard() {
             </>
           )}
 
-          {/* BROWSE DOCTORS TAB */}
-          {nav === 'doctors' && (
+          {/* BROWSE MEDICAL CENTERS TAB */}
+          {nav === 'centers' && (
             <div className="card glass-form-card" style={{ padding: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-                <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Find & Browse Doctors</h3>
-                  <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Search by doctor name, specialty, or clinic room</div>
-                </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {['All', 'Cardiology', 'General', 'Pediatrics', 'Neurology', 'Orthopedics'].map(s => (
-                    <button key={s} onClick={() => setSelectedSpec(s)} className="btn btn-sm" style={{
-                      background: selectedSpec === s ? 'var(--blue)' : '#fff',
-                      color: selectedSpec === s ? '#fff' : 'var(--text-2)',
-                      border: '1px solid var(--border-md)'
-                    }}>{s}</button>
-                  ))}
-                </div>
+              <div style={{ marginBottom: 20 }}>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Browse Medical Centers</h3>
+                <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Search by name, city, or a service they offer — open a profile for full details</div>
               </div>
 
               {/* Search Bar */}
               <div style={{ position: 'relative', marginBottom: 20 }}>
-                <Search size={16} color="var(--text-4)" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+                <Search size={18} aria-hidden="true" color="var(--text-3)" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 1, pointerEvents: 'none' }} />
                 <input
                   className="input"
-                  placeholder="Search doctor by name (e.g. Dr. Aisha Patel) or specialty..."
-                  value={docSearch}
-                  onChange={e => setDocSearch(e.target.value)}
-                  style={{ paddingLeft: 40, height: 44, fontSize: 14 }}
+                  placeholder="Search by doctor, center name, city, or service…"
+                  aria-label="Search medical centers by doctor, center name, city, or service"
+                  value={centerSearch}
+                  onChange={e => setCenterSearch(e.target.value)}
+                  style={{ paddingLeft: 42, height: 44, fontSize: 14 }}
                 />
               </div>
 
-              <div className="responsive-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-                {filteredDoctors.length > 0 ? (
-                  filteredDoctors.map(doc => (
-                    <div key={doc.id} style={{ background: '#ffffff', borderRadius: 14, padding: 18, border: '1px solid var(--border-md)' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-                        <Avatar name={doc.name} size={42} />
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>{doc.name}</div>
-                          {/* Only what's actually recorded — this used to print
-                              "General Medicine · Room 01" for every doctor
-                              regardless of what the database held. */}
-                          <div style={{ fontSize: 12, color: 'var(--blue-dark)', fontWeight: 600 }}>
-                            {[doc.spec, doc.room].filter(Boolean).join(' · ') || 'Details not set'}
+              <div className="patient-center-grid">
+                {filteredCenters.length > 0 ? (
+                  filteredCenters.map(c => (
+                    <div key={c.id} style={{ background: '#ffffff', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--border-md)', display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          {c.imageUrl ? (
+                            <img className="patient-center-thumbnail" src={c.imageUrl} alt="" loading="lazy" />
+                          ) : (
+                            <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--blue-dim)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                              <Building2 size={21} color="var(--blue)" aria-hidden="true" />
+                            </div>
+                          )}
+                          <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>{c.name}</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <MapPin size={11} style={{ flexShrink: 0 }} /> {c.city}
                           </div>
-                          {/* Labelled as the scheduled consult length, because
-                              that is what it is — not a live queue estimate. */}
-                          {doc.avgConsultMinutes != null && (
-                            <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 2 }}>
-                              ~{doc.avgConsultMinutes} min per consultation
-                            </div>
-                          )}
-                          {doc.status === 'delayed' && (
-                            <div style={{ fontSize: 11, color: '#B45309', fontWeight: 700, marginTop: 3 }}>
-                              ⏱ Running {doc.delayMinutes > 0 ? `${doc.delayMinutes} min ` : ''}late
-                            </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
-                        <button onClick={() => toggleSubscribe(doc.name, doc.id)} className="btn btn-sm btn-ghost" style={{ gap: 4 }}>
-                          <Heart size={13} color={subscribedIds.includes(doc.name) ? 'var(--crimson)' : 'var(--text-4)'} fill={subscribedIds.includes(doc.name) ? 'var(--crimson)' : 'none'} />
-                          {subscribedIds.includes(doc.name) ? 'Subscribed' : 'Subscribe'}
-                        </button>
-                        <button onClick={() => { setSelectedDoctorForBooking(doc.id); setShowBookModal(true) }} className="btn btn-sm btn-primary">
-                          Book Slot
-                        </button>
+
+                        {matchingDoctorsByCenter.has(c.id) && (
+                          <div style={{ fontSize: 12, color: 'var(--blue-dark)', background: 'var(--blue-dim)', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5 }}>
+                            <strong>Matching doctors:</strong> {Array.from(matchingDoctorsByCenter.get(c.id)!).join(', ')}
+                          </div>
+                        )}
+
+                        {Array.isArray(c.services) && c.services.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                            {c.services.slice(0, 3).map((s: string) => (
+                              <span key={s} style={{ fontSize: 10.5, background: 'var(--blue-dim)', color: 'var(--blue-dark)', border: '1px solid var(--blue-border)', borderRadius: 6, padding: '2px 7px', fontWeight: 600 }}>
+                                {s}
+                              </span>
+                            ))}
+                            {c.services.length > 3 && (
+                              <span style={{ fontSize: 10.5, color: 'var(--text-4)', fontWeight: 600, padding: '2px 4px' }}>+{c.services.length - 3} more</span>
+                            )}
+                          </div>
+                        )}
+
+                        <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                          <button
+                            type="button"
+                            aria-label={`View ${c.name} profile`}
+                            onClick={() => navigate(`/patient/centers/${c.id}`)}
+                            className="btn btn-sm btn-primary"
+                            style={{ width: '100%', justifyContent: 'center' }}
+                          >
+                            View Profile
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))
                 ) : (
                   <div style={{ gridColumn: '1 / -1', padding: 24, textAlign: 'center', background: '#fff', borderRadius: 12, color: 'var(--text-4)', fontSize: 13 }}>
-                    No doctors found matching "{docSearch || selectedSpec}". Try searching another name or selecting a different specialty filter.
+                    No medical centers found matching "{centerSearch}".
                   </div>
                 )}
               </div>
@@ -761,7 +842,7 @@ export default function PatientDashboard() {
                     ))
                   ) : (
                     <div style={{ padding: 16, background: '#fff', borderRadius: 10, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
-                      No subscribed doctors. Browse doctors to subscribe for delay alerts.
+                      No subscribed doctors. Open a medical center's profile to subscribe to a doctor for delay alerts.
                     </div>
                   )}
                 </div>
@@ -1068,6 +1149,9 @@ export default function PatientDashboard() {
                 </div>
               </form>
             </div>
+          )}
+
+          </>
           )}
 
       {/* Cancellation Confirmation Modal */}

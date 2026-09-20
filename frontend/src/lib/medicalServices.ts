@@ -22,6 +22,22 @@ export interface ServiceGroup {
 
 export const SERVICE_GROUPS: ServiceGroup[] = [
   {
+    label: 'Common Services',
+    services: [
+      'ECG',
+      'Wound care and dressing',
+      'Blood pressure checks',
+      'Blood sugar testing',
+      'Injections and vaccinations',
+      'Nebulization',
+      'Basic laboratory tests',
+      'General doctor consultations',
+      'Minor injury treatment',
+      'Health check-ups',
+      'Medical certificates and reports',
+    ],
+  },
+  {
     label: 'Primary & Urgent Care',
     services: ['General Medicine', 'Emergency', 'Pediatrics', 'Family Medicine'],
   },
@@ -53,7 +69,7 @@ export const SERVICE_GROUPS: ServiceGroup[] = [
   },
   {
     label: 'Diagnostics',
-    services: ['Laboratory', 'Radiology', 'ECG', 'Ultrasound Scanning', 'Endoscopy'],
+    services: ['Laboratory', 'Radiology', 'Ultrasound Scanning', 'Endoscopy'],
   },
   {
     label: 'Therapy & Support',

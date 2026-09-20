@@ -1,616 +1,496 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
-  Activity, ArrowRight, Bell, Building2, CheckCircle2, ChevronDown, Clock,
-  Phone, Search, Shield, Stethoscope, Ticket, Users,
+  Activity, ArrowRight, Bell, CalendarDays, Check, CheckCircle2, ChevronRight,
+  HeartPulse, LayoutDashboard, Menu, MessageSquare, MonitorPlay, ShieldCheck,
+  Smartphone, Stethoscope, UserRoundCheck, Users, X, Clock3, BarChart3,
+  PhoneCall, Mail, MapPin, Star,
 } from 'lucide-react'
 import bgLobby from '../imports/mediqueue_bg_lobby.png'
-import AnchoredMenu from '../components/AnchoredMenu'
-import MolecularParticles from '../components/MolecularParticles'
-import { Avatar, StatusBadge } from '../components/UIPrimitives'
-import { api } from '../lib/api'
-import type { ApiBoardEntry, ApiDoctor } from '../lib/api'
 
-/**
- * Public landing page — Persuade surface.
- *
- * The live clinic board is the argument: a visitor can read today's real token
- * numbers, and look their own token up, before creating any account. Everything
- * else on the page supports that one demonstration.
- *
- * When the API is unreachable the board falls back to the sample roster below
- * and says so in the open — a queue product that quietly invents live numbers
- * is claiming exactly the thing it can't back up.
- */
-
-const SAMPLE_DOCTORS: ApiDoctor[] = [
-  { id: 's1', name: 'Dr. Aisha Patel', dept: 'Cardiology', room: 'Room 03', series: 'A', status: 'active', avgConsultMinutes: 12 },
-  { id: 's2', name: 'Dr. Marcus Reeves', dept: 'General Medicine', room: 'Room 07', series: 'B', status: 'active', avgConsultMinutes: 10 },
-  { id: 's3', name: 'Dr. Sofia Montoya', dept: 'Pediatrics', room: 'Room 11', series: 'C', status: 'delayed', avgConsultMinutes: 15 },
-  { id: 's4', name: 'Dr. Kenji Nakamura', dept: 'Orthopedics', room: 'Room 02', series: 'D', status: 'break', avgConsultMinutes: 10 },
-  { id: 's5', name: 'Dr. Priya Kumari', dept: 'Neurology', room: 'Room 15', series: 'E', status: 'active', avgConsultMinutes: 14 },
-  { id: 's6', name: 'Dr. Ethan Carr', dept: 'General Medicine', room: 'Room 04', series: 'F', status: 'active', avgConsultMinutes: 8 },
+const patientBenefits = [
+  'Book appointments with your preferred doctor',
+  'Join live queues before arriving',
+  'See real-time waiting estimates',
+  'Receive WhatsApp/SMS notifications',
+  'Keep your appointment history',
 ]
 
-const SAMPLE_BOARD: ApiBoardEntry[] = [
-  { doctorId: 's1', series: 'A', nowServing: 14, waiting: 3 },
-  { doctorId: 's2', series: 'B', nowServing: 22, waiting: 5 },
-  { doctorId: 's3', series: 'C', nowServing: 9, waiting: 7 },
-  { doctorId: 's4', series: 'D', nowServing: null, waiting: 0 },
-  { doctorId: 's5', series: 'E', nowServing: 31, waiting: 2 },
-  { doctorId: 's6', series: 'F', nowServing: 7, waiting: 4 },
+const clinicBenefits = [
+  'Manage appointments and walk-ins',
+  'Coordinate multiple doctors and schedules',
+  'Manage live queues in real time',
+  'Track revenue and clinic performance',
+  'Reduce no-shows and waiting times',
 ]
 
-const STAFF_PORTALS = [
-  {
-    to: '/staff/login',
-    label: 'Reception Desk',
-    detail: 'Issue tokens, run counter queue, register medical center',
-    icon: <Ticket size={17} />,
-    accent: '#E28A00',
-  },
-  {
-    to: '/staff/login',
-    label: 'Doctor Console',
-    detail: 'Call patients, record consultations, publish delay notices',
-    icon: <Stethoscope size={17} />,
-    accent: '#10B981',
-  },
+const doctorBenefits = [
+  'See a focused daily schedule',
+  'Manage your personal patient queue',
+  'Update consultation status',
+  'Access patient history securely',
+  'Spend more time caring for patients',
 ]
 
-type LookupResult =
-  | { kind: 'idle' }
-  | { kind: 'unknown'; typed: string }
-  | { kind: 'serving'; token: string; doctor: ApiDoctor }
-  | { kind: 'passed'; token: string; doctor: ApiDoctor }
-  | { kind: 'waiting'; token: string; doctor: ApiDoctor; ahead: number; minutes: number }
+function FeatureList({ items, green = false }: { items: string[]; green?: boolean }) {
+  return (
+    <ul className="marketing-list">
+      {items.map((item) => (
+        <li key={item}>
+          <span className={green ? 'marketing-check green' : 'marketing-check'}>
+            <Check size={13} strokeWidth={3} />
+          </span>
+          {item}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
-/** Accepts `A-14`, `#a14`, `a 14` — whatever a patient reads off their slip. */
-function parseToken(raw: string): { series: string; number: number } | null {
-  const match = raw.trim().toUpperCase().match(/^#?\s*([A-Z])\s*[-\s]?\s*(\d{1,4})$/)
-  if (!match) return null
-  return { series: match[1], number: Number(match[2]) }
+function scrollToSection(id: string, closeMenu?: () => void) {
+  closeMenu?.()
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 export default function LandingPage() {
-  const navigate = useNavigate()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [isScrolled, setIsScrolled] = useState(false)
 
-  const [doctors, setDoctors] = useState<ApiDoctor[]>(SAMPLE_DOCTORS)
-  const [board, setBoard] = useState<ApiBoardEntry[]>(SAMPLE_BOARD)
-  const [live, setLive] = useState(false)
-  const [loadingBoard, setLoadingBoard] = useState(true)
-
-  const [spec, setSpec] = useState('All')
-  const [tokenInput, setTokenInput] = useState('')
-  const [lookup, setLookup] = useState<LookupResult>({ kind: 'idle' })
-  const [staffMenuOpen, setStaffMenuOpen] = useState(false)
-  const staffButtonRef = useRef<HTMLButtonElement>(null)
-
-  // Real roster + real board when the backend is up; labelled sample data when not.
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const [doctorsRes, boardRes] = await Promise.all([api.getDoctors(), api.getPublicBoard()])
-        if (cancelled) return
-        // Assign unconditionally. This was guarded by
-        // `if (doctorsRes.doctors.length)`, so a backend that answered
-        // correctly with an empty roster left the six sample doctors on screen
-        // *and* set `live` — the board then presented Dr. Aisha Patel and
-        // friends, with invented "now serving" numbers, under a Live badge.
-        // An empty real roster must read as empty.
-        setDoctors(doctorsRes.doctors)
-        setBoard(boardRes.board)
-        setLive(true)
-      } catch {
-        // Sample roster stays, and the badge below says so.
-      } finally {
-        if (!cancelled) setLoadingBoard(false)
-      }
-    })()
-    return () => { cancelled = true }
+    const handleScroll = () => setIsScrolled(window.scrollY > 18)
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
-  const boardBySeries = useMemo(
-    () => new Map(board.map(b => [b.series, b])),
-    [board],
-  )
-
-  const specialities = useMemo(
-    () => ['All', ...Array.from(new Set(doctors.map(d => d.dept)))],
-    [doctors],
-  )
-
-  const visibleDoctors = useMemo(
-    () => (spec === 'All' ? doctors : doctors.filter(d => d.dept === spec)),
-    [doctors, spec],
-  )
-
-  const totalWaiting = useMemo(() => board.reduce((sum, b) => sum + b.waiting, 0), [board])
-  const openRooms = useMemo(() => doctors.filter(d => d.status === 'active').length, [doctors])
-
-  /**
-   * Answers "where am I in the line?" from the public board alone — no account,
-   * no token, nothing that could identify another patient.
-   */
-  const handleLookup = (e: React.FormEvent) => {
-    e.preventDefault()
-    const parsed = parseToken(tokenInput)
-    if (!parsed) return setLookup({ kind: 'unknown', typed: tokenInput.trim() })
-
-    const doctor = doctors.find(d => d.series === parsed.series)
-    const standing = boardBySeries.get(parsed.series)
-    if (!doctor || !standing) return setLookup({ kind: 'unknown', typed: tokenInput.trim() })
-
-    const token = `#${parsed.series}-${String(parsed.number).padStart(2, '0')}`
-    const serving = standing.nowServing
-
-    if (serving !== null && parsed.number === serving) {
-      return setLookup({ kind: 'serving', token, doctor })
-    }
-    if (serving !== null && parsed.number < serving) {
-      return setLookup({ kind: 'passed', token, doctor })
-    }
-    const ahead = serving === null ? standing.waiting : parsed.number - serving - 1
-    setLookup({
-      kind: 'waiting',
-      token,
-      doctor,
-      ahead: Math.max(0, ahead),
-      minutes: Math.max(0, ahead) * doctor.avgConsultMinutes,
-    })
-  }
+  const navTo = (id: string) => scrollToSection(id, () => setMenuOpen(false))
 
   return (
-    // The app shell's body gradient runs teal → indigo, which drops body text
-    // below 4.5:1 in the lower sections. Every console sets its own ground for
-    // the same reason; this page does too.
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <main className="marketing-page">
+      {/* NAVIGATION */}
+      <header className={`marketing-nav${isScrolled ? ' is-scrolled' : ''}`}>
+        <Link to="/" className="marketing-brand" aria-label="MediQueue home">
+          <span className="brand-mark"><Activity size={21} /></span>
+          <span>Medi<span>Queue</span></span>
+        </Link>
 
-      {/* ── HEADER ── */}
-      <header className="topbar" style={{ borderRadius: 0, justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'linear-gradient(135deg, var(--teal) 0%, var(--teal-dark) 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 3px 10px rgba(18,198,186,0.35)', flexShrink: 0,
-          }}>
-            <Activity size={16} color="#fff" />
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1 }}>MediQueue</div>
-            <div style={{ fontSize: 9, color: 'var(--text-4)', fontWeight: 600, letterSpacing: '0.05em' }} className="desktop-only">HEALTHCARE PLATFORM</div>
-          </div>
-        </div>
+        <nav className="marketing-links" aria-label="Main navigation">
+          <button type="button" onClick={() => navTo('home')}>Home</button>
+          <button type="button" onClick={() => navTo('patients')}>For Patients</button>
+          <button type="button" onClick={() => navTo('clinics')}>For Clinics</button>
+          <button type="button" onClick={() => navTo('doctors')}>For Doctors</button>
+          <button type="button" onClick={() => navTo('solutions')}>Features</button>
+          <button type="button" onClick={() => navTo('stories')}>Testimonials</button>
+          <button type="button" onClick={() => navTo('contact')}>Contact</button>
+        </nav>
 
-        <div className="badge badge-emerald desktop-only" style={{ gap: 6, padding: '5px 11px', fontSize: 12 }}>
-          <span className="pulse-live" />
-          {live ? `${totalWaiting} patients in queue now` : 'Sample data — server offline'}
-        </div>
-
-        <div className="desktop-only" style={{ flex: 1, minWidth: 200, maxWidth: 380, position: 'relative' }}>
-          <Search size={14} color="var(--text-4)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-          <input className="input" placeholder="Search doctors or specialities…" style={{ paddingLeft: 36, height: 34 }} />
-        </div>
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'nowrap' }}>
-          {/* Staff sign-in — the three consoles, one step from the front door. */}
-          <>
-            <button
-              ref={staffButtonRef}
-              onClick={() => setStaffMenuOpen(o => !o)}
-              aria-haspopup="menu"
-              aria-expanded={staffMenuOpen}
-              className="btn btn-ghost btn-sm"
-              style={{ padding: '5px 10px', fontSize: 12, gap: 5 }}
-            >
-              <Building2 size={13} /> <span className="desktop-only">Staff sign-in</span>
-              <ChevronDown size={12} />
-            </button>
-
-            <AnchoredMenu
-              anchorRef={staffButtonRef}
-              open={staffMenuOpen}
-              onClose={() => setStaffMenuOpen(false)}
-              width={292}
-            >
-              {STAFF_PORTALS.map(p => (
-                <Link
-                  key={p.label}
-                  to={p.to}
-                  role="menuitem"
-                  onClick={() => setStaffMenuOpen(false)}
-                  className="staff-portal-link"
-                >
-                  <span style={{ color: p.accent, display: 'flex', flexShrink: 0 }}>{p.icon}</span>
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{p.label}</span>
-                    <span style={{ display: 'block', fontSize: 11, color: 'var(--text-4)', lineHeight: 1.4 }}>{p.detail}</span>
-                  </span>
-                </Link>
-              ))}
-            </AnchoredMenu>
-          </>
-
-          <Link to="/login" className="btn btn-ghost btn-sm" style={{ padding: '5px 10px', fontSize: 12, textDecoration: 'none' }}>
-            Patient Sign In
+        <div className="marketing-nav-actions">
+          <Link to="/login" className="marketing-signin">Sign in</Link>
+          <Link to="/register" className="marketing-nav-cta">
+            Get started <ArrowRight size={14} />
           </Link>
-          <Link to="/register" className="btn btn-primary btn-sm" style={{ padding: '5px 12px', fontSize: 12, textDecoration: 'none' }}>
-            Register Account
-          </Link>
-          <button className="btn btn-danger btn-sm desktop-only" style={{ borderColor: 'var(--crimson-border)' }}>
-            <Phone size={13} />Emergency
-          </button>
         </div>
+
+        <button
+          className="marketing-menu"
+          onClick={() => setMenuOpen((open) => !open)}
+          aria-label="Toggle navigation"
+          aria-expanded={menuOpen}
+        >
+          {menuOpen ? <X size={21} /> : <Menu size={21} />}
+        </button>
       </header>
 
-      {/* ── HERO ── */}
-      <section style={{
-        background: 'linear-gradient(180deg, rgba(16, 179, 168, 0.10) 0%, rgba(255, 255, 255, 0.10) 100%)',
-        padding: '56px 24px 52px',
-        borderBottom: '1px solid var(--border)',
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
-        <MolecularParticles />
-        <div style={{
-          position: 'absolute', top: 0, left: 0, width: '70%', height: '100%',
-          backgroundImage: `url(${bgLobby})`,
-          backgroundSize: 'cover', backgroundRepeat: 'no-repeat', backgroundPosition: 'center left',
-          opacity: 0.09, pointerEvents: 'none', zIndex: 1,
-          WebkitMaskImage: 'radial-gradient(ellipse 80% 90% at 40% 60%, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 50%, transparent 75%)',
-          maskImage: 'radial-gradient(ellipse 80% 90% at 40% 60%, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 50%, transparent 75%)',
-        }} />
-
-        <div className="responsive-hero-grid" style={{
-          maxWidth: 1240, margin: '0 auto', display: 'grid',
-          gridTemplateColumns: '1fr 440px', gap: 56, alignItems: 'center',
-          position: 'relative', zIndex: 2,
-        }}>
-          <div>
-            <h1 style={{
-              fontSize: 'clamp(34px, 5.2vw, 54px)', fontWeight: 900, color: 'var(--text-1)',
-              letterSpacing: '-0.038em', lineHeight: 1.04, marginBottom: 20, textWrap: 'balance',
-            }}>
-              Wait at home,<br />
-              <span style={{ color: 'var(--blue-dark)' }}>not in the corridor.</span>
-            </h1>
-            <p style={{
-              fontSize: 17, color: 'var(--text-2)', lineHeight: 1.65,
-              maxWidth: '64ch', marginBottom: 30, fontWeight: 450,
-            }}>
-              Every token in every consulting room, updated the moment a patient is called.
-              Check where the queue has reached before you leave the house — no app, no account,
-              just the number on your slip.
-            </p>
-
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 34 }}>
-              <Link to="/login?new=1" className="btn btn-primary btn-lg" style={{ textDecoration: 'none', gap: 8 }}>
-                Book an appointment <ArrowRight size={16} />
-              </Link>
-              <a href="#live-board" className="btn btn-ghost btn-lg" style={{ textDecoration: 'none', gap: 8 }}>
-                See today's queue
-              </a>
-            </div>
-
-            {/* Numbers the page can actually stand behind. */}
-            <dl style={{ display: 'flex', gap: 40, flexWrap: 'wrap', margin: 0 }}>
-              {[
-                { v: String(doctors.length), l: 'Consulting rooms' },
-                { v: String(openRooms), l: 'Seeing patients now' },
-                { v: String(totalWaiting), l: 'Patients waiting' },
-                { v: live ? 'Live' : 'Sample', l: live ? 'Updated on every call' : 'Server offline' },
-              ].map(s => (
-                <div key={s.l}>
-                  <dt style={{ fontSize: 11.5, color: 'var(--text-3)', fontWeight: 600, order: 2, marginTop: 3 }}>{s.l}</dt>
-                  <dd style={{
-                    fontSize: 26, fontWeight: 800, color: 'var(--text-1)',
-                    letterSpacing: '-0.03em', margin: 0, lineHeight: 1,
-                  }}>{s.v}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-
-          {/* Token lookup — the product, working, before sign-up. */}
-          <div className="card glass-form-card" style={{ padding: 28, background: 'rgba(255, 255, 255, 0.9)' }}>
-            <h2 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
-              Where has the queue reached?
-            </h2>
-            <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6, marginBottom: 18, lineHeight: 1.55 }}>
-              Type the token number printed on your slip.
-            </p>
-
-            <form onSubmit={handleLookup} style={{ display: 'flex', gap: 8 }}>
-              <input
-                className="input"
-                placeholder="A-14"
-                value={tokenInput}
-                onChange={e => { setTokenInput(e.target.value); setLookup({ kind: 'idle' }) }}
-                aria-label="Your token number"
-                style={{ height: 46, fontSize: 16, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.04em' }}
-              />
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={!tokenInput.trim() || loadingBoard}
-                style={{ height: 46, padding: '0 18px', fontWeight: 700, borderRadius: 10, flexShrink: 0 }}
-              >
-                Check
-              </button>
-            </form>
-
-            <div style={{ marginTop: 18 }} aria-live="polite">
-              {lookup.kind === 'idle' && (
-                <p style={{ fontSize: 12.5, color: 'var(--text-4)', lineHeight: 1.6, margin: 0 }}>
-                  {loadingBoard
-                    ? 'Loading today\'s board…'
-                    : live
-                      ? `Reading today's live board across ${doctors.length} rooms.`
-                      : 'Showing sample data — start the MediQueue server for live numbers.'}
-                </p>
-              )}
-
-              {lookup.kind === 'unknown' && (
-                <div className="lookup-result" style={{ borderColor: 'var(--amber-border)', background: 'var(--amber-dim)' }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--amber)' }}>
-                    No queue found for “{lookup.typed}”
-                  </div>
-                  <p style={{ fontSize: 12.5, color: 'var(--text-3)', margin: '5px 0 0', lineHeight: 1.55 }}>
-                    Tokens look like <strong style={{ fontFamily: 'monospace' }}>A-14</strong> — a room letter and
-                    the number from your slip. Ask at reception if your slip looks different.
-                  </p>
-                </div>
-              )}
-
-              {lookup.kind === 'serving' && (
-                <div className="lookup-result" style={{ borderColor: 'var(--emerald-border)', background: 'var(--emerald-dim)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <CheckCircle2 size={17} color="var(--emerald)" />
-                    <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--emerald)' }}>
-                      {lookup.token} is being called now
-                    </span>
-                  </div>
-                  <p style={{ fontSize: 12.5, color: 'var(--text-2)', margin: '6px 0 0', lineHeight: 1.55 }}>
-                    Go to {lookup.doctor.room} — {lookup.doctor.name} is ready for you.
-                  </p>
-                </div>
-              )}
-
-              {lookup.kind === 'passed' && (
-                <div className="lookup-result" style={{ borderColor: 'var(--crimson-border)', background: 'var(--crimson-dim)' }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--crimson)' }}>
-                    {lookup.token} has already been called
-                  </div>
-                  <p style={{ fontSize: 12.5, color: 'var(--text-3)', margin: '5px 0 0', lineHeight: 1.55 }}>
-                    Speak to reception at {lookup.doctor.room} — they can put you back in the line.
-                  </p>
-                </div>
-              )}
-
-              {lookup.kind === 'waiting' && (
-                <div className="lookup-result" style={{ borderColor: 'var(--blue-border)', background: 'var(--blue-dim)' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 34, fontWeight: 900, color: 'var(--blue-dark)', fontFamily: 'monospace', letterSpacing: '-0.03em', lineHeight: 1 }}>
-                      {lookup.ahead}
-                    </span>
-                    <span style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-1)' }}>
-                      {lookup.ahead === 1 ? 'patient ahead of you' : 'patients ahead of you'}
-                    </span>
-                  </div>
-                  <p style={{ fontSize: 12.5, color: 'var(--text-2)', margin: '8px 0 0', lineHeight: 1.6 }}>
-                    {lookup.token} · {lookup.doctor.name} · {lookup.doctor.room}
-                    {lookup.ahead > 0 && <> · roughly {lookup.minutes} minutes at today's pace</>}
-                  </p>
-                  {lookup.doctor.status === 'delayed' && (
-                    <p style={{ fontSize: 12, color: 'var(--amber)', margin: '8px 0 0', fontWeight: 600 }}>
-                      This room is running late — allow extra time.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── LIVE BOARD ── */}
-      <section id="live-board" style={{ padding: '52px 24px 44px', maxWidth: 1240, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <h2 style={{ fontSize: 27, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.15 }}>
-              Today's consulting rooms
-            </h2>
-            <p style={{ fontSize: 13.5, color: 'var(--text-3)', marginTop: 7, maxWidth: '68ch', lineHeight: 1.6 }}>
-              {live
-                ? 'Read live from the reception desk. The number changes the moment a patient is called.'
-                : 'Sample rooms. Start the MediQueue server to read the live board.'}
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {specialities.map(s => (
-              <button
-                key={s}
-                onClick={() => setSpec(s)}
-                aria-pressed={spec === s}
-                className="btn btn-sm"
-                style={{
-                  background: spec === s ? 'var(--blue)' : 'rgba(255,255,255,0.6)',
-                  color: spec === s ? '#fff' : 'var(--text-3)',
-                  border: '1px solid', borderColor: spec === s ? 'var(--blue)' : 'var(--border-md)',
-                }}
-              >{s}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* A board, not a card grid — the token is the row's reason to exist. */}
-        <div className="card glass-form-card" style={{ padding: 0, overflow: 'hidden' }}>
-          {visibleDoctors.length === 0 && (
-            <p style={{ padding: '38px 24px', textAlign: 'center', color: 'var(--text-4)', fontSize: 13.5, margin: 0 }}>
-              {doctors.length === 0
-                ? 'No consulting rooms are registered yet. Once a clinic adds its doctors, their live token board appears here.'
-                : `No rooms open in ${spec} today.`}
-            </p>
-          )}
-
-          {visibleDoctors.map((doc, i) => {
-            const standing = boardBySeries.get(doc.series)
-            const serving = standing?.nowServing ?? null
-            const waiting = standing?.waiting ?? 0
-            return (
-              <div
-                key={doc.id}
-                className="board-row"
-                style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)', animationDelay: `${Math.min(i, 7) * 55}ms` }}
-              >
-                <Avatar name={doc.name} size={42} />
-
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 15.5, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.015em' }}>{doc.name}</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 2 }}>{doc.dept} · {doc.room}</div>
-                </div>
-
-                <div className="board-row-token">
-                  <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-                    Now serving
-                  </div>
-                  <div style={{
-                    fontSize: 27, fontWeight: 900, fontFamily: 'monospace', letterSpacing: '-0.03em',
-                    color: serving === null ? 'var(--text-4)' : 'var(--blue-dark)', lineHeight: 1.15,
-                  }}>
-                    {serving === null ? '—' : `#${doc.series}-${String(serving).padStart(2, '0')}`}
-                  </div>
-                </div>
-
-                <div className="board-row-wait">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-2)', fontWeight: 600 }}>
-                    <Users size={14} color="var(--text-4)" />
-                    {waiting === 0 ? 'No one waiting' : `${waiting} waiting`}
-                  </div>
-                  {waiting > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-4)', marginTop: 4 }}>
-                      <Clock size={12} /> about {waiting * doc.avgConsultMinutes} min to clear
-                    </div>
-                  )}
-                </div>
-
-                <StatusBadge status={doc.status === 'offline' ? 'offline' : doc.status} />
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
-      {/* ── HOW IT WORKS — the sequence is the information, so it is numbered. ── */}
-      <section style={{ padding: '20px 24px 56px', maxWidth: 1240, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 27, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.03em', marginBottom: 26 }}>
-          How a visit works
-        </h2>
-        <ol className="how-it-works">
+      {menuOpen && (
+        <nav className={`marketing-mobile-menu${isScrolled ? ' is-scrolled' : ''}`} aria-label="Mobile navigation">
           {[
-            {
-              title: 'Book, or walk in',
-              body: 'Reserve a slot online, or take a token at the counter. Both land in the same queue — walk-ins are never pushed to the back.',
-            },
-            {
-              title: 'Watch the number, not the clock',
-              body: 'Your token and the room\'s current number update together. Reception sends an SMS as your turn approaches.',
-            },
-            {
-              title: 'Arrive when it is nearly your turn',
-              body: 'Rooms running late publish a delay notice, so a slipping schedule reaches you before you have left home.',
-            },
-          ].map((step, i) => (
-            <li key={step.title}>
-              <span className="how-step-number">{i + 1}</span>
-              <div>
-                <h3 style={{ fontSize: 16.5, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.015em' }}>{step.title}</h3>
-                <p style={{ fontSize: 13.5, color: 'var(--text-3)', lineHeight: 1.65, marginTop: 6, maxWidth: '52ch' }}>{step.body}</p>
-              </div>
-            </li>
+            ['home', 'Home'],
+            ['patients', 'For Patients'],
+            ['clinics', 'For Clinics'],
+            ['doctors', 'For Doctors'],
+            ['solutions', 'Features'],
+            ['pricing', 'Pricing'],
+            ['stories', 'Testimonials'],
+            ['contact', 'Contact'],
+          ].map(([id, label]) => (
+            <button key={id} type="button" onClick={() => navTo(id)}>{label}</button>
           ))}
-        </ol>
-      </section>
+          <Link to="/login" onClick={() => setMenuOpen(false)}>Patient sign in</Link>
+          <Link to="/staff/login" onClick={() => setMenuOpen(false)}>Staff portal</Link>
+          <Link to="/register" onClick={() => setMenuOpen(false)}>Create patient account</Link>
+        </nav>
+      )}
 
-      {/* ── STAFF ACCESS ── */}
-      <section style={{ padding: '0 24px 56px', maxWidth: 1240, margin: '0 auto' }}>
-        <div className="card glass-form-card staff-band">
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.025em' }}>
-              Working here today?
-            </h2>
-            <p style={{ fontSize: 13.5, color: 'var(--text-3)', marginTop: 8, lineHeight: 1.6, maxWidth: '48ch' }}>
-              Sign in to your console. Staff accounts are created by your system
-              administrator — there is no self-service sign-up for clinic roles.
-            </p>
+      {/* HERO */}
+      <section id="home" className="marketing-hero">
+        <div className="hero-glow" />
+        <div className="hero-grid-pattern" />
+
+        <div className="marketing-hero-copy">
+          <div className="eyebrow">
+            <HeartPulse size={15} /> Smarter healthcare for a healthier tomorrow
+          </div>
+          <h1>
+            Book. Queue. <span>Care.</span><br />
+            All in one place.
+          </h1>
+          <p>
+            MediQueue connects patients, doctors, and medical centers in one simple platform —
+            making appointments, live queues, and consultations easier for everyone.
+          </p>
+
+          <div className="marketing-actions">
+            <Link to="/login?new=1" className="marketing-primary">
+              Book an appointment <ArrowRight size={16} />
+            </Link>
+            <button type="button" className="marketing-secondary" onClick={() => navTo('how-it-works')}>
+              <span className="play-icon">▶</span> See how it works
+            </button>
           </div>
 
-          <div className="staff-band-links">
-            {STAFF_PORTALS.map(p => (
-              <Link key={p.label} to={p.to} className="staff-portal-card">
-                <span style={{ color: p.accent, display: 'flex' }}>{p.icon}</span>
-                <span style={{ minWidth: 0, flex: 1 }}>
-                  <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{p.label}</span>
-                  <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-4)', lineHeight: 1.45, marginTop: 2 }}>{p.detail}</span>
-                </span>
-                <ArrowRight size={15} color="var(--text-4)" style={{ flexShrink: 0 }} />
-              </Link>
-            ))}
+          <div className="hero-trust">
+            <span><CheckCircle2 size={15} /> No long waiting rooms</span>
+            <span><ShieldCheck size={15} /> Secure by design</span>
+            <span><Clock3 size={15} /> Real-time queue updates</span>
           </div>
         </div>
-      </section>
 
-      {/* ── FOOTER ── */}
-      <footer style={{ borderTop: '1px solid var(--border)', background: 'rgba(255,255,255,0.4)', backdropFilter: 'blur(10px)', padding: '40px 24px 24px' }}>
-        <div style={{ maxWidth: 1240, margin: '0 auto' }}>
-          <div className="responsive-grid-4" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 32, marginBottom: 32 }}>
+        <div className="marketing-hero-visual">
+          <div className="hero-image-wrap">
+            <img src={bgLobby} alt="Modern medical center reception" />
+          </div>
+
+          <div className="hero-image-overlay" />
+
+          <div className="floating-card next-card">
+            <span className="floating-icon green"><Bell size={16} /></span>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', marginBottom: 10 }}>MediQueue Systems</div>
-              <p style={{ fontSize: 12.5, color: 'var(--text-3)', lineHeight: 1.65, maxWidth: '38ch', margin: 0 }}>
-                Outpatient queue management, live token tracking, and EHR integration
-                for clinics that would rather not run on a shouted name and a paper list.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 16, fontSize: 11.5, color: 'var(--text-4)', fontWeight: 600 }}>
-                <Shield size={13} /> HIPAA compliant · ISO 27001 · HL7 FHIR
+              <strong>You're next!</strong>
+              <small>Please proceed to Room 03</small>
+            </div>
+            <span className="tiny-muted">now</span>
+          </div>
+
+          <div className="floating-card queue-card">
+            <div className="queue-card-title">
+              <span className="floating-icon blue"><Users size={16} /></span>
+              <strong>Live queue</strong>
+            </div>
+            <b>A19</b>
+            <small>Your place is saved</small>
+            <div className="queue-time">~ 30 minutes</div>
+            <Link to="/login?new=1">Join queue <ArrowRight size={13} /></Link>
+          </div>
+
+          <div className="floating-card appointment-card">
+            <CalendarDays size={17} />
+            <span>
+              <strong>Book appointment</strong>
+              <small>Choose your doctor and time</small>
+            </span>
+          </div>
+
+          <div className="hero-note">
+            Less waiting.<br /><b>More living.</b><br />Better healthcare.
+          </div>
+        </div>
+      </section>
+
+      {/* AUDIENCES */}
+      <section id="solutions" className="marketing-section intro-section">
+        <div className="section-heading">
+          <div className="eyebrow centered">One platform. Every care journey.</div>
+          <h2>A smarter experience <span>for everyone</span></h2>
+          <p>Whether you are a patient, doctor, receptionist, or clinic owner, MediQueue gives you the tools you need in one connected healthcare platform.</p>
+        </div>
+
+        <div className="audience-grid">
+          <article className="audience-card patient-card">
+            <div className="audience-icon"><Users size={22} /></div>
+            <h3>For patients</h3>
+            <p>Book, queue, and stay informed without spending your day sitting in a waiting room.</p>
+            <FeatureList items={patientBenefits} />
+            <Link to="/register" className="text-link">Create patient account <ArrowRight size={15} /></Link>
+          </article>
+
+          <article className="audience-card clinic-card">
+            <div className="audience-icon"><LayoutDashboard size={22} /></div>
+            <h3>For medical centers</h3>
+            <p>Run appointments, doctors, walk-ins, queues, and clinic performance from one dashboard.</p>
+            <FeatureList items={clinicBenefits} />
+            <Link to="/staff/register/medical-center" className="text-link">Register your center <ArrowRight size={15} /></Link>
+          </article>
+
+          <article className="audience-card doctor-card">
+            <div className="audience-icon"><Stethoscope size={22} /></div>
+            <h3>For doctors</h3>
+            <p>A focused workspace that keeps your schedule, patient queue, and consultation flow clear.</p>
+            <FeatureList items={doctorBenefits} green />
+            <Link to="/staff/login" className="text-link green-link">Open doctor portal <ArrowRight size={15} /></Link>
+          </article>
+        </div>
+      </section>
+
+      {/* PATIENT */}
+      <section id="patients" className="marketing-section split-section patient-split">
+        <div className="split-copy">
+          <div className="eyebrow">For patients</div>
+          <h2>Your health.<br /><span>Your time.</span></h2>
+          <p>
+            Find your doctor, book an appointment, join a live queue remotely, and receive updates before your turn — without guessing when to leave home.
+          </p>
+          <FeatureList items={patientBenefits} />
+          <div className="store-buttons">
+            <span><Smartphone size={17} /> Available on web</span>
+            <span><MessageSquare size={16} /> WhatsApp & SMS updates</span>
+          </div>
+          <Link to="/register" className="marketing-primary compact">Create patient account <ArrowRight size={15} /></Link>
+        </div>
+
+        <div className="phone-demo" aria-label="MediQueue patient app preview">
+          <div className="phone-stage">
+            <div className="phone-shell phone-primary">
+              <div className="phone-top">MediQueue <span>9:41</span></div>
+              <div className="phone-greeting">Good morning,<br /><b>Tharushi Silva</b></div>
+              <div className="phone-search">Search doctors or specialties...</div>
+              <div className="phone-action-grid">
+                <div><CalendarDays size={18} /><small>Book appointment</small></div>
+                <div><Users size={18} /><small>Join live queue</small></div>
+                <div><Clock3 size={18} /><small>My appointments</small></div>
+                <div><MapPin size={18} /><small>Find a clinic</small></div>
+              </div>
+              <div className="phone-panel">
+                <small>UPCOMING APPOINTMENT</small>
+                <b>Dr. Aisha Patel</b>
+                <span>Today · 10:30 AM</span>
+                <div className="phone-progress"><span /></div>
+                <em>Arrive in about 25 min</em>
               </div>
             </div>
 
-            {([
-              ['For patients', [['Track a token', '#live-board'], ['Patient Portal', '/login'], ['Register Account', '/register']]],
-              ['For clinics', [['Healthcare Staff Portal', '/staff/login'], ['Register Medical Center', '/staff/login']]],
-              ['Displays', [['Waiting-room board', '/tv-display']]],
-            ] as const).map(([title, links]) => (
-              <div key={title}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>{title}</div>
-                {links.map(([label, to]) => (
-                  to.startsWith('#')
-                    ? <a key={label} href={to} className="footer-link">{label}</a>
-                    : <Link key={label} to={to} className="footer-link">{label}</Link>
-                ))}
+            <div className="phone-shell phone-secondary">
+              <div className="phone-top"><span>‹</span><b>Live Queue</b><span>•••</span></div>
+              <div className="queue-clinic">
+                <span className="queue-clinic-icon"><Activity size={15} /></span>
+                <div><b>City Care Medical Center</b><small>Dr. Aisha Patel · General Medicine</small></div>
               </div>
-            ))}
+              <div className="queue-serving">
+                <small>Currently serving</small>
+                <strong>A19</strong>
+                <span>5<br /><small>patients waiting</small></span>
+              </div>
+              <div className="queue-tokens"><span>A20</span><span>A21</span><span>A22</span><span>A23</span><span>A24</span></div>
+              <div className="queue-estimate">
+                <Bell size={14} />
+                <span>Estimated waiting time<strong>~ 35–45 minutes</strong></span>
+              </div>
+              <small className="queue-hint">You'll receive a notification when you're 2 patients away.</small>
+            </div>
           </div>
 
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-            <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>© 2026 MediQueue Systems Pvt. Ltd.</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <Link to="/admin/login" style={{ fontSize: 11.5, color: 'var(--text-4)', textDecoration: 'none' }}>
-                System Admin
-              </Link>
-              <button
-                onClick={() => navigate('/tv-display')}
-                className="btn btn-ghost btn-sm"
-                style={{ gap: 6, fontSize: 11.5 }}
-              >
-                <Bell size={12} /> Open waiting-room display
-              </button>
+          <div className="phone-queue"><Users size={17} /><b>Live Queue</b><strong>A19</strong><small>~ 35–45 min</small></div>
+          <div className="patient-whatsapp-card"><MessageSquare size={15} /><span><b>You're next!</b><small>Please proceed to your doctor's room.</small></span></div>
+          <div className="demo-caption"><span className="demo-pulse" /> Live patient experience</div>
+          <div className="demo-steps"><span><b>01</b>Book</span><span><b>02</b>Join queue</span><span><b>03</b>Arrive on time</span></div>
+        </div>
+      </section>
+
+      {/* CLINIC */}
+      <section id="clinics" className="marketing-section split-section clinic-split">
+        <div className="dashboard-stage">
+          <div className="dashboard-window">
+            <div className="dash-sidebar">
+              <b><Activity size={14} /> MediQueue</b>
+              <span className="active">Overview</span><span>Appointments</span><span>Live queue</span>
+              <span>Patients</span><span>Doctors</span><span>Reports</span>
+            </div>
+            <div className="dash-main">
+              <div className="dash-top"><span>Good morning, <b>City Care Medical Center</b></span><span className="live-pill">● Live</span></div>
+              <h4>Today's overview</h4>
+              <div className="dash-stats">
+                <span><small>Today's patients</small><b>46</b></span>
+                <span><small>Completed</small><b className="green-text">38</b></span>
+                <span><small>Waiting</small><b>6</b></span>
+                <span><small>No-shows</small><b className="red-text">2</b></span>
+              </div>
+              <div className="dash-finance">
+                <span><small>Today's revenue</small><b>Rs. 92,500</b></span>
+                <span><small>Avg. wait</small><b>24 min</b></span>
+              </div>
+              <div className="dash-chart">
+                <div><b>Doctor schedule</b><span className="chart-line" /></div>
+                <p><strong>Dr. Aisha Patel</strong><small>General Medicine · 6 patients</small><span className="bar"><i /></span></p>
+                <p><strong>Dr. Marcus Reeves</strong><small>Cardiology · 4 patients</small><span className="bar"><i className="bar-two" /></span></p>
+              </div>
             </div>
           </div>
         </div>
+
+        <div className="split-copy">
+          <div className="eyebrow">For medical centers</div>
+          <h2>Run your clinic<br /><span>smarter.</span></h2>
+          <p>One calm dashboard for appointments, walk-ins, doctors, live queues, revenue, and daily performance.</p>
+          <FeatureList items={clinicBenefits} />
+          <div className="clinic-roi-card">
+            <BarChart3 size={22} />
+            <div><b>Make every slot count</b><small>See no-shows, waiting time, doctor utilization and revenue in one place.</small></div>
+          </div>
+          <Link to="/staff/register/medical-center" className="marketing-primary compact">Register your medical center <ArrowRight size={15} /></Link>
+        </div>
+      </section>
+
+      {/* DOCTOR */}
+      <section id="doctors" className="marketing-section doctor-role-section">
+        <div className="doctor-role-visual">
+          <div className="doctor-role-card">
+            <div className="role-card-top">
+              <span className="floating-icon green"><UserRoundCheck size={17} /></span>
+              <div><b>Doctor workspace</b><small>Focused care, less admin</small></div>
+              <span className="role-live">Ready</span>
+            </div>
+            <div className="doctor-mini-stats"><span><b>12</b><small>Today</small></span><span><b>4</b><small>Waiting</small></span><span><b>2</b><small>Completed</small></span></div>
+            <div className="role-patient">
+              <span className="doctor-avatar">TS</span>
+              <div><b>Tharushi Silva</b><small>Follow-up · 10:30 AM</small></div>
+              <span className="role-tag">Next</span>
+            </div>
+            <div className="role-actions">
+              <span><CheckCircle2 size={15} /> Review history</span>
+              <span><MessageSquare size={15} /> Send update</span>
+              <span><CalendarDays size={15} /> Plan follow-up</span>
+            </div>
+          </div>
+        </div>
+        <div className="split-copy">
+          <div className="eyebrow">For doctors</div>
+          <h2>More time for<br /><span>what matters.</span></h2>
+          <p>MediQueue gives every doctor a focused workspace to prepare, consult, update patient status, and move through the day with less administrative work.</p>
+          <FeatureList items={doctorBenefits} green />
+          <Link to="/staff/login" className="marketing-primary compact">Open doctor portal <ArrowRight size={15} /></Link>
+        </div>
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section id="how-it-works" className="marketing-section how-section">
+        <div className="section-heading">
+          <div className="eyebrow centered">Get started in minutes</div>
+          <h2>Simple for patients.<br /><span>Powerful for clinics.</span></h2>
+          <p>From account creation to live queue updates, MediQueue keeps every step clear.</p>
+        </div>
+        <div className="steps-grid">
+          {[
+            ['01', 'Create your account', 'Sign up as a patient or register your medical center.'],
+            ['02', 'Book or manage', 'Book appointments or manage doctors and schedules.'],
+            ['03', 'Join and track', 'Join the live queue and receive real-time updates.'],
+            ['04', 'Get better care', 'Arrive at the right time and reduce unnecessary waiting.'],
+          ].map(([number, title, body], index) => (
+            <div className="step-card" key={number}>
+              <div className="step-number">{number}</div>
+              <div className="step-icon">{[<Users />, <CalendarDays />, <MonitorPlay />, <CheckCircle2 />][index]}</div>
+              <h3>{title}</h3><p>{body}</p>
+              {index < 3 && <ChevronRight className="step-arrow" size={22} />}
+            </div>
+          ))}
+        </div>
+        <div className="metric-band">
+          <div><b>50+</b><span>Medical centers</span></div>
+          <div><b>25,000+</b><span>Patients served</span></div>
+          <div><b>40%</b><span>Less waiting time</span></div>
+          <div><b>30%</b><span>Better doctor utilization</span></div>
+        </div>
+      </section>
+
+      {/* FEATURES */}
+      <section className="marketing-section feature-detail-section">
+        <div className="section-heading">
+          <div className="eyebrow centered">Built around the real workflow</div>
+          <h2>Everything your healthcare journey <span>needs.</span></h2>
+          <p>Purpose-built tools connect patients and medical teams without adding unnecessary complexity.</p>
+        </div>
+        <div className="feature-detail-grid">
+          <article><CalendarDays size={24} /><h3>Appointments</h3><p>Book, reschedule and cancel appointments while giving clinics a clear daily schedule.</p></article>
+          <article><Users size={24} /><h3>Live Queue</h3><p>Digital tokens, walk-ins, appointments, queue position and estimated waiting time.</p></article>
+          <article><MessageSquare size={24} /><h3>Patient Communication</h3><p>Keep patients informed with appointment, queue and reminder notifications.</p></article>
+          <article><BarChart3 size={24} /><h3>Clinic Insights</h3><p>Understand patient volume, no-shows, waiting time, revenue and doctor utilization.</p></article>
+        </div>
+      </section>
+
+      {/* TESTIMONIALS */}
+      <section id="stories" className="marketing-section stories-section">
+        <div className="section-heading">
+          <div className="eyebrow centered">Testimonials</div>
+          <h2>What our users say</h2>
+          <p>Designed around patients and healthcare teams who want a calmer experience.</p>
+        </div>
+        <div className="stories-grid">
+          {[
+            ['I can book my appointment and check the queue from home. No more long waits at the clinic.', 'Tharushi Silva', 'Patient'],
+            ['MediQueue gives our team a much clearer view of appointments, queues and the day ahead.', 'Dr. Nimal Perera', 'Medical Center'],
+            ['Simple, effective, and exactly what a small clinic needs to keep the daily workflow organized.', 'Kasun Fernando', 'Clinic Owner'],
+          ].map(([quote, name, role]) => (
+            <article className="story-card" key={name}>
+              <div className="quote-mark">“</div>
+              <p>{quote}</p>
+              <div className="story-stars"><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /></div>
+              <div className="story-person"><div className="person-avatar">{name.split(' ').map(part => part[0]).join('').slice(0, 2)}</div><span><b>{name}</b><small>{role}</small></span></div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {/* CONTACT / CTA */}
+      <section id="contact" className="marketing-cta">
+        <div>
+          <div className="eyebrow light">A better way to care is here</div>
+          <h2>Join the future of<br />healthcare today.</h2>
+          <p>Whether you are a patient or a medical center, MediQueue helps you save time, reduce waiting, and make every visit better.</p>
+          <div className="marketing-actions">
+            <Link to="/register" className="marketing-light-button">Get started now <ArrowRight size={15} /></Link>
+            <a href="mailto:hello@mediqueue.io" className="marketing-outline-button">Talk to our team</a>
+          </div>
+        </div>
+        <div className="cta-illustration"><HeartPulse size={108} strokeWidth={1} /><Activity size={52} /></div>
+      </section>
+
+      <section className="contact-strip">
+        <div><PhoneCall size={18} /><span><b>Need help?</b><small>Talk to our team</small></span></div>
+        <div><Mail size={18} /><span><b>hello@mediqueue.io</b><small>Email support</small></span></div>
+        <div><MapPin size={18} /><span><b>Sri Lanka</b><small>Built for local healthcare</small></span></div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="marketing-footer">
+        <div className="footer-brand">
+          <Link to="/" className="marketing-brand"><span className="brand-mark"><Activity size={21} /></span><span>Medi<span>Queue</span></span></Link>
+          <p>A modern healthcare platform connecting patients and medical teams through appointments and live queues.</p>
+          <span className="footer-status"><i /> Healthcare workflow, thoughtfully connected</span>
+        </div>
+        <div>
+          <b>Explore</b>
+          <button type="button" onClick={() => navTo('patients')}>For patients</button>
+          <button type="button" onClick={() => navTo('clinics')}>For medical centers</button>
+          <button type="button" onClick={() => navTo('doctors')}>For doctors</button>
+          <button type="button" onClick={() => navTo('solutions')}>Features</button>
+          <button type="button" onClick={() => navTo('pricing')}>Pricing</button>
+        </div>
+        <div>
+          <b>Portals</b>
+          <Link to="/login">Patient sign in</Link>
+          <Link to="/register">Create patient account</Link>
+          <Link to="/staff/login">Staff portal</Link>
+          <Link to="/staff/register/medical-center">Register a center</Link>
+          <a href="mailto:hello@mediqueue.io">Contact us</a>
+        </div>
+        <div>
+          <b>Quick actions</b>
+          <Link to="/login?new=1">Book appointment</Link>
+          <Link to="/login?new=1">Join live queue</Link>
+          <Link to="/staff/login">Doctor / staff login</Link>
+          <p className="footer-muted">Built for calmer, kinder healthcare.</p>
+          <div className="footer-social"><span>f</span><span>in</span><span>◎</span></div>
+        </div>
+        <div className="footer-bottom">© 2026 MediQueue. All rights reserved. <span>Privacy · Terms</span></div>
       </footer>
-    </div>
+    </main>
   )
 }

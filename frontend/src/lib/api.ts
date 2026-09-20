@@ -212,6 +212,7 @@ export interface ApiDoctorHour {
   dayOfWeek: number      // 0=Sun … 6=Sat
   startTime: string      // "HH:MM"
   endTime: string        // "HH:MM"
+  sessions?: { startTime: string; endTime: string }[]
   isAvailable: boolean
   dailyCapacity: number  // derived: hours × maxAppointmentsPerHour
 }
@@ -287,11 +288,14 @@ export interface ApiCenter {
   address: string
   city: string
   province?: string | null
+  latitude?: number | null
+  longitude?: number | null
   opening_hours: string
   services: string[]
   phone?: string
   email?: string
   website?: string | null
+  imageUrl?: string | null
   status?: 'operational' | 'maintenance' | 'closed'
   /** Super Admin approval state — a receptionist-requested center starts 'pending'. */
   approvalStatus?: 'pending' | 'approved' | 'rejected'
@@ -313,6 +317,16 @@ export interface ApiCenterClosure {
   cancelledCount: number
   /** Patients SMSed by that sweep. */
   notifiedCount: number
+  createdAt: string | null
+}
+
+/** A receptionist-posted notice/promotion for a center (migration 016). */
+export interface ApiCenterNotice {
+  id: string
+  centerId: string
+  title: string
+  message: string
+  imageUrl: string | null
   createdAt: string | null
 }
 
@@ -370,6 +384,7 @@ export interface ApiDoctorRequest {
   maxAppointmentsPerHour?: number
   status: 'pending' | 'approved' | 'rejected'
   rejectionReason?: string | null
+  targetDoctorUserId?: string | null
   createdAt: string
 }
 
@@ -410,6 +425,15 @@ export interface ApiDoctorSummary {
     centerId: string | null
     centerName: string | null
     maxAppointmentsPerHour: number
+    assignedCenters: {
+      id: string
+      centerId: string
+      centerName: string
+      roomNumber: string | null
+      series: string | null
+      currentStatus: string
+      delayMinutes: number
+    }[]
   }
   stats: {
     totalToday: number
@@ -616,20 +640,22 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  // ── Doctor Requests (Receptionist -> Super Admin Approvals) ──
+  // ── Doctor Requests (Receptionist → Doctor self-approval) ──────────────────
   getDoctorRequests: (params?: { status?: string }) => {
     const query = params?.status ? `?status=${encodeURIComponent(params.status)}` : ''
     return request<{ requests: ApiDoctorRequest[] }>(`/doctor-requests${query}`)
   },
 
+  /** Doctor fetches their own incoming join requests */
+  getMyDoctorRequests: () =>
+    request<{ requests: ApiDoctorRequest[] }>('/doctor-requests/mine'),
+
   createDoctorRequest: (input: {
-    requestType: 'ASSIGN_EXISTING' | 'REGISTER_NEW'
+    requestType: 'ASSIGN_EXISTING'
     centerId: string
     centerName?: string
-    doctorId?: string | null
+    doctorId: string
     doctorName: string
-    email?: string
-    phone?: string
     specialization: string
     roomNumber?: string
     series?: string
@@ -640,13 +666,15 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  approveDoctorRequest: (id: string) =>
-    request<{ message: string; requestId: string; status: 'approved'; doctor?: ApiDoctor }>(`/doctor-requests/${id}/approve`, {
+  /** Doctor accepts a join request → immediately creates their center assignment */
+  acceptDoctorRequest: (id: string) =>
+    request<{ message: string; requestId: string; status: 'approved'; assignment?: { centerId: string; centerName: string; roomNumber?: string; series?: string } }>(`/doctor-requests/${id}/accept`, {
       method: 'PATCH',
     }),
 
-  rejectDoctorRequest: (id: string, reason?: string) =>
-    request<{ message: string; requestId: string; status: 'rejected'; reason?: string }>(`/doctor-requests/${id}/reject`, {
+  /** Doctor declines a join request */
+  declineDoctorRequest: (id: string, reason?: string) =>
+    request<{ message: string; requestId: string; status: 'rejected'; reason?: string }>(`/doctor-requests/${id}/decline`, {
       method: 'PATCH',
       body: JSON.stringify({ reason }),
     }),
@@ -738,7 +766,7 @@ export const api = {
     ),
 
   /** `advanceBookingDays` — how many days ahead patients may book this doctor (migration 013). */
-  upsertDoctorHours: (doctorId: string, hours: Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'>[], maxAppointmentsPerHour?: number, advanceBookingDays?: number, centerId?: string | null) =>
+  upsertDoctorHours: (doctorId: string, hours: (Pick<ApiDoctorHour, 'dayOfWeek' | 'startTime' | 'endTime' | 'isAvailable'> & { sessions?: { startTime: string; endTime: string }[] })[], maxAppointmentsPerHour?: number, advanceBookingDays?: number, centerId?: string | null) =>
     request<{ message: string; hours: ApiDoctorHour[] }>(`/doctors/${doctorId}/hours`, {
       method: 'PUT',
       body: JSON.stringify({ hours, maxAppointmentsPerHour, advanceBookingDays, centerId }),
@@ -766,7 +794,7 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  updateCenter: (id: string, updates: Partial<{ name: string; registrationNumber: string; licenseStatus: ApiCenter['licenseStatus']; city: string; province: string; address: string; openingHours: string; services: string[]; phone: string; email: string; website: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
+  updateCenter: (id: string, updates: Partial<{ name: string; registrationNumber: string; licenseStatus: ApiCenter['licenseStatus']; city: string; province: string; address: string; latitude: number; longitude: number; openingHours: string; services: string[]; phone: string; email: string; website: string; imageUrl: string | null; status: 'operational' | 'maintenance' | 'closed' }>) =>
     request<{ message: string; center: ApiCenter }>(`/centers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
@@ -792,6 +820,23 @@ export const api = {
   /** Re-open a day for new bookings. Previously cancelled appointments are not restored. */
   deleteCenterClosure: (centerId: string, date: string) =>
     request<{ message: string }>(`/centers/${centerId}/closures/${date}`, {
+      method: 'DELETE',
+    }),
+
+  // ── Notices & Promotions (migration 016) ──
+  /** A center's notices, newest first. Unauthenticated, like `getCenters`. */
+  getCenterNotices: (centerId: string) =>
+    request<{ notices: ApiCenterNotice[] }>(`/centers/${centerId}/notices`),
+
+  /** `imageUrl` is optional — upload it first via `uploadFile` and pass the resulting URL. */
+  createCenterNotice: (centerId: string, input: { title: string; message: string; imageUrl?: string | null }) =>
+    request<{ message: string; notice: ApiCenterNotice }>(`/centers/${centerId}/notices`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  deleteCenterNotice: (centerId: string, noticeId: string) =>
+    request<{ message: string }>(`/centers/${centerId}/notices/${noticeId}`, {
       method: 'DELETE',
     }),
 

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Activity, AlertCircle, Bell, BellRing, Building2, CheckCircle2, Clock, Hash, Plus, Radio,
-  Search, Stethoscope, Ticket, UserX, Users, Wifi, CalendarClock, CalendarOff, Pencil, Menu, X,
-  ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert
+  Activity, AlertCircle, Bell, BellRing, Building2, Camera, CheckCircle2, Clock, Hash, ImagePlus,
+  Megaphone, Plus, Radio, Save, Search, Stethoscope, Ticket, Trash2, UserX, Users, Wifi, CalendarClock,
+  Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -12,6 +12,8 @@ import AddDoctorModal from '../components/AddDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import DoctorHoursModal from '../components/DoctorHoursModal'
 import DelayAlertModal from '../components/DelayAlertModal'
+import ServiceChecklist from '../components/ServiceChecklist'
+import LocationPickerMap from '../components/LocationPickerMap'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
@@ -19,7 +21,7 @@ import {
   minutesSince, validateNic, validatePhone, waitingFor
 } from '../lib/receptionQueue'
 import type { QueueEntry, TokenSource } from '../lib/receptionQueue'
-import { api, type ApiAppointmentRow, type ApiCenterClosure, type ApiCenterDateHours, type ApiDoctorDateHours, type ApiDoctor } from '../lib/api'
+import { api, type ApiAppointmentRow, type ApiCenter, type ApiCenterNotice, type ApiDoctor } from '../lib/api'
 
 /**
  * Identity key for a patient — their name plus phone number. Used to collapse
@@ -269,7 +271,7 @@ export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
   const { user } = useAuth()
 
-  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'schedule'>('checkin')
+  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'profile'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
@@ -283,6 +285,29 @@ export default function ReceptionistDesk() {
   const [showAddDoctor, setShowAddDoctor] = useState(false)
   const [editingDoctor, setEditingDoctor] = useState<ApiDoctor | null>(null)
   const [hoursDoctor, setHoursDoctor] = useState<ApiDoctor | null>(null)
+
+  // Center Profile tab — the receptionist's own medical center, view + edit.
+  const [centerProfile, setCenterProfile] = useState<ApiCenter | null>(null)
+  const [profileForm, setProfileForm] = useState({
+    address: '', phone: '', openingHours: '', latitude: 6.9271, longitude: 79.8612, imageUrl: null as string | null,
+  })
+  const [profileServices, setProfileServices] = useState<string[]>([])
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileSaved, setProfileSaved] = useState(false)
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [profileImageUploading, setProfileImageUploading] = useState(false)
+  const [profileTrackingLocation, setProfileTrackingLocation] = useState(false)
+
+  // Notices & Promotions — posted from the Center Profile tab, visible to patients.
+  const [notices, setNotices] = useState<ApiCenterNotice[]>([])
+  const [noticesLoading, setNoticesLoading] = useState(false)
+  const [noticeTitle, setNoticeTitle] = useState('')
+  const [noticeMessage, setNoticeMessage] = useState('')
+  const [noticeImageUrl, setNoticeImageUrl] = useState<string | null>(null)
+  const [noticeImageUploading, setNoticeImageUploading] = useState(false)
+  const [noticePosting, setNoticePosting] = useState(false)
+  const [noticeError, setNoticeError] = useState<string | null>(null)
 
   // Delay alerts (BR-05 / FR-07) — reception is usually the first to know a
   // doctor is running late, so the desk can publish the notice too.
@@ -379,64 +404,223 @@ export default function ReceptionistDesk() {
    */
   const [allAppointments, setAllAppointments] = useState<ApiAppointmentRow[]>([])
 
-  /** Center closures (migration 012) — drives the Schedule tab's CLOSED badges. */
-  const [closures, setClosures] = useState<ApiCenterClosure[]>([])
-  /** Bumped after a close/re-open so both lists refetch. */
-  const [scheduleReloadKey, setScheduleReloadKey] = useState(0)
-
   useEffect(() => {
-    // Loaded for the Patients tab's tables, the check-in tab's name
-    // autocomplete, and the Schedule tab's day list — all read the same
-    // center-scoped appointment list.
-    if (activeTab !== 'patients' && activeTab !== 'checkin' && activeTab !== 'schedule') return
+    // Loaded for the Patients tab's tables and the check-in tab's name autocomplete
+    if (activeTab !== 'patients' && activeTab !== 'checkin') return
     let cancelled = false
     api.getAppointments(queue.centerId ? { centerId: queue.centerId } : undefined)
       .then(res => { if (!cancelled) setAllAppointments(res.appointments) })
       .catch(() => { if (!cancelled) setAllAppointments([]) })
     return () => { cancelled = true }
-  }, [activeTab, queue.centerId, scheduleReloadKey])
+  }, [activeTab, queue.centerId])
 
+  /** Resets the edit form to match a loaded (or just-saved) center record — the "last saved" snapshot. */
+  const applyCenterToProfileForm = (mine: ApiCenter | null) => {
+    setCenterProfile(mine)
+    setProfileForm({
+      address: mine?.address ?? '',
+      phone: mine?.phone ?? '',
+      openingHours: mine?.opening_hours ?? '',
+      latitude: mine?.latitude ?? 6.9271,
+      longitude: mine?.longitude ?? 79.8612,
+      imageUrl: mine?.imageUrl ?? null,
+    })
+    setProfileServices(mine?.services ?? [])
+  }
+
+  // Loads the desk's own center record into the Profile tab's edit form.
   useEffect(() => {
-    if (activeTab !== 'schedule' || !queue.centerId) { setClosures([]); return }
+    if (activeTab !== 'profile' || !queue.centerId) return
     let cancelled = false
-    api.getCenterClosures(queue.centerId)
-      .then(res => { if (!cancelled) setClosures(res.closures) })
-      .catch(() => { if (!cancelled) setClosures([]) })
-    return () => { cancelled = true }
-  }, [activeTab, queue.centerId, scheduleReloadKey])
-
-  /** Date-specific hours (migration 014) — per-doctor overrides + the centre's
-   *  display-only label, both keyed by date on the Schedule tab. */
-  const [centerDateHours, setCenterDateHours] = useState<ApiCenterDateHours[]>([])
-  const [doctorDateHours, setDoctorDateHours] = useState<ApiDoctorDateHours[]>([])
-  /** This centre's usual opening-hours string — the placeholder when no date override exists. */
-  const [centerDefaultHours, setCenterDefaultHours] = useState('')
-
-  useEffect(() => {
-    if (activeTab !== 'schedule' || !queue.centerId) { setCenterDateHours([]); setDoctorDateHours([]); return }
-    let cancelled = false
-    api.getCenterDayHours(queue.centerId)
-      .then(res => {
-        if (cancelled) return
-        setCenterDateHours(res.centerHours)
-        setDoctorDateHours(res.doctorHours)
-      })
-      .catch(() => { if (!cancelled) { setCenterDateHours([]); setDoctorDateHours([]) } })
-    return () => { cancelled = true }
-  }, [activeTab, queue.centerId, scheduleReloadKey])
-
-  useEffect(() => {
-    if (activeTab !== 'schedule' || !queue.centerId) return
-    let cancelled = false
+    setProfileLoading(true)
+    setProfileError(null)
     api.getCenters()
       .then(res => {
         if (cancelled) return
-        const mine = res.centers.find(c => c.id === queue.centerId)
-        setCenterDefaultHours(mine?.opening_hours ?? '')
+        applyCenterToProfileForm(res.centers.find(c => c.id === queue.centerId) ?? null)
       })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) setProfileError('Could not load your medical center profile.') })
+      .finally(() => { if (!cancelled) setProfileLoading(false) })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, queue.centerId])
+
+  /** True once the form diverges from the last loaded/saved center record — gates the unsaved-changes prompt. */
+  const isProfileDirty = useMemo(() => {
+    if (!centerProfile) return false
+    const sameServices = JSON.stringify([...profileServices].sort()) === JSON.stringify([...(centerProfile.services ?? [])].sort())
+    return (
+      profileForm.address !== (centerProfile.address ?? '') ||
+      profileForm.phone !== (centerProfile.phone ?? '') ||
+      profileForm.openingHours !== (centerProfile.opening_hours ?? '') ||
+      profileForm.imageUrl !== (centerProfile.imageUrl ?? null) ||
+      profileForm.latitude !== (centerProfile.latitude ?? 6.9271) ||
+      profileForm.longitude !== (centerProfile.longitude ?? 79.8612) ||
+      !sameServices
+    )
+  }, [profileForm, profileServices, centerProfile])
+
+  /** Which tab the receptionist tried to switch to while the profile had unsaved edits. */
+  const [pendingTab, setPendingTab] = useState<typeof activeTab | null>(null)
+
+  const requestTabChange = (target: typeof activeTab) => {
+    if (activeTab === 'profile' && target !== 'profile' && isProfileDirty) {
+      setPendingTab(target)
+      return
+    }
+    setActiveTab(target)
+    setShowMobileSidebar(false)
+  }
+
+  // Browser-level guard (tab close, refresh, address-bar navigation) — the
+  // in-app confirm dialog above only catches switching tabs inside the desk.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (activeTab !== 'profile' || !isProfileDirty) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [activeTab, isProfileDirty])
+
+  const handleProfileImageSelect = async (file: File | null) => {
+    if (!file) return
+    setProfileImageUploading(true)
+    setProfileError(null)
+    try {
+      const uploaded = await api.uploadFile(file, 'center-images')
+      setProfileForm(f => ({ ...f, imageUrl: uploaded.fileUrl }))
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Could not upload the image. Please try again.')
+    } finally {
+      setProfileImageUploading(false)
+    }
+  }
+
+  const handleTrackProfileLocation = () => {
+    if (!navigator.geolocation) {
+      setProfileError('Location tracking is not supported by this browser.')
+      return
+    }
+    setProfileTrackingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setProfileForm(f => ({ ...f, latitude: Number(pos.coords.latitude.toFixed(4)), longitude: Number(pos.coords.longitude.toFixed(4)) }))
+        setProfileTrackingLocation(false)
+      },
+      () => {
+        setProfileTrackingLocation(false)
+        setProfileError('Could not determine your current location. Please check browser permissions.')
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
+  }
+
+  /** Returns whether the save succeeded, so a caller (e.g. the unsaved-changes dialog) knows whether it's safe to navigate away. */
+  const handleSaveProfile = async (): Promise<boolean> => {
+    if (!queue.centerId) return false
+    setProfileSaving(true)
+    setProfileError(null)
+    try {
+      const res = await api.updateCenter(queue.centerId, {
+        address: profileForm.address,
+        phone: profileForm.phone,
+        openingHours: profileForm.openingHours,
+        services: profileServices,
+        imageUrl: profileForm.imageUrl,
+        latitude: profileForm.latitude,
+        longitude: profileForm.longitude,
+      })
+      applyCenterToProfileForm(res.center)
+      setProfileSaved(true)
+      setTimeout(() => setProfileSaved(false), 2500)
+      return true
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Could not save the medical center profile.')
+      return false
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  const handleDiscardProfileChanges = () => applyCenterToProfileForm(centerProfile)
+
+  const handleResolvePendingTabChange = async (action: 'save' | 'discard') => {
+    const target = pendingTab
+    if (!target) return
+    if (action === 'discard') {
+      handleDiscardProfileChanges()
+    } else {
+      const ok = await handleSaveProfile()
+      if (!ok) { setPendingTab(null); return }
+    }
+    setPendingTab(null)
+    setActiveTab(target)
+    setShowMobileSidebar(false)
+  }
+
+  /** Notices & Promotions — loaded alongside the profile, refreshed after posting/removing one. */
+  const loadNotices = () => {
+    if (!queue.centerId) { setNotices([]); return }
+    setNoticesLoading(true)
+    api.getCenterNotices(queue.centerId)
+      .then(res => setNotices(res.notices))
+      .catch(() => setNotices([]))
+      .finally(() => setNoticesLoading(false))
+  }
+
+  useEffect(() => {
+    if (activeTab !== 'profile') return
+    loadNotices()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, queue.centerId])
+
+  const handleNoticeImageSelect = async (file: File | null) => {
+    if (!file) return
+    setNoticeImageUploading(true)
+    setNoticeError(null)
+    try {
+      const uploaded = await api.uploadFile(file, 'center-notices')
+      setNoticeImageUrl(uploaded.fileUrl)
+    } catch (err) {
+      setNoticeError(err instanceof Error ? err.message : 'Could not upload the image. Please try again.')
+    } finally {
+      setNoticeImageUploading(false)
+    }
+  }
+
+  const handlePostNotice = async () => {
+    if (!queue.centerId || !noticeTitle.trim() || !noticeMessage.trim()) return
+    setNoticePosting(true)
+    setNoticeError(null)
+    try {
+      await api.createCenterNotice(queue.centerId, {
+        title: noticeTitle.trim(),
+        message: noticeMessage.trim(),
+        imageUrl: noticeImageUrl,
+      })
+      setNoticeTitle('')
+      setNoticeMessage('')
+      setNoticeImageUrl(null)
+      loadNotices()
+    } catch (err) {
+      setNoticeError(err instanceof Error ? err.message : 'Could not post the notice. Please try again.')
+    } finally {
+      setNoticePosting(false)
+    }
+  }
+
+  const handleDeleteNotice = async (notice: ApiCenterNotice) => {
+    if (!queue.centerId) return
+    if (!window.confirm(`Remove the notice "${notice.title}"? Patients will no longer see it.`)) return
+    try {
+      await api.deleteCenterNotice(queue.centerId, notice.id)
+      setNotices(prev => prev.filter(n => n.id !== notice.id))
+    } catch (err) {
+      setNoticeError(err instanceof Error ? err.message : 'Could not remove the notice. Please try again.')
+    }
+  }
 
   /** Local YYYY-MM-DD, recomputed each minute so the table rolls over at midnight. */
   const todayIso = useMemo(() => {
@@ -587,198 +771,7 @@ export default function ReceptionistDesk() {
     showDelayToast(res.message)
   }
 
-  // ── Schedule tab ─────────────────────────────────────────────────────────
 
-  /** The 7 local ISO dates from today (inclusive). */
-  const next7Days = useMemo(() => {
-    const base = queue.now
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i)
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    })
-  }, [queue.now])
-
-  const closureByDate = useMemo(() => {
-    const m = new Map<string, ApiCenterClosure>()
-    for (const c of closures) m.set(c.closedDate, c)
-    return m
-  }, [closures])
-
-  const apptsByDate = useMemo(() => {
-    const m = new Map<string, ApiAppointmentRow[]>()
-    for (const a of allAppointments) {
-      const list = m.get(a.appointmentDate)
-      if (list) list.push(a)
-      else m.set(a.appointmentDate, [a])
-    }
-    return m
-  }, [allAppointments])
-
-  const centerHoursByDate = useMemo(() => {
-    const m = new Map<string, ApiCenterDateHours>()
-    for (const c of centerDateHours) m.set(c.openDate, c)
-    return m
-  }, [centerDateHours])
-
-  /** date -> doctorId -> that doctor's override for that date. */
-  const doctorHoursByDate = useMemo(() => {
-    const m = new Map<string, Map<string, ApiDoctorDateHours>>()
-    for (const d of doctorDateHours) {
-      if (!m.has(d.workDate)) m.set(d.workDate, new Map())
-      m.get(d.workDate)!.set(d.doctorId, d)
-    }
-    return m
-  }, [doctorDateHours])
-
-  /** Which day a closure is being confirmed for, plus the reason draft. */
-  const [closingDate, setClosingDate] = useState<string | null>(null)
-  const [closingReason, setClosingReason] = useState('')
-  const [scheduleBusy, setScheduleBusy] = useState(false)
-
-  const confirmCloseDay = async () => {
-    if (!closingDate || !queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      const res = await api.createCenterClosure(queue.centerId, {
-        date: closingDate,
-        reason: closingReason.trim(),
-      })
-      showDelayToast(
-        res.alreadyClosed
-          ? `${closingDate} was already marked closed.`
-          : `${closingDate} closed · ${res.cancelledCount} appointment${res.cancelledCount === 1 ? '' : 's'} cancelled · ${res.notifiedCount} patient${res.notifiedCount === 1 ? '' : 's'} notified`,
-      )
-      setClosingDate(null)
-      setClosingReason('')
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not close this day.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const reopenDay = async (date: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      const res = await api.deleteCenterClosure(queue.centerId, date)
-      showDelayToast(res.message)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not re-open this day.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  // ── Date-specific hours editor (migration 014) ──────────────────────────
-  interface DoctorHoursDraft { isWorking: boolean; startTime: string; endTime: string }
-
-  /** The day whose "Edit hours" panel is open, plus its working copies. */
-  const [editingHoursDate, setEditingHoursDate] = useState<string | null>(null)
-  const [centerLabelDraft, setCenterLabelDraft] = useState('')
-  const [centerNoteDraft, setCenterNoteDraft] = useState('')
-  const [doctorHoursDraft, setDoctorHoursDraft] = useState<Record<string, DoctorHoursDraft>>({})
-
-  const openHoursEditor = (date: string) => {
-    setEditingHoursDate(prev => (prev === date ? null : date))
-    const ch = centerHoursByDate.get(date)
-    setCenterLabelDraft(ch?.hoursLabel ?? '')
-    setCenterNoteDraft(ch?.note ?? '')
-    const perDoctor = doctorHoursByDate.get(date)
-    const draft: Record<string, DoctorHoursDraft> = {}
-    for (const d of queue.doctors) {
-      const existing = perDoctor?.get(d.id)
-      draft[d.id] = {
-        isWorking: existing?.isWorking ?? true,
-        startTime: existing?.startTime ?? '08:00',
-        endTime: existing?.endTime ?? '17:00',
-      }
-    }
-    setDoctorHoursDraft(draft)
-  }
-
-  const saveCenterHours = async (date: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      await api.putCenterDateHours(queue.centerId, {
-        date, hoursLabel: centerLabelDraft.trim(), note: centerNoteDraft.trim(),
-      })
-      showDelayToast(`Centre hours for ${date} updated.`)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not save the centre hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const resetCenterHours = async (date: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      await api.deleteCenterDateHours(queue.centerId, date)
-      setCenterLabelDraft('')
-      setCenterNoteDraft('')
-      showDelayToast(`Centre hours for ${date} reverted to the default.`)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not reset the centre hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const saveDoctorHours = async (date: string, doctorId: string) => {
-    if (!queue.centerId) return
-    const draft = doctorHoursDraft[doctorId]
-    if (!draft) return
-    if (draft.isWorking && draft.startTime >= draft.endTime) {
-      showDelayToast('End time must be after start time.')
-      return
-    }
-    setScheduleBusy(true)
-    try {
-      const res = await api.putDoctorDateHours(queue.centerId, {
-        doctorId,
-        date,
-        isWorking: draft.isWorking,
-        startTime: draft.isWorking ? draft.startTime : undefined,
-        endTime: draft.isWorking ? draft.endTime : undefined,
-      })
-      const doctorName = queue.doctors.find(d => d.id === doctorId)?.name ?? 'This doctor'
-      const newHours = draft.isWorking ? `${draft.startTime}–${draft.endTime}` : 'not working'
-      // A widened or unchanged window cancels nothing — saying "0 cancelled ·
-      // 0 notified" there reads like an error or a no-op instead of the
-      // successful save it is, so that case gets its own, plainer sentence.
-      showDelayToast(
-        res.cancelledCount > 0
-          ? `${doctorName}'s hours on ${date} set to ${newHours}: ${res.cancelledCount} appointment${res.cancelledCount === 1 ? '' : 's'} no longer fit and ${res.cancelledCount === 1 ? 'was' : 'were'} cancelled · ${res.notifiedCount} patient${res.notifiedCount === 1 ? '' : 's'} notified.`
-          : `${doctorName}'s hours on ${date} set to ${newHours}. No existing appointments were affected.`,
-      )
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not save these hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
-
-  const resetDoctorHours = async (date: string, doctorId: string) => {
-    if (!queue.centerId) return
-    setScheduleBusy(true)
-    try {
-      const res = await api.deleteDoctorDateHours(queue.centerId, doctorId, date)
-      showDelayToast(res.message)
-      setScheduleReloadKey(k => k + 1)
-    } catch (err) {
-      showDelayToast(err instanceof Error ? err.message : 'Could not reset these hours.')
-    } finally {
-      setScheduleBusy(false)
-    }
-  }
 
   return (
     // App.tsx wraps every route in `paddingTop: 46` to clear the fixed
@@ -819,6 +812,73 @@ export default function ReceptionistDesk() {
         roomNumber={selectedDoctor?.room ?? undefined}
         dept={selectedDoctor?.dept ?? undefined}
       />
+
+      {/* Unsaved Center Profile edits — asks before leaving the tab. */}
+      {pendingTab && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10001,
+          background: 'rgba(6, 35, 33, 0.65)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div className="fade-in modal-card" style={{
+            width: '100%', maxWidth: 420,
+            background: '#ffffff', borderRadius: 18, padding: '28px 26px',
+            boxShadow: '0 20px 60px rgba(8, 48, 45, 0.2)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{
+                width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+                background: 'rgba(245, 158, 11, 0.14)', border: '1px solid rgba(245, 158, 11, 0.3)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b45309',
+              }}>
+                <TriangleAlert size={20} />
+              </div>
+              <h3 style={{ fontSize: 17, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>
+                Unsaved Changes
+              </h3>
+            </div>
+
+            <p style={{ fontSize: 13.5, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 22 }}>
+              You've made changes to the medical center profile that haven't been saved. Save them before leaving, or discard them?
+            </p>
+
+            {profileError && (
+              <div style={{
+                background: '#fff1f1', border: '1px solid #fca5a5',
+                borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626', marginBottom: 16,
+              }}>
+                {profileError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => setPendingTab(null)} disabled={profileSaving} className="btn btn-ghost" style={{ height: 42 }}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResolvePendingTabChange('discard')}
+                disabled={profileSaving}
+                className="btn"
+                style={{ height: 42, background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+              >
+                Discard Changes
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResolvePendingTabChange('save')}
+                disabled={profileSaving}
+                className="btn btn-primary"
+                style={{ height: 42, gap: 8 }}
+              >
+                <Save size={15} /> {profileSaving ? 'Saving…' : 'Save & Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Result of publishing or clearing a delay — states how many patients
           were actually reached rather than assuming it worked. */}
@@ -879,17 +939,17 @@ export default function ReceptionistDesk() {
         {/* Nav Tabs */}
         <div style={{ padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, paddingLeft: 8 }}>Navigation</div>
-          <button disabled={!centerAccessApproved} onClick={() => { setActiveTab('checkin'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'checkin' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
+          <button disabled={!centerAccessApproved} onClick={() => requestTabChange('checkin')} className={`btn ${activeTab === 'checkin' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Ticket size={16} /> Issue Tokens & Queue
           </button>
-          <button disabled={!centerAccessApproved} onClick={() => { setActiveTab('doctors'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
+          <button disabled={!centerAccessApproved} onClick={() => requestTabChange('doctors')} className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Stethoscope size={16} /> Doctors
           </button>
-          <button disabled={!centerAccessApproved} onClick={() => { setActiveTab('patients'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
+          <button disabled={!centerAccessApproved} onClick={() => requestTabChange('patients')} className={`btn ${activeTab === 'patients' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Users size={16} /> Patients
           </button>
-          <button onClick={() => { setActiveTab('schedule'); setShowMobileSidebar(false) }} className={`btn ${activeTab === 'schedule' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
-            <CalendarClock size={16} /> Schedule
+          <button disabled={!centerAccessApproved} onClick={() => requestTabChange('profile')} className={`btn ${activeTab === 'profile' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
+            <Building2 size={16} /> Center Profile
           </button>
         </div>
 
@@ -1717,265 +1777,317 @@ export default function ReceptionistDesk() {
             </div>
           )}
 
-          {/* SCHEDULE TAB — the next 7 days for this center, and the control to
-              mark a day closed (which cancels that day's appointments and SMSes
-              the patients — see backend center_closures / migration 012). */}
-          {activeTab === 'schedule' && (
-            <div style={{ padding: '18px 24px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {!queue.centerId ? (
-                <div className="card glass-form-card" style={{ padding: 26, textAlign: 'center', color: 'var(--text-4)', fontSize: 13 }}>
-                  Your account isn't linked to a medical center yet, so there's no schedule to manage.
+          {/* CENTER PROFILE TAB — receptionist maintains their center's public profile */}
+          {activeTab === 'profile' && (
+            <div style={{ padding: '18px 24px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+              {/* ── PROFILE CARD — photo, location, contact, hours, services ── */}
+              <div className="card glass-form-card" style={{ padding: 26 }}>
+                <div style={{ marginBottom: 18 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Medical Center Profile</h3>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 620 }}>
+                    Keep {deskCenterName ?? 'your medical center'}'s public profile up to date — patients see this when browsing centers and booking appointments.
+                  </div>
                 </div>
-              ) : (
-                <>
-                  <div>
-                    <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Schedule</h2>
-                    <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
-                      The next 7 days at {deskCenterName ?? 'this center'}. Mark a day closed to cancel its
-                      appointments and text the affected patients.
+
+                {profileLoading && !centerProfile ? (
+                  <div style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>Loading profile…</div>
+                ) : !centerProfile ? (
+                  <div style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--text-4)' }}>
+                    Your medical center profile could not be loaded.
+                  </div>
+                ) : (
+                  <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
+
+                    {/* Photo (optional) */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Facility Photo (Optional)
+                      </label>
+                      <div style={{
+                        width: '100%', aspectRatio: '1', borderRadius: 14, overflow: 'hidden',
+                        border: '1px solid var(--border-md)', background: 'var(--bg)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                      }}>
+                        {profileForm.imageUrl ? (
+                          <img src={profileForm.imageUrl} alt={centerProfile.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <Camera size={32} color="var(--text-4)" />
+                        )}
+                        {profileImageUploading && (
+                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>
+                            Uploading…
+                          </div>
+                        )}
+                      </div>
+                      <label className="btn btn-ghost btn-sm" style={{ gap: 6, justifyContent: 'center', cursor: 'pointer' }}>
+                        <Camera size={13} /> {profileForm.imageUrl ? 'Change Photo' : 'Upload Photo'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e => handleProfileImageSelect(e.target.files?.[0] ?? null)}
+                          style={{ display: 'none' }}
+                          disabled={profileImageUploading}
+                        />
+                      </label>
+                      {profileForm.imageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setProfileForm(f => ({ ...f, imageUrl: null }))}
+                          className="btn btn-ghost btn-sm"
+                          style={{ gap: 6, justifyContent: 'center', color: '#ef4444' }}
+                        >
+                          <Trash2 size={13} /> Remove Photo
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Details form */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                          Address
+                        </label>
+                        <input
+                          className="input"
+                          value={profileForm.address}
+                          onChange={e => setProfileForm(f => ({ ...f, address: e.target.value }))}
+                          style={{ height: 44, fontSize: 14 }}
+                        />
+                        <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>
+                          City: {centerProfile.city} — contact your Super Admin to change the city or registration details.
+                        </div>
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                          Location on Map
+                        </label>
+                        <LocationPickerMap
+                          lat={profileForm.latitude}
+                          lng={profileForm.longitude}
+                          trackingLocation={profileTrackingLocation}
+                          onTrackLocation={handleTrackProfileLocation}
+                          onChange={(nLat, nLng) => setProfileForm(f => ({ ...f, latitude: nLat, longitude: nLng }))}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            Mobile Number
+                          </label>
+                          <input
+                            className="input"
+                            placeholder="e.g. 0771234567"
+                            value={profileForm.phone}
+                            onChange={e => setProfileForm(f => ({ ...f, phone: e.target.value }))}
+                            style={{ height: 44, fontSize: 14 }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            Opening Hours
+                          </label>
+                          <input
+                            className="input"
+                            placeholder="e.g. 08:00 - 18:00"
+                            value={profileForm.openingHours}
+                            onChange={e => setProfileForm(f => ({ ...f, openingHours: e.target.value }))}
+                            style={{ height: 44, fontSize: 14 }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="profile-services"
+                          style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}
+                        >
+                          Special Services (e.g. Blood Tests, ECG)
+                        </label>
+                        <ServiceChecklist
+                          id="profile-services"
+                          value={profileServices}
+                          onChange={setProfileServices}
+                          disabled={profileSaving}
+                        />
+                      </div>
+
+                      {profileError && (
+                        <div style={{
+                          background: '#fff1f1', border: '1px solid #fca5a5',
+                          borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626',
+                        }}>
+                          {profileError}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+                        {profileSaved && (
+                          <span style={{ color: '#047857', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <CheckCircle2 size={15} /> Saved
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleSaveProfile}
+                          disabled={profileSaving || profileImageUploading}
+                          className="btn btn-primary"
+                          style={{ gap: 8, height: 42, padding: '0 20px', fontSize: 14 }}
+                        >
+                          <Save size={16} /> {profileSaving ? 'Saving…' : 'Save Profile'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── NOTICES & PROMOTIONS — receptionist posts, patients see them ── */}
+              <div className="card glass-form-card" style={{ padding: 26 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Notices &amp; Promotions</h3>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 620 }}>
+                    Post an announcement or promotion for {deskCenterName ?? 'your medical center'} — patients see it on their dashboard. An image is optional.
+                  </div>
+                </div>
+
+                {/* New notice form */}
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 12,
+                  padding: 16, borderRadius: 12, border: '1px solid var(--border-md)', background: 'var(--bg)', marginBottom: 20,
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 14 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Image (Optional)
+                      </label>
+                      <div style={{
+                        width: '100%', aspectRatio: '1', borderRadius: 12, overflow: 'hidden',
+                        border: '1px solid var(--border-md)', background: '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                      }}>
+                        {noticeImageUrl ? (
+                          <img src={noticeImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <ImagePlus size={26} color="var(--text-4)" />
+                        )}
+                        {noticeImageUploading && (
+                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)' }}>
+                            Uploading…
+                          </div>
+                        )}
+                      </div>
+                      <label className="btn btn-ghost btn-sm" style={{ gap: 5, justifyContent: 'center', cursor: 'pointer', fontSize: 11.5 }}>
+                        <ImagePlus size={12} /> {noticeImageUrl ? 'Change' : 'Add Image'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e => handleNoticeImageSelect(e.target.files?.[0] ?? null)}
+                          style={{ display: 'none' }}
+                          disabled={noticeImageUploading || noticePosting}
+                        />
+                      </label>
+                      {noticeImageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setNoticeImageUrl(null)}
+                          className="btn btn-ghost btn-sm"
+                          style={{ gap: 5, justifyContent: 'center', color: '#ef4444', fontSize: 11.5 }}
+                        >
+                          <Trash2 size={12} /> Remove
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <input
+                        className="input"
+                        placeholder="Notice title — e.g. 20% off health checkups this month"
+                        value={noticeTitle}
+                        onChange={e => setNoticeTitle(e.target.value)}
+                        disabled={noticePosting}
+                        style={{ height: 42, fontSize: 14 }}
+                      />
+                      <textarea
+                        className="input"
+                        placeholder="Details patients should know…"
+                        value={noticeMessage}
+                        onChange={e => setNoticeMessage(e.target.value)}
+                        disabled={noticePosting}
+                        style={{ height: 84, fontSize: 13.5, padding: 12, resize: 'vertical' }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={handlePostNotice}
+                          disabled={noticePosting || noticeImageUploading || !noticeTitle.trim() || !noticeMessage.trim()}
+                          className="btn btn-primary"
+                          style={{ gap: 8, height: 40, padding: '0 18px', fontSize: 13.5 }}
+                        >
+                          <Megaphone size={15} /> {noticePosting ? 'Posting…' : 'Post Notice'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  {next7Days.map(date => {
-                    const closure = closureByDate.get(date)
-                    const dayAppts = (apptsByDate.get(date) ?? [])
-                      .slice()
-                      .sort((a, b) => a.queueToken.localeCompare(b.queueToken))
-                    const activeAppts = dayAppts.filter(a => {
-                      const s = (a.status || '').toLowerCase()
-                      return s !== 'cancelled' && s !== 'completed' && s !== 'no_show'
-                    })
-                    const d = new Date(`${date}T00:00:00`)
-                    const heading = d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
-                    const isToday = date === todayIso
-                    const confirming = closingDate === date
-                    const editingHours = editingHoursDate === date
-                    const dayCenterHours = centerHoursByDate.get(date)
-                    const dayDoctorHours = doctorHoursByDate.get(date)
-                    const hasHourOverrides = !!dayCenterHours?.hoursLabel || (dayDoctorHours?.size ?? 0) > 0
+                  {noticeError && (
+                    <div style={{
+                      background: '#fff1f1', border: '1px solid #fca5a5',
+                      borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626',
+                    }}>
+                      {noticeError}
+                    </div>
+                  )}
+                </div>
 
-                    return (
-                      <div key={date} className="card glass-form-card" style={{ padding: 20, opacity: closure ? 0.92 : 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>{heading}</span>
-                            {isToday && <Badge cls="badge-blue">Today</Badge>}
-                            {closure ? (
-                              <Badge cls="badge-crimson"><CalendarOff size={11} /> Closed</Badge>
-                            ) : (
-                              <span style={{ fontSize: 12, color: 'var(--text-4)' }}>
-                                {activeAppts.length} appointment{activeAppts.length === 1 ? '' : 's'}
-                              </span>
-                            )}
-                            {closure?.reason && <span style={{ fontSize: 12, color: 'var(--text-4)' }}>· {closure.reason}</span>}
-                          </div>
-
-                          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                            {!closure && (
-                              <button
-                                onClick={() => openHoursEditor(date)}
-                                disabled={scheduleBusy}
-                                className={`btn btn-ghost btn-sm ${editingHours ? 'btn-primary' : ''}`}
-                                style={editingHours ? { gap: 5 } : { gap: 5, color: 'var(--blue)', border: '1px solid var(--blue-border)' }}
-                              >
-                                <Clock size={12} /> Edit hours
-                              </button>
-                            )}
-                            {closure ? (
-                              <button
-                                onClick={() => reopenDay(date)}
-                                disabled={scheduleBusy}
-                                className="btn btn-ghost btn-sm"
-                                style={{ gap: 5, color: '#047857', border: '1px solid var(--emerald-border)' }}
-                              >
-                                <CheckCircle2 size={12} /> Re-open day
-                              </button>
-                            ) : !confirming ? (
-                              <button
-                                onClick={() => { setClosingDate(date); setClosingReason('') }}
-                                disabled={scheduleBusy}
-                                className="btn btn-ghost btn-sm"
-                                style={{ gap: 5, color: 'var(--crimson)', border: '1px solid var(--crimson-border)' }}
-                              >
-                                <CalendarOff size={12} /> Close this day
-                              </button>
-                            ) : null}
-                          </div>
+                {/* Posted notices */}
+                {noticesLoading ? (
+                  <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--text-4)', fontSize: 13 }}>
+                    Loading notices…
+                  </div>
+                ) : notices.length === 0 ? (
+                  <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--text-4)', fontSize: 13 }}>
+                    No notices posted yet.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {notices.map(notice => (
+                      <div key={notice.id} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 14,
+                        padding: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff',
+                      }}>
+                        {notice.imageUrl && (
+                          <img
+                            src={notice.imageUrl}
+                            alt=""
+                            style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }}
+                          />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{notice.title}</div>
+                          <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.5 }}>{notice.message}</div>
+                          {notice.createdAt && (
+                            <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 6 }}>
+                              Posted {new Date(notice.createdAt).toLocaleDateString()}
+                            </div>
+                          )}
                         </div>
-
-                        {/* Collapsed summary of any date-specific hours, so the
-                            override is visible without opening the editor. */}
-                        {!editingHours && hasHourOverrides && (
-                          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-4)', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                            {dayCenterHours?.hoursLabel && (
-                              <span>🏥 Centre {dayCenterHours.hoursLabel}</span>
-                            )}
-                            {queue.doctors.map(doc => {
-                              const ov = dayDoctorHours?.get(doc.id)
-                              if (!ov) return null
-                              return (
-                                <span key={doc.id}>
-                                  · {doc.name} {ov.isWorking ? `${ov.startTime}–${ov.endTime}` : 'off'}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        )}
-
-                        {editingHours && (
-                          <div style={{
-                            marginTop: 12, padding: 14, borderRadius: 10,
-                            background: 'var(--blue-dim)', border: '1px solid var(--blue-border)',
-                            display: 'flex', flexDirection: 'column', gap: 12,
-                          }}>
-                            {/* Centre hours — display-only label shown to patients */}
-                            <div>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-                                Centre hours <span style={{ fontWeight: 500, textTransform: 'none' }}>(shown to patients only — doesn't restrict bookings)</span>
-                              </div>
-                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                                <input
-                                  className="input"
-                                  placeholder={centerDefaultHours || 'e.g. 10:00 - 14:00'}
-                                  value={centerLabelDraft}
-                                  onChange={e => setCenterLabelDraft(e.target.value)}
-                                  style={{ height: 36, fontSize: 12.5, width: 180 }}
-                                />
-                                <input
-                                  className="input"
-                                  placeholder="Note (optional)"
-                                  value={centerNoteDraft}
-                                  onChange={e => setCenterNoteDraft(e.target.value)}
-                                  style={{ height: 36, fontSize: 12.5, flex: 1, minWidth: 140 }}
-                                />
-                                <button onClick={() => saveCenterHours(date)} disabled={scheduleBusy} className="btn btn-primary btn-sm">Save</button>
-                                {dayCenterHours && (
-                                  <button onClick={() => resetCenterHours(date)} disabled={scheduleBusy} className="btn btn-ghost btn-sm">Reset</button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Per-doctor working hours — this is what actually gates bookable slots */}
-                            <div>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-                                Doctor hours for {heading}
-                              </div>
-                              {queue.doctors.length === 0 ? (
-                                <div style={{ fontSize: 12, color: 'var(--text-4)' }}>No doctors on this roster.</div>
-                              ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                  {queue.doctors.map(doc => {
-                                    const draft = doctorHoursDraft[doc.id] ?? { isWorking: true, startTime: '08:00', endTime: '17:00' }
-                                    const hasOverride = !!dayDoctorHours?.get(doc.id)
-                                    return (
-                                      <div key={doc.id} style={{
-                                        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                                        padding: '8px 10px', borderRadius: 8, background: '#ffffff', border: '1px solid var(--border-md)',
-                                      }}>
-                                        <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-1)', minWidth: 130 }}>{doc.name}</span>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-3)', cursor: 'pointer' }}>
-                                          <input
-                                            type="checkbox"
-                                            checked={draft.isWorking}
-                                            onChange={e => setDoctorHoursDraft(prev => ({ ...prev, [doc.id]: { ...draft, isWorking: e.target.checked } }))}
-                                          />
-                                          Working
-                                        </label>
-                                        {draft.isWorking && (
-                                          <>
-                                            <input
-                                              type="time"
-                                              value={draft.startTime}
-                                              onChange={e => setDoctorHoursDraft(prev => ({ ...prev, [doc.id]: { ...draft, startTime: e.target.value } }))}
-                                              style={{ height: 32, borderRadius: 6, border: '1px solid var(--border-md)', padding: '0 8px', fontSize: 12.5 }}
-                                            />
-                                            <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>to</span>
-                                            <input
-                                              type="time"
-                                              value={draft.endTime}
-                                              onChange={e => setDoctorHoursDraft(prev => ({ ...prev, [doc.id]: { ...draft, endTime: e.target.value } }))}
-                                              style={{ height: 32, borderRadius: 6, border: '1px solid var(--border-md)', padding: '0 8px', fontSize: 12.5 }}
-                                            />
-                                          </>
-                                        )}
-                                        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-                                          <button onClick={() => saveDoctorHours(date, doc.id)} disabled={scheduleBusy} className="btn btn-primary btn-sm">Save</button>
-                                          {hasOverride && (
-                                            <button onClick={() => resetDoctorHours(date, doc.id)} disabled={scheduleBusy} className="btn btn-ghost btn-sm">Reset</button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {confirming && (
-                          <div style={{
-                            marginTop: 12, padding: 14, borderRadius: 10,
-                            background: 'var(--crimson-dim)', border: '1px solid var(--crimson-border)',
-                            display: 'flex', flexDirection: 'column', gap: 10,
-                          }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--crimson)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <TriangleAlert size={14} />
-                              Close {heading}? {activeAppts.length} appointment{activeAppts.length === 1 ? '' : 's'} will be cancelled
-                              and {activeAppts.length === 1 ? 'that patient' : 'those patients'} texted.
-                            </div>
-                            <input
-                              className="input"
-                              placeholder="Reason (optional) — e.g. Public holiday"
-                              value={closingReason}
-                              onChange={e => setClosingReason(e.target.value)}
-                              style={{ height: 38, fontSize: 13 }}
-                            />
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <button
-                                onClick={confirmCloseDay}
-                                disabled={scheduleBusy}
-                                className="btn btn-sm"
-                                style={{ background: 'var(--crimson)', color: '#fff', gap: 5 }}
-                              >
-                                <CalendarOff size={12} /> {scheduleBusy ? 'Closing…' : 'Confirm closure'}
-                              </button>
-                              <button
-                                onClick={() => { setClosingDate(null); setClosingReason('') }}
-                                disabled={scheduleBusy}
-                                className="btn btn-ghost btn-sm"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {dayAppts.length > 0 ? (
-                          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {dayAppts.map(a => {
-                              const b = apptStatusBadge(a.status)
-                              return (
-                                <div key={a.id} style={{
-                                  display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-                                  padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff',
-                                }}>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 800, color: 'var(--blue)', minWidth: 64 }}>{a.queueToken}</span>
-                                  <span style={{ flex: 1, minWidth: 140, fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>{a.patientName}</span>
-                                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{a.doctorName || '—'}</span>
-                                  <Badge cls={b.cls}>{b.label}</Badge>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        ) : (
-                          <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text-4)' }}>No appointments.</div>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteNotice(notice)}
+                          className="btn btn-ghost btn-sm"
+                          style={{ gap: 5, color: '#ef4444', flexShrink: 0 }}
+                        >
+                          <Trash2 size={13} /> Remove
+                        </button>
                       </div>
-                    )
-                  })}
-                </>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
+
             </div>
           )}
 
@@ -2054,13 +2166,13 @@ export default function ReceptionistDesk() {
                     No doctors match "{doctorSearch}".
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 18 }}>
                     {filteredDoctors.map(d => {
                       const serving = currentFor(queue.entries, d.id)
                       const docWaiting = waitingFor(queue.entries, d.id)
                       const accentColor = d.status === 'active' ? '#10B981' : d.status === 'delayed' ? 'var(--amber, #f59e0b)' : d.status === 'break' ? 'var(--blue)' : '#94a3b8'
                       return (
-                        <div key={d.id} className="card glass-form-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14, position: 'relative', overflow: 'hidden' }}>
+                        <div key={d.id} className="card glass-form-card" style={{ padding: '24px 22px', display: 'flex', flexDirection: 'column', gap: 14, position: 'relative', overflow: 'hidden' }}>
                           {/* Status accent stripe */}
                           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, borderRadius: '16px 16px 0 0', background: accentColor }} />
 
@@ -2103,27 +2215,27 @@ export default function ReceptionistDesk() {
                           </div>
 
                           {/* Action buttons */}
-                          <div style={{ display: 'flex', gap: 7 }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
                             <button
                               onClick={() => { queue.setSelectedDoctorId(d.id); setActiveTab('checkin'); queue.clearError() }}
                               className="btn btn-primary btn-sm"
-                              style={{ flex: 2, justifyContent: 'center', gap: 5, fontSize: 12 }}
+                              style={{ flex: '1 1 auto', justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
                             >
                               <Ticket size={12} /> Queue
                             </button>
                             <button
                               onClick={() => setEditingDoctor(d)}
                               className="btn btn-ghost btn-sm"
-                              style={{ flex: 1, justifyContent: 'center', gap: 5, fontSize: 12 }}
+                              style={{ flex: '0.8 1 auto', justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
                             >
                               <Pencil size={12} /> Edit
                             </button>
                             <button
                               onClick={() => setHoursDoctor(d)}
                               className="btn btn-ghost btn-sm"
-                              style={{ flex: 1, justifyContent: 'center', gap: 5, fontSize: 12, color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
+                              style={{ flex: '1.4 1 auto', justifyContent: 'center', gap: 4, fontSize: 11.5, padding: '0 8px', whiteSpace: 'nowrap', color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
                             >
-                              <CalendarClock size={12} /> Hours
+                              <CalendarClock size={12} /> Available Hours
                             </button>
                           </div>
                         </div>

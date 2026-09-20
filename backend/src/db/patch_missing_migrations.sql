@@ -148,3 +148,29 @@ FROM public.doctors d
 JOIN public.users u ON u.id = d.user_id
 WHERE LOWER(u.email) = 'dr.carr@mediqueue.io'
 ON CONFLICT (doctor_id, center_id) DO NOTHING;
+
+-- ── Doctor Self-Approval: target_doctor_user_id ──────────────────────────────
+-- Routes a join request to the specific doctor's dashboard instead of admin.
+ALTER TABLE public.doctor_requests
+  ADD COLUMN IF NOT EXISTS target_doctor_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+
+-- Index so the doctor's inbox query is fast
+CREATE INDEX IF NOT EXISTS idx_doctor_requests_target_user
+  ON public.doctor_requests(target_doctor_user_id)
+  WHERE target_doctor_user_id IS NOT NULL;
+
+-- ── Medical Center Profile: image (migration 015) ────────────────────────────
+ALTER TABLE public.medical_centers
+  ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- ── Notices & Promotions (migration 016) ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.center_notices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  image_url TEXT,
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_center_notices_center ON public.center_notices(center_id);
