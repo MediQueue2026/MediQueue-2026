@@ -288,11 +288,14 @@ export interface ApiCenter {
   address: string
   city: string
   province?: string | null
+  latitude?: number | null
+  longitude?: number | null
   opening_hours: string
   services: string[]
   phone?: string
   email?: string
   website?: string | null
+  imageUrl?: string | null
   status?: 'operational' | 'maintenance' | 'closed'
   /** Super Admin approval state — a receptionist-requested center starts 'pending'. */
   approvalStatus?: 'pending' | 'approved' | 'rejected'
@@ -314,6 +317,16 @@ export interface ApiCenterClosure {
   cancelledCount: number
   /** Patients SMSed by that sweep. */
   notifiedCount: number
+  createdAt: string | null
+}
+
+/** A receptionist-posted notice/promotion for a center (migration 016). */
+export interface ApiCenterNotice {
+  id: string
+  centerId: string
+  title: string
+  message: string
+  imageUrl: string | null
   createdAt: string | null
 }
 
@@ -781,7 +794,7 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  updateCenter: (id: string, updates: Partial<{ name: string; registrationNumber: string; licenseStatus: ApiCenter['licenseStatus']; city: string; province: string; address: string; openingHours: string; services: string[]; phone: string; email: string; website: string; status: 'operational' | 'maintenance' | 'closed' }>) =>
+  updateCenter: (id: string, updates: Partial<{ name: string; registrationNumber: string; licenseStatus: ApiCenter['licenseStatus']; city: string; province: string; address: string; latitude: number; longitude: number; openingHours: string; services: string[]; phone: string; email: string; website: string; imageUrl: string | null; status: 'operational' | 'maintenance' | 'closed' }>) =>
     request<{ message: string; center: ApiCenter }>(`/centers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
@@ -807,6 +820,23 @@ export const api = {
   /** Re-open a day for new bookings. Previously cancelled appointments are not restored. */
   deleteCenterClosure: (centerId: string, date: string) =>
     request<{ message: string }>(`/centers/${centerId}/closures/${date}`, {
+      method: 'DELETE',
+    }),
+
+  // ── Notices & Promotions (migration 016) ──
+  /** A center's notices, newest first. Unauthenticated, like `getCenters`. */
+  getCenterNotices: (centerId: string) =>
+    request<{ notices: ApiCenterNotice[] }>(`/centers/${centerId}/notices`),
+
+  /** `imageUrl` is optional — upload it first via `uploadFile` and pass the resulting URL. */
+  createCenterNotice: (centerId: string, input: { title: string; message: string; imageUrl?: string | null }) =>
+    request<{ message: string; notice: ApiCenterNotice }>(`/centers/${centerId}/notices`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  deleteCenterNotice: (centerId: string, noticeId: string) =>
+    request<{ message: string }>(`/centers/${centerId}/notices/${noticeId}`, {
       method: 'DELETE',
     }),
 

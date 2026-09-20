@@ -26,6 +26,7 @@ CREATE TABLE public.medical_centers (
   phone TEXT,
   email TEXT,
   website TEXT,
+  image_url TEXT,
   status TEXT CHECK (status IN ('operational', 'maintenance', 'closed')) NOT NULL DEFAULT 'operational',
   approval_status TEXT CHECK (approval_status IN ('pending', 'approved', 'rejected')) DEFAULT 'approved',
   requested_by_name TEXT,
@@ -207,6 +208,18 @@ CREATE TABLE public.center_closures (
   UNIQUE (center_id, closed_date)
 );
 CREATE INDEX idx_center_closures_lookup ON public.center_closures(center_id, closed_date);
+
+-- 8c. Notices & promotions (migration 016) — receptionist-posted, patient-visible.
+CREATE TABLE public.center_notices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  image_url TEXT,
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_center_notices_center ON public.center_notices(center_id);
 
 -- 8d. Date-specific hours (migration 014). Per-doctor overrides drive bookable
 --     slots for a single date; the per-centre row is a display-only label.

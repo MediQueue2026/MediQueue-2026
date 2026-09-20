@@ -381,6 +381,83 @@ select.input option {
   transition: all 0.25s ease;
 }
 
+/* ── Center Profile Page (patient-facing) ────────────────────────────── */
+.patient-center-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+}
+.patient-center-thumbnail {
+  width: 104px; height: 88px; object-fit: cover; flex-shrink: 0; border-radius: 10px;
+}
+@media (max-width: 480px) {
+  .patient-center-thumbnail { width: 80px; height: 76px; }
+}
+.center-profile-header {
+  display: flex; align-items: center; gap: 16px; padding: 14px;
+  border: 1px solid var(--border-md); border-radius: 16px;
+  background: linear-gradient(110deg, var(--blue-dim), #fff 65%);
+}
+.center-profile-photo {
+  width: 112px; height: 88px; flex-shrink: 0; overflow: hidden;
+  display: grid; place-items: center; border-radius: 10px;
+  background: var(--blue-dim);
+}
+.center-profile-photo img { width: 100%; height: 100%; object-fit: cover; }
+.center-profile-identity { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.center-profile-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  gap: 12px; align-items: start;
+}
+.center-profile-layout > * { min-width: 0; }
+.center-profile-doctors {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 10px;
+}
+.center-profile-details {
+  display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 12px; align-items: start; overflow-wrap: anywhere;
+}
+.center-profile-details > * { min-width: 0; }
+.center-profile-contact-items {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 8px 14px;
+}
+.center-profile-details > :only-child { grid-column: 1 / -1; }
+.center-doctor-schedule {
+  background: #fff; border: 1px solid var(--border); border-radius: 9px;
+  padding: 10px; font-size: 12px; line-height: 1.5;
+}
+.center-doctor-schedule-title {
+  display: flex; align-items: center; gap: 6px;
+  font-weight: 700; color: var(--blue-dark); margin-bottom: 6px;
+}
+.center-doctor-schedule-days { margin: 0; }
+.center-doctor-schedule-row {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  gap: 3px 12px; padding: 7px 0;
+}
+.center-doctor-schedule-row + .center-doctor-schedule-row { border-top: 1px solid var(--border); }
+.center-doctor-schedule-row:last-child { padding-bottom: 0; }
+.center-doctor-schedule-row dt { color: var(--text-3); font-weight: 600; }
+.center-doctor-schedule-row dd {
+  display: flex; flex-direction: column; gap: 3px; margin: 0;
+  color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.center-doctor-schedule-empty { margin: 0; color: var(--text-4); }
+.center-profile-service-groups, .center-profile-notices {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.center-profile button:focus-visible, .center-profile a:focus-visible {
+  outline: 2px solid var(--blue); outline-offset: 3px;
+}
+@media (max-width: 768px) {
+  .center-profile-details { grid-template-columns: minmax(0, 1fr); }
+  .center-profile-header { flex-wrap: wrap; gap: 10px; padding: 12px; }
+  .center-profile-photo { width: 72px; height: 72px; }
+  .center-profile-identity { flex-basis: calc(100% - 82px); }
+}
+
 /* ── Topbar utility ─────────────────────────────────────────────────── */
 .topbar {
   position: sticky; top: 52px; z-index: 40;
