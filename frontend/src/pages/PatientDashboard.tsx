@@ -43,7 +43,6 @@ const NAV_PATIENT = [
   { id: 'overview',      icon: <Home size={15} />,         label: 'Overview' },
   { id: 'centers',       icon: <Building2 size={15} />,    label: 'Browse Medical Centers' },
   { id: 'subscriptions', icon: <Heart size={15} />,        label: 'Subscribed Doctors' },
-  { id: 'token',         icon: <Ticket size={15} />,       label: 'Live Token' },
   { id: 'history',       icon: <ClipboardList size={15} />,label: 'Medical History & Reports' },
   { id: 'settings',      icon: <Settings size={15} />,     label: 'Settings' },
 ]
@@ -442,29 +441,28 @@ export default function PatientDashboard() {
             <Menu size={18} />
           </button>
 
-          {/* Live token alert banner */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: 'var(--blue-dim)', border: '1px solid var(--blue-border)',
-            borderRadius: 8, padding: '7px 12px', flex: 1, minWidth: 0,
-          }}>
-            <Bell size={13} color="var(--blue)" style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: 12.5, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeAppointment ? (
-                <>
-                  <strong style={{ color: 'var(--blue)' }}>Token {activeAppointment.queueToken ?? '—'}</strong> for {activeAppointment.doctorName} — <strong style={{ color: 'var(--blue)' }}>{formatSlotTime(activeAppointment.slotHour)}</strong>
-                </>
-              ) : (
-                'No active appointment for today. Click "Book Doctor" to schedule.'
-              )}
-            </span>
-            <button onClick={() => openPatientPage('token')} className="btn btn-sm" style={{ marginLeft: 'auto', flexShrink: 0, background: 'var(--blue-dim)', color: 'var(--blue)', border: '1px solid var(--blue-border)', fontWeight: 600, fontSize: 11, padding: '4px 10px' }}>View Token</button>
-          </div>
+          {/* Live token alert banner — displays only when user is in other tabs (not Overview) */}
+          {activeNav !== 'overview' && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'var(--blue-dim)', border: '1px solid var(--blue-border)',
+              borderRadius: 8, padding: '7px 12px', flex: 1, minWidth: 0,
+            }}>
+              <Bell size={13} color="var(--blue)" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 12.5, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {activeAppointment ? (
+                  <>
+                    <strong style={{ color: 'var(--blue)' }}>Token {activeAppointment.queueToken ?? '—'}</strong> for {activeAppointment.doctorName} — <strong style={{ color: 'var(--blue)' }}>{formatSlotTime(activeAppointment.slotHour)}</strong>
+                  </>
+                ) : (
+                  'No active appointment for today. Click "Overview" or "Browse Medical Centers" to schedule.'
+                )}
+              </span>
+              <button onClick={() => openPatientPage('overview')} className="btn btn-sm" style={{ marginLeft: 'auto', flexShrink: 0, background: 'var(--blue-dim)', color: 'var(--blue)', border: '1px solid var(--blue-border)', fontWeight: 600, fontSize: 11, padding: '4px 10px' }}>View Overview</button>
+            </div>
+          )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-            <button onClick={() => setShowBookModal(true)} className="btn btn-primary btn-sm" style={{ gap: 6 }}>
-              <Plus size={14} /> Book Doctor
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, marginLeft: activeNav === 'overview' ? 'auto' : undefined }}>
             <AccountMenu
               compact
               phone={profile.phone}
@@ -489,8 +487,8 @@ export default function PatientDashboard() {
           ) : (
           <>
 
-          {/* OVERVIEW TAB & LIVE TOKEN TAB */}
-          {(nav === 'overview' || nav === 'token') && (
+          {/* OVERVIEW TAB */}
+          {nav === 'overview' && (
             <>
               {/* ── CLEAN HUMAN-DESIGNED WELCOME BANNER ── */}
               <div className="card glass-form-card" style={{
