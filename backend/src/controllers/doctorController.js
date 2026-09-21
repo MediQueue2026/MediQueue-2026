@@ -787,7 +787,7 @@ export async function getDoctorHours(req, res, next) {
         .from('doctors')
         .select('available_hours, max_appointments_per_hour')
         .eq('id', doctorId)
-        .single();
+        .maybeSingle();
       if (error) {
         return res.status(500).json({ error: error.message });
       }
