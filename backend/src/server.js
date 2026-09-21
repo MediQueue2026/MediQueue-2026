@@ -39,8 +39,15 @@ const ALLOWED_ORIGINS = (
 app.use(
   cors({
     origin(origin, callback) {
-      // Allow server-to-server calls, explicit origins, or any local dev port (localhost / 127.0.0.1)
-      if (!origin || ALLOWED_ORIGINS.includes(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+      // Allow server-to-server calls, wildcard '*', Vercel/Render subdomains, explicit origins, or local dev ports
+      if (
+        !origin ||
+        ALLOWED_ORIGINS.includes('*') ||
+        ALLOWED_ORIGINS.includes(origin) ||
+        /\.vercel\.app$/i.test(origin) ||
+        /\.onrender\.com$/i.test(origin) ||
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+      ) {
         return callback(null, true);
       }
       callback(new Error(`Origin ${origin} is not allowed by CORS`));
