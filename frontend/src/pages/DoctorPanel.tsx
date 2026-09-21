@@ -43,6 +43,7 @@ export default function DoctorPanel() {
 
   const [shift, setShift] = useState<Shift>('online')
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false)
+  const [selectedDrawerPatient, setSelectedDrawerPatient] = useState<{ id: string; name: string; token: string } | null>(null)
   const [showPrescriptionModal, setShowPrescriptionModal] = useState(false)
   const [showDelayModal, setShowDelayModal] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
@@ -322,10 +323,10 @@ export default function DoctorPanel() {
       {/* Modals */}
       <PatientHistoryDrawer
         isOpen={showHistoryDrawer}
-        onClose={() => setShowHistoryDrawer(false)}
-        patientId={activePatient?.patientId ?? activePatient?.id}
-        patientName={activePatient?.name ?? 'Patient'}
-        patientToken={activePatient?.token ?? '—'}
+        onClose={() => { setShowHistoryDrawer(false); setSelectedDrawerPatient(null); }}
+        patientId={selectedDrawerPatient?.id ?? activePatient?.patientId ?? activePatient?.id}
+        patientName={selectedDrawerPatient?.name ?? activePatient?.name ?? 'Patient'}
+        patientToken={selectedDrawerPatient?.token ?? activePatient?.token ?? '—'}
       />
       <PrescriptionModal
         isOpen={showPrescriptionModal}
@@ -585,7 +586,7 @@ export default function DoctorPanel() {
       )}
 
       {/* ── ASSIGNED CENTERS STRIP ── */}
-      {summary.doctor.assignedCenters && summary.doctor.assignedCenters.length > 0 && (
+      {doctor?.assignedCenters && doctor.assignedCenters.length > 0 && (
         <div style={{
           margin: '14px 24px 0', padding: '12px 18px',
           background: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(12px)',
@@ -597,7 +598,7 @@ export default function DoctorPanel() {
             My Centers
           </div>
           <div style={{ width: 1, height: 20, background: 'var(--border-md)' }} />
-          {summary.doctor.assignedCenters.map(center => (
+          {doctor.assignedCenters.map(center => (
             <div key={center.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, padding: '4px 10px', background: 'rgba(255,255,255,0.7)', border: '1px solid var(--border-md)', borderRadius: 8 }}>
               <Building2 size={14} color="var(--text-3)" />
               <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -652,7 +653,7 @@ export default function DoctorPanel() {
                     <span className="pulse-live" />
                     <span style={{ fontSize: 11, fontWeight: 700, color: '#10B981', letterSpacing: '0.07em', textTransform: 'uppercase' }}>Currently Serving</span>
                   </div>
-                  <button onClick={() => setShowHistoryDrawer(true)} className="btn btn-sm" style={{ background: 'rgba(16,185,129,0.15)', color: '#10B981', border: '1px solid rgba(16,185,129,0.3)', gap: 5 }}>
+                  <button onClick={() => { setSelectedDrawerPatient(activePatient ? { id: activePatient.patientId ?? activePatient.id, name: activePatient.name, token: activePatient.token } : null); setShowHistoryDrawer(true); }} className="btn btn-sm" style={{ background: 'rgba(16,185,129,0.15)', color: '#10B981', border: '1px solid rgba(16,185,129,0.3)', gap: 5 }}>
                     <Eye size={13} /> View Patient History & Reports
                   </button>
                 </div>
@@ -828,21 +829,44 @@ export default function DoctorPanel() {
                           <Timer size={9} /> {waited} min waiting
                         </div>
                       )}
-                      {!isClosed && (
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <button
-                          onClick={() => handleToggleUrgent(p.token)}
+                          onClick={() => {
+                            setSelectedDrawerPatient({
+                              id: p.patientId ?? p.id,
+                              name: p.name,
+                              token: p.token,
+                            })
+                            setShowHistoryDrawer(true)
+                          }}
                           className="btn btn-sm"
-                          title="Session-only triage flag — it is not saved and reception cannot see it"
+                          title="View health records & reports for this live queue patient"
                           style={{
                             fontSize: 10.5, padding: '3px 8px',
-                            background: isUrgent ? '#e11d48' : 'var(--crimson-dim)',
-                            color: isUrgent ? '#ffffff' : 'var(--crimson)',
-                            border: '1px solid var(--crimson-border)',
+                            background: 'rgba(16,185,129,0.12)',
+                            color: '#047857',
+                            border: '1px solid rgba(16,185,129,0.3)',
+                            display: 'flex', alignItems: 'center', gap: 4,
                           }}
                         >
-                          {isUrgent ? 'Urgent ✓' : 'Flag Urgent'}
+                          <Eye size={11} /> History
                         </button>
-                      )}
+                        {!isClosed && (
+                          <button
+                            onClick={() => handleToggleUrgent(p.token)}
+                            className="btn btn-sm"
+                            title="Session-only triage flag — it is not saved and reception cannot see it"
+                            style={{
+                              fontSize: 10.5, padding: '3px 8px',
+                              background: isUrgent ? '#e11d48' : 'var(--crimson-dim)',
+                              color: isUrgent ? '#ffffff' : 'var(--crimson)',
+                              border: '1px solid var(--crimson-border)',
+                            }}
+                          >
+                            {isUrgent ? 'Urgent ✓' : 'Flag Urgent'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )

@@ -15,7 +15,7 @@ import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
 import { ViewReportModal } from '../components/ViewReportModal'
 import { api } from '../lib/api'
-import type { ApiCenter, ApiDoctor, ApiDoctorRequest, AuditLog } from '../lib/api'
+import type { ApiCenter, ApiDoctor, AuditLog } from '../lib/api'
 
 const NAV_ADMIN = [
   { id: 'health', icon: <Activity size={15} />, label: 'System Health' },
