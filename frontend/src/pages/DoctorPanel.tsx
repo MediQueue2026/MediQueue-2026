@@ -7,6 +7,7 @@ import AccountMenu from '../components/AccountMenu'
 import PatientHistoryDrawer from '../components/PatientHistoryDrawer'
 import PrescriptionModal from '../components/PrescriptionModal'
 import DelayAlertModal from '../components/DelayAlertModal'
+import MolecularParticles from '../components/MolecularParticles'
 import { Badge, Dot, StatusBadge } from '../components/UIPrimitives'
 import { useAuth } from '../context/AuthContext'
 import { ApiError, api } from '../lib/api'
@@ -318,7 +319,8 @@ export default function DoctorPanel() {
   ]
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div className="doctor-dashboard-shell" style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      <MolecularParticles />
 
       {/* Modals */}
       <PatientHistoryDrawer
@@ -362,7 +364,7 @@ export default function DoctorPanel() {
       )}
 
       {/* ── TOP BAR ── */}
-      <div className="topbar" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+      <div className="topbar doctor-topbar" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 0 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1, whiteSpace: 'nowrap' }}>

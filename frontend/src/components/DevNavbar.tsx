@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, Database, Home, MonitorPlay, ShieldCheck, Stethoscope, LogIn, UserPlus } from 'lucide-react'
+import { Activity, Database, MonitorPlay, ShieldCheck, Stethoscope, LogIn, UserPlus } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import type { UserRole } from '../context/AuthContext'
 import { ApiOfflineError } from '../lib/api'
@@ -15,7 +15,6 @@ interface DevPage {
 }
 
 const PAGES: DevPage[] = [
-  { path: '/',             label: 'Landing',         icon: Home,        role: null },
   { path: '/login',        label: 'Patient Portal',  icon: LogIn,       role: 'patient',      targetConsole: '/patient' },
   { path: '/register',     label: 'Patient Sign-up', icon: UserPlus,    role: null },
   { path: '/staff/login',  label: 'Staff Portal',    icon: Stethoscope, role: 'receptionist', targetConsole: '/receptionist' },
@@ -90,7 +89,7 @@ export function DevNavbar() {
   return (
     <div className="page-switcher" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, height: 46, padding: '0 14px' }}>
       {/* App Brand */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 16, flexShrink: 0 }}>
+      <Link to="/" aria-label="MediQueue home" style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 16, flexShrink: 0, textDecoration: 'none' }}>
         <div style={{
           width: 26, height: 26, borderRadius: 7,
           background: 'linear-gradient(135deg, var(--teal), var(--blue))',
@@ -100,7 +99,7 @@ export function DevNavbar() {
           <Activity size={14} color="#fff" strokeWidth={2.5} />
         </div>
         <span style={{ fontSize: 13.5, fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em' }}>MediQueue</span>
-      </div>
+      </Link>
 
       <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.12)', marginRight: 8 }} className="desktop-only" />
 
