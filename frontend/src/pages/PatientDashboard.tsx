@@ -44,7 +44,6 @@ const NAV_PATIENT = [
   { id: 'centers',       icon: <Building2 size={15} />,    label: 'Browse Medical Centers' },
   { id: 'subscriptions', icon: <Heart size={15} />,        label: 'Subscribed Doctors' },
   { id: 'history',       icon: <ClipboardList size={15} />,label: 'Medical History & Reports' },
-  { id: 'token',         icon: <Ticket size={15} />,        label: 'My Queue Token' },
   { id: 'settings',      icon: <Settings size={15} />,     label: 'Settings' },
 ]
 
@@ -446,7 +445,10 @@ export default function PatientDashboard() {
       }}>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-4)', paddingLeft: 4 }}>Patient Portal</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 4 }}>
+              <img src="/logo.png" alt="MediQueue" style={{ height: 22, width: 'auto', objectFit: 'contain' }} />
+              <span style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>Medi<span style={{ color: 'var(--blue)' }}>Queue</span></span>
+            </div>
             <button onClick={() => setSidebarOpen(false)} className="hamburger-btn" style={{ width: 28, height: 28, borderRadius: 6 }} title="Close menu">
               <X size={14} />
             </button>
@@ -641,26 +643,26 @@ export default function PatientDashboard() {
                 </div>
               )}
 
-              {/* ── ACTIVE TOKEN HERO (HIGH VISIBILITY GLASSMORPHISM CARD) ── */}
+              {/* ── ACTIVE TOKEN HERO ── */}
               {activeAppointment ? (
                 <div style={{
-                  background: 'linear-gradient(135deg, #071e1c 0%, #0c2b28 50%, #051413 100%)',
-                  border: '1px solid rgba(18, 198, 186, 0.45)',
+                  background: 'linear-gradient(135deg, #042f2e 0%, #0D9488 60%, #0F766E 100%)',
+                  border: '1px solid rgba(153,246,228,0.35)',
                   borderRadius: 20, padding: '26px 28px', position: 'relative', overflow: 'hidden',
-                  boxShadow: '0 16px 40px rgba(7, 30, 28, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+                  boxShadow: '0 16px 40px rgba(13,148,136,0.25), inset 0 1px 0 rgba(255,255,255,0.08)'
                 }}>
-                  {/* Ambient Light Orbs */}
-                  <div style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle, rgba(18, 198, 186, 0.22) 0%, transparent 70%)', pointerEvents: 'none' }} />
-                  <div style={{ position: 'absolute', bottom: -50, left: 100, width: 180, height: 180, borderRadius: '50%', background: 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%)', pointerEvents: 'none' }} />
+                  {/* Ambient light orbs */}
+                  <div style={{ position: 'absolute', top: -60, right: -60, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(153,246,228,0.18) 0%, transparent 70%)', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', bottom: -50, left: 80, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(20,184,166,0.14) 0%, transparent 70%)', pointerEvents: 'none' }} />
 
                   {/* Header Row */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22, flexWrap: 'wrap', gap: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(18, 198, 186, 0.12)', border: '1px solid rgba(18, 198, 186, 0.3)', borderRadius: 20, padding: '4px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.20)', borderRadius: 20, padding: '4px 14px' }}>
                       <span className="pulse-blue" />
-                      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--blue)' }}>Live Queue Token Active</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#ccfbf1' }}>Live Queue Token Active</span>
                     </div>
                     {activeAppointment.isLateNumber && (
-                      <span style={{ fontSize: 11, background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#ef4444', borderRadius: 20, padding: '3px 10px', fontWeight: 700 }}>
+                      <span style={{ fontSize: 11, background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', borderRadius: 20, padding: '3px 10px', fontWeight: 700 }}>
                         ⚠️ Penalty Queue (Late Repeat No-Show)
                       </span>
                     )}
@@ -668,10 +670,10 @@ export default function PatientDashboard() {
 
                   {/* Responsive Grid Layout */}
                   <div className="responsive-hero-active-token" style={{ display: 'grid', gridTemplateColumns: 'auto 1px 1.1fr 1px 1.4fr', gap: 0, alignItems: 'center' }}>
-                    {/* Column 1: Token Display */}
+                    {/* Column 1: Token Number */}
                     <div style={{ textAlign: 'center', paddingRight: 28 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255, 255, 255, 0.6)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>Your Queue Token</div>
-                      <div style={{ fontSize: 62, fontWeight: 900, color: 'var(--blue)', lineHeight: 1, letterSpacing: '-0.04em', fontFamily: 'monospace', textShadow: '0 0 25px rgba(18, 198, 186, 0.5)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>Your Queue Token</div>
+                      <div style={{ fontSize: 62, fontWeight: 900, color: '#ccfbf1', lineHeight: 1, letterSpacing: '-0.04em', fontFamily: 'monospace', textShadow: '0 0 25px rgba(153,246,228,0.4)' }}>
                         {activeAppointment.queueToken ?? '—'}
                       </div>
                       <div style={{ marginTop: 10 }}>
@@ -679,38 +681,32 @@ export default function PatientDashboard() {
                       </div>
                     </div>
 
-                    <div className="responsive-divider-line" style={{ width: 1, height: 90, background: 'rgba(255,255,255,0.12)', margin: '0 24px' }} />
+                    <div className="responsive-divider-line" style={{ width: 1, height: 90, background: 'rgba(255,255,255,0.15)', margin: '0 24px' }} />
 
                     {/* Column 2: Status & Time */}
                     <div style={{ paddingRight: 24 }}>
-                      <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.6)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Current Queue Status</div>
-                      <div style={{ fontSize: 26, fontWeight: 900, color: '#10B981', letterSpacing: '-0.02em', textTransform: 'uppercase', marginBottom: 4 }}>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Current Status</div>
+                      <div style={{ fontSize: 26, fontWeight: 900, color: '#99f6e4', letterSpacing: '-0.02em', textTransform: 'uppercase', marginBottom: 4 }}>
                         {activeAppointment.status === 'in_consultation' ? 'In Consultation' : activeAppointment.status}
                       </div>
                       <div style={{ fontSize: 12.5, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <Calendar size={13} color="var(--blue)" /> Date: <strong style={{ color: '#ffffff' }}>{activeAppointment.appointmentDate}</strong>
+                        <Calendar size={13} color="#99f6e4" /> Date: <strong style={{ color: '#ffffff' }}>{activeAppointment.appointmentDate}</strong>
                       </div>
                       <div style={{ fontSize: 12.5, color: '#e2e8f0', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <Bell size={13} color="var(--amber)" /> Scheduled: <strong style={{ color: 'var(--amber)' }}>{formatSlotTime(activeAppointment.slotHour)}</strong>
+                        <Bell size={13} color="#fcd34d" /> Scheduled: <strong style={{ color: '#fcd34d' }}>{formatSlotTime(activeAppointment.slotHour)}</strong>
                       </div>
                     </div>
 
-                    <div className="responsive-divider-line" style={{ width: 1, height: 90, background: 'rgba(255,255,255,0.12)', margin: '0 24px' }} />
+                    <div className="responsive-divider-line" style={{ width: 1, height: 90, background: 'rgba(255,255,255,0.15)', margin: '0 24px' }} />
 
-                    {/* Column 3: Doctor & Clinic Details */}
+                    {/* Column 3: Doctor & Clinic */}
                     <div>
-                      <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.6)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Doctor & Location</div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Doctor & Location</div>
                       <div style={{ fontSize: 16, fontWeight: 800, color: '#ffffff', marginBottom: 2 }}>{activeAppointment.doctorName}</div>
-                      <div style={{ fontSize: 12.5, color: 'var(--blue)', marginBottom: 12, fontWeight: 600 }}>{[activeAppointment.specialization, activeAppointment.centerName].filter(Boolean).join(' · ') || '—'}</div>
-                      
-                      {/* Interactive Token Action Buttons */}
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button type="button" onClick={() => setShowRxModal(true)} className="btn btn-sm" style={{ background: 'rgba(18, 198, 186, 0.2)', border: '1px solid var(--blue)', color: '#ffffff', fontSize: 11, fontWeight: 700, gap: 5 }}>
-                          <Eye size={12} color="var(--blue)" /> View Rx Note
-                        </button>
-                        <button type="button" onClick={() => { setNav('overview'); window.scrollTo({ top: 300, behavior: 'smooth' }) }} className="btn btn-sm" style={{ background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.2)', color: '#ffffff', fontSize: 11, fontWeight: 700, gap: 5 }}>
-                          <MapPin size={12} color="#10B981" /> Locate Room
-                        </button>
+                      <div style={{ fontSize: 12.5, color: '#99f6e4', marginBottom: 8, fontWeight: 600 }}>{[activeAppointment.specialization, activeAppointment.centerName].filter(Boolean).join(' · ') || '—'}</div>
+                      <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.55)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <Ticket size={12} color="#ccfbf1" />
+                        Please arrive on time and show this token at the counter
                       </div>
                     </div>
                   </div>
@@ -732,7 +728,7 @@ export default function PatientDashboard() {
                   <div>
                     <h3><Calendar size={16} /> Find &amp; Browse Doctors</h3>
                   </div>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNav('doctors')}>View all <span aria-hidden="true">→</span></button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNav('centers')}>View all <span aria-hidden="true">→</span></button>
                 </div>
                 <div className="patient-doctor-search">
                   <Search size={15} color="var(--blue)" />
@@ -773,7 +769,7 @@ export default function PatientDashboard() {
                   {filteredDoctors.length === 0 && <div className="patient-doctor-empty">Doctors will appear here when available.</div>}
                 </div>
                 {filteredDoctors.length > 3 && (
-                  <button type="button" className="patient-more-doctors" onClick={() => setNav('doctors')}>
+                  <button type="button" className="patient-more-doctors" onClick={() => setNav('centers')}>
                     View more doctors <span aria-hidden="true">→</span>
                   </button>
                 )}
@@ -791,6 +787,54 @@ export default function PatientDashboard() {
                     onSelectCenter={cId => setSelectedMapCenterId(cId)}
                     onBookCenter={cId => openBookingForCenter(cId)}
                   />
+                </div>
+
+                {/* UPCOMING APPOINTMENTS CARD */}
+                <div className="card glass-form-card" style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>Upcoming Appointments</div>
+                    <button onClick={() => setShowBookModal(true)} className="btn btn-ghost btn-sm" style={{ gap: 4, fontSize: 11 }}>
+                      <Plus size={13} /> Book New
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 380, overflowY: 'auto', paddingRight: 2 }}>
+                    {myAppointments.length > 0 ? (
+                      myAppointments.map(u => (
+                        <div key={u.id} style={{ padding: 12, background: '#ffffff', borderRadius: 10, border: '1px solid var(--border-md)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{u.doctorName}</div>
+                              <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>{[u.specialization, u.centerName].filter(Boolean).join(' · ') || '—'}</div>
+                            </div>
+                            <span className="badge badge-blue" style={{ fontSize: 11 }}>{u.queueToken ?? '—'}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <Calendar size={12} /> {u.appointmentDate} at {formatSlotTime(u.slotHour)}
+                            </div>
+                            {u.status !== 'cancelled' && u.status !== 'completed' && (
+                              <button
+                                onClick={() => setCancellingAppt({ id: u.id, docName: u.doctorName, token: u.queueToken })}
+                                className="btn btn-sm"
+                                style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 8px', fontSize: 10.5 }}
+                              >
+                                Cancel Booking
+                              </button>
+                            )}
+                            {u.status === 'cancelled' && (
+                              <span style={{ fontSize: 10.5, color: '#ef4444', fontWeight: 700, background: 'rgba(239,68,68,0.15)', padding: '2px 6px', borderRadius: 6 }}>
+                                Cancelled
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
+                        No upcoming appointments. Click "Book New" to schedule.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
               </div>
@@ -844,16 +888,6 @@ export default function PatientDashboard() {
                     <div><Hourglass size={18} /><strong>~ 25 min</strong><small>Average waiting time</small></div>
                     <div><Ticket size={18} /><strong>{lastCalledQueueToken ?? '—'}</strong><small>Last called token</small></div>
                   </div>
-                </div>
-
-                <div className="patient-bottom-panel patient-empty-panel">
-                  <div className="patient-bottom-panel-heading">
-                    <h3><Calendar size={16} /> Upcoming Appointments</h3>
-                    <button type="button" onClick={() => setShowBookModal(true)} className="patient-panel-action"><Plus size={13} /> Book New</button>
-                  </div>
-                  <Calendar size={34} className="patient-empty-panel-icon" />
-                  <strong>{myAppointments.length > 0 ? `${myAppointments.length} appointment${myAppointments.length === 1 ? '' : 's'} scheduled` : 'No upcoming appointments'}</strong>
-                  <p>{myAppointments.length > 0 ? 'Review your scheduled visits above.' : 'Click “Book New” to schedule your next visit.'}</p>
                 </div>
 
                 <div className="patient-bottom-panel patient-empty-panel">

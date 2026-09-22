@@ -710,10 +710,8 @@ export default function AdminPanel() {
           <button className="hamburger-btn" onClick={() => setSidebarOpen(true)} title="Open menu">
             <Menu size={18} />
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg, #12c6ba, #0d968d)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Activity size={14} color="#fff" />
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <img src="/logo.png" alt="MediQueue" style={{ height: 26, width: 'auto', objectFit: 'contain' }} />
             <div>
               <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-1)', lineHeight: 1.2 }}>System Admin Console</div>
               <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>MediQueue Platform · v3.2.1</div>

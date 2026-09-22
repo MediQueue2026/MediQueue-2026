@@ -153,14 +153,8 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
           <div className="auth-aside-glow" style={{ background: `radial-gradient(circle, ${portal.accent}55, transparent 70%)` }} />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-              background: 'linear-gradient(135deg, var(--teal), var(--blue))',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Activity size={16} color="#fff" />
-            </div>
-            <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em' }}>MediQueue</span>
+            <img src="/logo.png" alt="MediQueue" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
+            <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.03em', color: '#fff' }}>MediQueue</span>
           </div>
 
           <div className="auth-aside-spacer" style={{ flex: 1, minHeight: 28 }} />

@@ -365,7 +365,8 @@ export default function DoctorPanel() {
 
       {/* ── TOP BAR ── */}
       <div className="topbar doctor-topbar" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0, minWidth: 0 }}>
+          <img src="/logo.png" alt="MediQueue" style={{ height: 24, width: 'auto', objectFit: 'contain', flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.1, whiteSpace: 'nowrap' }}>
               Doctor Console — {doctor.name}

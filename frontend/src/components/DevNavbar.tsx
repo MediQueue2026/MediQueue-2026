@@ -90,14 +90,7 @@ export function DevNavbar() {
     <div className="page-switcher" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, height: 46, padding: '0 14px' }}>
       {/* App Brand */}
       <Link to="/" aria-label="MediQueue home" style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 16, flexShrink: 0, textDecoration: 'none' }}>
-        <div style={{
-          width: 26, height: 26, borderRadius: 7,
-          background: 'linear-gradient(135deg, var(--teal), var(--blue))',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)',
-        }}>
-          <Activity size={14} color="#fff" strokeWidth={2.5} />
-        </div>
+        <img src="/logo.png" alt="MediQueue" style={{ height: 24, width: 'auto', objectFit: 'contain' }} />
         <span style={{ fontSize: 13.5, fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em' }}>MediQueue</span>
       </Link>
 

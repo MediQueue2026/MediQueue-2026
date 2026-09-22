@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Map, MapPin, Navigation, Phone, Calendar, Compass, Search, X, Megaphone } from 'lucide-react'
@@ -138,10 +138,28 @@ export function LiveClinicMap({
     }
   }, [])
 
-  // Sync Markers & Center View
+  // Stable keys: serialise the list of IDs to a plain string so the marker
+  // sync effect only fires when the actual data set changes, not every time
+  // the parent re-renders and passes a structurally-equal-but-new array ref.
+  const centersKey = (centers || []).map(c => c.id).sort().join(',')
+  const doctorsKey = (doctors || []).map(d => d.id).sort().join(',')
+  const prevCentersKey = useRef('')
+  const prevDoctorsKey = useRef('')
+  const prevUserLocation = useRef<{ lat: number; lng: number } | null>(null)
+
+  // Sync Markers & Center View — only runs when center/doctor sets actually change
   useEffect(() => {
     const map = mapInstanceRef.current
     if (!map || !approvedCenters || approvedCenters.length === 0) return
+
+    // Skip if nothing actually changed (guards against parent re-renders that
+    // produce new array references with identical content)
+    const locStr = userLocation ? `${userLocation.lat},${userLocation.lng}` : ''
+    const prevLocStr = prevUserLocation.current ? `${prevUserLocation.current.lat},${prevUserLocation.current.lng}` : ''
+    if (centersKey === prevCentersKey.current && doctorsKey === prevDoctorsKey.current && locStr === prevLocStr) return
+    prevCentersKey.current = centersKey
+    prevDoctorsKey.current = doctorsKey
+    prevUserLocation.current = userLocation
 
     // Clear existing clinic markers
     Object.values(markersRef.current).forEach(m => m.remove())
@@ -200,7 +218,10 @@ export function LiveClinicMap({
     } else if (markerPoints.length === 1) {
       map.setView(markerPoints[0], 13, { animate: false })
     }
-  }, [centers, doctors, userLocation])
+  // centersKey and doctorsKey are stable memoised strings — they only change
+  // when the actual list of IDs changes, not on every parent re-render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centersKey, doctorsKey, userLocation])
 
   // GPS Geolocation Handler
   const handleLocateUser = () => {

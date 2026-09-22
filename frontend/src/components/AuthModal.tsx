@@ -87,16 +87,9 @@ export default function AuthModal({ isOpen, onClose, defaultTab = 'signin', onSu
 
         {/* Brand badge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: 'linear-gradient(135deg, #12c6ba, #0d968d)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 14px rgba(18,198,186,0.35)',
-          }}>
-            <Shield size={19} color="#fff" />
-          </div>
+          <img src="/logo.png" alt="MediQueue" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--blue-dark)', letterSpacing: '-0.01em' }}>MediQueue</div>
+            <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>MediQueue</div>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Secure Patient Portal</div>
           </div>
         </div>
