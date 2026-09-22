@@ -19,18 +19,19 @@ interface DoctorBoard {
 }
 
 export default function PublicTvDisplay({
-  isOpen, onClose, doctor, current, waiting, estimateWait, onCallNext,
+  isOpen, onClose, doctor, centerId, current, waiting, estimateWait, onCallNext,
 }: {
   isOpen: boolean
   onClose: () => void
   doctor?: ReceptionDoctor
+  centerId?: string | null
   current?: QueueEntry
   waiting?: QueueEntry[]
   estimateWait?: (entry: QueueEntry) => number
   onCallNext?: () => void
 }) {
   const [flash, setFlash] = useState(false)
-  const [selectedDocIndex, setSelectedDocIndex] = useState(0)
+  const [selectedDocId, setSelectedDocId] = useState('')
 
   // Live DB Board State for Overall Queue across all doctors & centers
   const [dbDoctors, setDbDoctors] = useState<DoctorBoard[]>([])
@@ -41,7 +42,8 @@ export default function PublicTvDisplay({
 
     const fetchBoard = async () => {
       try {
-        const res = await fetch(`${API_BASE}/queue/board`)
+        const query = centerId ? `?centerId=${encodeURIComponent(centerId)}` : ''
+        const res = await fetch(`${API_BASE}/queue/board${query}`)
         if (res.ok) {
           const data = await res.json()
           if (Array.isArray(data.doctors) && data.doctors.length > 0) {
@@ -56,7 +58,11 @@ export default function PublicTvDisplay({
     fetchBoard()
     const timer = setInterval(fetchBoard, 3000)
     return () => clearInterval(timer)
-  }, [isOpen])
+  }, [isOpen, centerId])
+
+  useEffect(() => {
+    if (doctor?.id) setSelectedDocId(doctor.id)
+  }, [doctor?.id])
 
   if (!isOpen) return null
 
@@ -67,16 +73,20 @@ export default function PublicTvDisplay({
   }
 
   // Active doctor board object from DB stream
-  const activeDocBoard = dbDoctors[selectedDocIndex] || dbDoctors[0] || null
+  const activeDocBoard = dbDoctors.find(d => d.doctorId === selectedDocId)
+    || dbDoctors[0]
+    || null
 
-  const currentServing = activeDocBoard?.nowServing?.token
-    || (current ? entryToken(current) : '—')
+  const currentServing = activeDocBoard
+    ? (activeDocBoard.nowServing?.token || '—')
+    : (current ? entryToken(current) : '—')
   
-  const patientName = activeDocBoard?.nowServing?.patientName
-    || (current?.patientName ?? 'Waiting for next patient')
+  const patientName = activeDocBoard
+    ? (activeDocBoard.nowServing?.patientName ?? 'Waiting for next patient')
+    : (current?.patientName ?? 'Waiting for next patient')
 
-  const waitingQueue = activeDocBoard && Array.isArray(activeDocBoard.waitingQueue) && activeDocBoard.waitingQueue.length > 0
-    ? activeDocBoard.waitingQueue.map((entry: any, i: number) => ({
+  const waitingQueue = activeDocBoard
+    ? (Array.isArray(activeDocBoard.waitingQueue) ? activeDocBoard.waitingQueue : []).map((entry: any, i: number) => ({
         token: entry.token || `#${activeDocBoard.series}-${String(entry.queue_number || i + 1).padStart(2, '0')}`,
         name: entry.patientName || entry.patient_name || 'Patient',
         est: `${(i + 1) * 10} min`,
@@ -166,12 +176,12 @@ export default function PublicTvDisplay({
         {/* Doctor selector tabs for multi-room lobby view */}
         {dbDoctors.length > 1 && (
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
-            {dbDoctors.map((d, idx) => (
+            {dbDoctors.map((d) => (
               <button
                 key={d.doctorId}
-                onClick={() => setSelectedDocIndex(idx)}
+                onClick={() => setSelectedDocId(d.doctorId)}
                 style={{
-                  background: selectedDocIndex === idx ? '#10B981' : 'rgba(255,255,255,0.08)',
+                  background: selectedDocId === d.doctorId ? '#10B981' : 'rgba(255,255,255,0.08)',
                   color: '#ffffff', border: '1px solid rgba(255,255,255,0.2)',
                   borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 700,
                   cursor: 'pointer', whiteSpace: 'nowrap'

@@ -63,28 +63,44 @@ async function seriesMapFor(rows) {
 export async function getPublicBoard(req, res, next) {
   try {
     const date = todayDate();
+    const centerFilter = req.query.centerId ? String(req.query.centerId) : null;
 
     // 1. Query walk-in queue rows
-    const { data: queueRows, error } = await supabase
+    let queueQuery = supabase
       .from('walk_in_queue')
       .select('*, doctors(specialization, room_number, series, center_id, user_id, medical_centers(name), users(full_name))')
       .eq('queue_date', date)
       .order('queue_number', { ascending: true });
+    if (centerFilter) queueQuery = queueQuery.eq('center_id', centerFilter);
+    const { data: queueRows, error } = await queueQuery;
 
     if (error && error.code === TABLE_MISSING) {
       return res.json({ doctors: [], board: [], migrationPending: true });
     }
 
     // 2. Query online appointments for today only
-    const { data: aptRows } = await supabase
+    let appointmentQuery = supabase
       .from('appointments')
       .select('*, doctors(specialization, room_number, series, center_id, user_id, medical_centers(name), users(full_name)), users:patient_id(full_name)')
       .eq('appointment_date', date);
+    if (centerFilter) appointmentQuery = appointmentQuery.eq('center_id', centerFilter);
+    const { data: aptRows } = await appointmentQuery;
 
     // 3. Fetch all registered doctors
     const { data: doctorsData } = await supabase
       .from('doctors')
       .select('id, user_id, specialization, room_number, series, current_status, medical_centers(name), users(full_name)');
+
+    const assignmentByDoctor = new Map();
+    if (centerFilter) {
+      const { data: assignments } = await supabase
+        .from('doctor_center_assignments')
+        .select('doctor_id, room_number, series, medical_centers(name)')
+        .eq('center_id', centerFilter);
+      for (const assignment of assignments || []) {
+        assignmentByDoctor.set(assignment.doctor_id, assignment);
+      }
+    }
 
     const doctorMap = new Map();
 
@@ -104,6 +120,8 @@ export async function getPublicBoard(req, res, next) {
 
     // Initialize doctor map
     for (const d of doctorsData || []) {
+      const posting = assignmentByDoctor.get(d.id);
+      if (centerFilter && !posting && d.center_id !== centerFilter) continue;
       const docObj = {
         doctorId: d.id,
         userId: d.user_id,
@@ -113,9 +131,9 @@ export async function getPublicBoard(req, res, next) {
         // room TV then displayed as fact for any doctor whose posting was
         // incomplete — sending patients to a room that doesn't exist.
         specialization: d.specialization || null,
-        roomNumber: d.room_number || null,
-        centerName: d.medical_centers?.name || null,
-        series: d.series || '?',
+        roomNumber: posting?.room_number || d.room_number || null,
+        centerName: posting?.medical_centers?.name || d.medical_centers?.name || null,
+        series: posting?.series || d.series || '?',
         nowServing: null,
         waitingQueue: []
       };
@@ -131,9 +149,9 @@ export async function getPublicBoard(req, res, next) {
           userId: row.doctors?.user_id,
           doctorName: row.doctors?.users?.full_name || 'Doctor',
           specialization: row.doctors?.specialization || null,
-          roomNumber: row.doctors?.room_number || null,
-          centerName: row.doctors?.medical_centers?.name || null,
-          series: row.doctors?.series || '?',
+          roomNumber: assignmentByDoctor.get(row.doctor_id)?.room_number || row.doctors?.room_number || null,
+          centerName: assignmentByDoctor.get(row.doctor_id)?.medical_centers?.name || row.doctors?.medical_centers?.name || null,
+          series: assignmentByDoctor.get(row.doctor_id)?.series || row.doctors?.series || '?',
           nowServing: null,
           waitingQueue: []
         };
@@ -169,9 +187,9 @@ export async function getPublicBoard(req, res, next) {
             userId: a.doctors?.user_id,
             doctorName: a.doctors?.users?.full_name || 'Doctor',
             specialization: a.doctors?.specialization || null,
-            roomNumber: a.doctors?.room_number || null,
-            centerName: a.doctors?.medical_centers?.name || null,
-            series: a.doctors?.series || '?',
+            roomNumber: assignmentByDoctor.get(a.doctor_id)?.room_number || a.doctors?.room_number || null,
+            centerName: assignmentByDoctor.get(a.doctor_id)?.medical_centers?.name || a.doctors?.medical_centers?.name || null,
+            series: assignmentByDoctor.get(a.doctor_id)?.series || a.doctors?.series || '?',
             nowServing: null,
             waitingQueue: []
           };

@@ -11,7 +11,7 @@ import MolecularParticles from '../components/MolecularParticles'
 import { Badge, Dot, StatusBadge } from '../components/UIPrimitives'
 import { useAuth } from '../context/AuthContext'
 import { ApiError, api } from '../lib/api'
-import type { ApiDelayAlert, ApiDoctorQueueItem, ApiDoctorSummary, ApiDoctorRequest } from '../lib/api'
+import type { ApiAppointmentRow, ApiDelayAlert, ApiDoctorQueueItem, ApiDoctorSummary, ApiDoctorRequest } from '../lib/api'
 
 /** The three states a doctor can put themselves in from the top bar. */
 type Shift = 'online' | 'break' | 'offline'
@@ -50,6 +50,11 @@ export default function DoctorPanel() {
   const [showNotifications, setShowNotifications] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [toast, setToast] = useState<string | null>(null)
+  const [appointmentView, setAppointmentView] = useState<'queue' | 'appointments'>('queue')
+  const [appointments, setAppointments] = useState<ApiAppointmentRow[]>([])
+  const [selectedAppointment, setSelectedAppointment] = useState<ApiAppointmentRow | null>(null)
+  const [appointmentsLoading, setAppointmentsLoading] = useState(false)
+  const [appointmentsError, setAppointmentsError] = useState<string | null>(null)
 
   /**
    * The whole console is driven by one summary payload.
@@ -174,6 +179,25 @@ export default function DoctorPanel() {
   }, [doctorKey])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const doctorId = summary?.doctor.id
+    if (!doctorId) return
+    let cancelled = false
+    setAppointmentsLoading(true)
+    setAppointmentsError(null)
+    api.getAppointments({ doctorId })
+      .then(result => {
+        if (!cancelled) setAppointments(result.appointments || [])
+      })
+      .catch(err => {
+        if (!cancelled) setAppointmentsError(err instanceof ApiError ? err.message : 'Could not load appointments.')
+      })
+      .finally(() => {
+        if (!cancelled) setAppointmentsLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [summary?.doctor.id])
 
   // Live polling so tokens issued at the reception desk appear here.
   useEffect(() => {
@@ -749,22 +773,47 @@ export default function DoctorPanel() {
 
         {/* RIGHT — Upcoming queue */}
         <div className="card glass-form-card" style={{ maxHeight: 560, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', flex: 1 }}>Today's Queue</span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>{openCount} open</span>
-            <div style={{ position: 'relative' }}>
-              <Search size={13} color="var(--text-4)" style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }} />
+          <div style={{ padding: '10px 18px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {([
+                ['queue', "Today's Queue"],
+                ['appointments', 'Appointments'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setAppointmentView(value)}
+                  className="btn btn-sm"
+                  style={{
+                    border: 'none',
+                    borderBottom: appointmentView === value ? '2px solid var(--blue)' : '2px solid transparent',
+                    borderRadius: 0,
+                    background: 'transparent',
+                    color: appointmentView === value ? 'var(--blue)' : 'var(--text-4)',
+                    fontWeight: 800,
+                    padding: '6px 4px 9px',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-4)' }}>
+                {appointmentView === 'queue' ? `${openCount} open` : `${appointments.length} total`}
+              </span>
+            </div>
+          </div>
+
+          {appointmentView === 'queue' && (
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: '10px 18px 0', position: 'relative' }}>
+              <Search size={13} color="var(--text-4)" style={{ position: 'absolute', left: 27, top: 20, transform: 'translateY(-50%)' }} />
               <input
                 className="input"
                 placeholder="Search token or name…"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                style={{ paddingLeft: 30, width: 170, fontSize: 12 }}
+                style={{ paddingLeft: 30, width: '100%', fontSize: 12 }}
               />
             </div>
-          </div>
-
-          <div style={{ overflowY: 'auto', flex: 1 }}>
             {filteredQueue.length > 0 ? (
               filteredQueue.map((p: ApiDoctorQueueItem) => {
                 const isClosed = p.status === 'completed' || p.status === 'left' || p.status === 'cancelled'
@@ -888,6 +937,50 @@ export default function DoctorPanel() {
               </div>
             )}
           </div>
+          )}
+          {appointmentView === 'appointments' && (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {appointmentsLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-4)' }}>Loading appointments…</div>
+              ) : appointmentsError ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--crimson)' }}>{appointmentsError}</div>
+              ) : appointments.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-4)' }}>No appointments found.</div>
+              ) : appointments.map(appointment => (
+                <button
+                  key={appointment.id}
+                  onClick={() => setSelectedAppointment(appointment)}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '13px 18px',
+                    border: 'none', borderBottom: '1px solid var(--border)',
+                    background: selectedAppointment?.id === appointment.id ? 'var(--blue-dim)' : 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                    <strong style={{ color: 'var(--text-1)', fontSize: 13 }}>{appointment.patientName}</strong>
+                    <span style={{ color: 'var(--blue)', fontFamily: 'monospace', fontWeight: 800 }}>{appointment.queueToken}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 5, fontSize: 11.5, color: 'var(--text-3)' }}>
+                    <span>Date: {appointment.appointmentDate}</span>
+                    <span>Time: {appointment.timeLabel}</span>
+                    <span>Status: {appointment.status}</span>
+                  </div>
+                </button>
+              ))}
+              {selectedAppointment && (
+                <div style={{ margin: 14, padding: 14, borderRadius: 10, background: 'var(--blue-dim)', border: '1px solid var(--border-md)', fontSize: 12.5, color: 'var(--text-2)' }}>
+                  <div style={{ fontWeight: 800, color: 'var(--text-1)', marginBottom: 8 }}>Appointment Details</div>
+                  <div>Patient: <strong>{selectedAppointment.patientName}</strong></div>
+                  <div>Date: {selectedAppointment.appointmentDate}</div>
+                  <div>Token: {selectedAppointment.queueToken}</div>
+                  <div>Time: {selectedAppointment.timeLabel}</div>
+                  <div>Status: {selectedAppointment.status}</div>
+                  {selectedAppointment.phone && <div>Phone: {selectedAppointment.phone}</div>}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

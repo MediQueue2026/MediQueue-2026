@@ -787,6 +787,7 @@ export default function ReceptionistDesk() {
         isOpen={showTvDisplay}
         onClose={() => setShowTvDisplay(false)}
         doctor={selectedDoctor}
+        centerId={queue.centerId}
         current={current}
         waiting={waiting}
         estimateWait={queue.waitFor}
@@ -1744,10 +1745,9 @@ export default function ReceptionistDesk() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 700 }}>
                     <thead>
                       <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
-                        <th style={{ padding: '13px 16px' }}>Name</th>
-                        <th style={{ padding: '13px 16px' }}>NIC Number</th>
-                        <th style={{ padding: '13px 16px' }}>Phone</th>
                         <th style={{ padding: '13px 16px' }}>Active Token</th>
+                        <th style={{ padding: '13px 16px' }}>Name</th>
+                        <th style={{ padding: '13px 16px' }}>Phone</th>
                         <th style={{ padding: '13px 16px' }}>Assigned Doctor</th>
                       </tr>
                     </thead>
@@ -1763,10 +1763,9 @@ export default function ReceptionistDesk() {
                       )}
                       {allPatients.map(p => (
                         <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '13px 16px', fontWeight: 600, color: 'var(--text-1)' }}>{p.patientName}</td>
-                          <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.nic ?? '—'}</td>
-                          <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.phone || '—'}</td>
                           <td style={{ padding: '13px 16px', fontWeight: 800, color: 'var(--blue)', fontFamily: 'monospace' }}>{p.queueToken}</td>
+                          <td style={{ padding: '13px 16px', fontWeight: 600, color: 'var(--text-1)' }}>{p.patientName}</td>
+                          <td style={{ padding: '13px 16px', color: 'var(--text-3)' }}>{p.phone || '—'}</td>
                           <td style={{ padding: '13px 16px', color: 'var(--text-2)' }}>{p.doctorName || '—'}</td>
                         </tr>
                       ))}

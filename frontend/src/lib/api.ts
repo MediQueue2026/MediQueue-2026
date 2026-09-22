@@ -249,6 +249,8 @@ export interface ApiAppointmentRow {
   centerName: string | null
   queueToken: string
   appointmentDate: string
+  slotHour: number | null
+  timeLabel: string
   status: string
 }
 
@@ -944,9 +946,10 @@ export const api = {
 
   /** Every appointment ever booked (optionally scoped to one center) — the
    *  Reception Desk's "all patients" directory. */
-  getAppointments: (opts?: { centerId?: string | null }) => {
+  getAppointments: (opts?: { centerId?: string | null; doctorId?: string | null }) => {
     const q = new URLSearchParams()
     if (opts?.centerId) q.set('centerId', opts.centerId)
+    if (opts?.doctorId) q.set('doctorId', opts.doctorId)
     const qs = q.toString()
     return request<{ appointments: ApiAppointmentRow[] }>(
       `/appointments${qs ? `?${qs}` : ''}`,
