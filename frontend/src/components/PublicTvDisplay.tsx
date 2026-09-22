@@ -139,14 +139,7 @@ export default function PublicTvDisplay({
       }}>
         {/* Brand + Doctor info */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{
-            width: 42, height: 42, borderRadius: 12, flexShrink: 0,
-            background: 'linear-gradient(135deg, #10b3a8, #0d968d)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 20px rgba(16, 179, 168, 0.4)',
-          }}>
-            <Stethoscope size={22} color="#fff" />
-          </div>
+          <img src="/logo.png" alt="MediQueue" style={{ height: 38, width: 'auto', objectFit: 'contain' }} />
           <div>
             <h1 className="tv-title" style={{
               fontSize: 'clamp(14px, 2.5vw, 22px)',

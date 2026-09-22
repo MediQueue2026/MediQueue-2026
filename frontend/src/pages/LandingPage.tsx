@@ -134,9 +134,9 @@ export default function LandingPage() {
       </div>
       {/* NAVIGATION */}
       <header className={`marketing-nav${isScrolled ? ' is-scrolled' : ''}`}>
-        <Link to="/" className="marketing-brand" aria-label="MediQueue home" onClick={goHome}>
-          <span className="brand-mark"><Activity size={21} /></span>
-          <span>Medi<span>Queue</span></span>
+        <Link to="/" className="marketing-brand" aria-label="MediQueue home" onClick={goHome} style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none' }}>
+          <img src="/logo.png" alt="MediQueue" style={{ height: 70, width: 'auto', objectFit: 'contain', flexShrink: 0 }} />
+          {/*<span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--text-1)' }}>Medi<span style={{ color: 'var(--blue)' }}>Queue</span></span>*/}
         </Link>
 
         <nav className="marketing-links" aria-label="Main navigation">
@@ -366,7 +366,9 @@ export default function LandingPage() {
         <div className="dashboard-stage">
           <div className="dashboard-window">
             <div className="dash-sidebar">
-              <b><Activity size={14} /> MediQueue</b>
+              <b style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <img src="/logo.png" alt="" style={{ height: 16, width: 'auto', objectFit: 'contain' }} /> MediQueue
+              </b>
               <span className="active">Overview</span><span>Appointments</span><span>Live queue</span>
               <span>Patients</span><span>Doctors</span><span>Reports</span>
             </div>
@@ -535,7 +537,10 @@ export default function LandingPage() {
       {/* FOOTER */}
       <footer className="marketing-footer">
         <div className="footer-brand">
-          <Link to="/" className="marketing-brand" onClick={goHome}><span className="brand-mark"><Activity size={21} /></span><span>Medi<span>Queue</span></span></Link>
+          <Link to="/" className="marketing-brand" onClick={goHome} style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none' }}>
+            <img src="/logo.png" alt="MediQueue" style={{ height: 30, width: 'auto', objectFit: 'contain' }} />
+            <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em' }}>Medi<span>Queue</span></span>
+          </Link>
           <p>A modern healthcare platform connecting patients and medical teams through appointments and live queues.</p>
           <span className="footer-status"><i /> Healthcare workflow, thoughtfully connected</span>
         </div>

@@ -45,10 +45,8 @@ export default function MedicalCenterSignupPage() {
       <div className="auth-card">
         <aside className="auth-aside">
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, var(--teal), var(--blue))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Activity size={16} color="#fff" />
-            </div>
-            <span style={{ fontSize: 15, fontWeight: 800 }}>MediQueue</span>
+            <img src="/logo.png" alt="MediQueue" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
+            <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.03em', color: '#fff' }}>MediQueue</span>
           </div>
           <div style={{ flex: 1 }} />
           <h1 style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.15 }}>Register a medical center</h1>

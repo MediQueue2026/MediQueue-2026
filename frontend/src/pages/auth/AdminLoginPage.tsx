@@ -58,14 +58,8 @@ export default function AdminLoginPage() {
           <div className="auth-aside-glow" style={{ background: `radial-gradient(circle, ${ACCENT}55, transparent 70%)` }} />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-              background: 'linear-gradient(135deg, #dc2626, #991b1b)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <ShieldCheck size={18} color="#fff" />
-            </div>
-            <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em', color: '#f8fafc' }}>
+            <img src="/logo.png" alt="MediQueue" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
+            <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.03em', color: '#f8fafc' }}>
               MediQueue Admin
             </span>
           </div>
