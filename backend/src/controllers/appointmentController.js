@@ -298,6 +298,7 @@ export async function getAppointments(req, res, next) {
     // The Reception Desk passes its center so the "all patients" directory is
     // scoped to patients who booked a doctor at that clinic.
     const centerFilter = req.query.centerId ? String(req.query.centerId) : null;
+    const doctorFilter = req.query.doctorId ? String(req.query.doctorId) : null;
 
     let query = supabase
       .from('appointments')
@@ -306,6 +307,7 @@ export async function getAppointments(req, res, next) {
       )
       .order('created_at', { ascending: false });
     if (centerFilter) query = query.eq('center_id', centerFilter);
+    if (doctorFilter) query = query.eq('doctor_id', doctorFilter);
 
     const { data, error } = await query;
 
@@ -350,6 +352,8 @@ export async function getAppointments(req, res, next) {
         centerName: a.center?.name || null,
         queueToken: `#${series}-${String(a.queue_number).padStart(2, '0')}`,
         appointmentDate: a.appointment_date,
+        slotHour: a.slot_hour,
+        timeLabel: formatAppointmentTime(a.slot_hour),
         status: a.status,
       };
     });
@@ -357,6 +361,12 @@ export async function getAppointments(req, res, next) {
     res.json({ appointments });
   } catch (err) {
     next(err);
+  }
+
+  function formatAppointmentTime(hour) {
+    const h = Number(hour ?? 10);
+    const displayHour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    return `${String(displayHour).padStart(2, '0')}:00 ${h >= 12 ? 'PM' : 'AM'}`;
   }
 }
 
