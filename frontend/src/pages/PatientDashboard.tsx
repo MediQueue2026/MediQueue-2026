@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  Bell, Building2, Calendar, ClipboardList, Download, Eye, FileText, FileUp, Heart, Home, LogOut,
-  Map as MapIcon, MapPin, Menu, Plus, Search, Settings, ShieldCheck, Ticket, User, X
+  Bell, Building2, Calendar, ClipboardList, Clock, Download, Eye, FileText, FileUp, Heart, Home, LogOut,
+  ChevronDown, MapPin, Menu, Plus, Search, Settings, ShieldCheck, Ticket, User, Users, X, Hourglass
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -44,6 +44,7 @@ const NAV_PATIENT = [
   { id: 'centers',       icon: <Building2 size={15} />,    label: 'Browse Medical Centers' },
   { id: 'subscriptions', icon: <Heart size={15} />,        label: 'Subscribed Doctors' },
   { id: 'history',       icon: <ClipboardList size={15} />,label: 'Medical History & Reports' },
+  { id: 'token',         icon: <Ticket size={15} />,        label: 'My Queue Token' },
   { id: 'settings',      icon: <Settings size={15} />,     label: 'Settings' },
 ]
 
@@ -51,12 +52,18 @@ export default function PatientDashboard() {
   const [nav, setNav] = useState('overview')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [centerSearch, setCenterSearch] = useState('')
+  const [docSearch, setDocSearch] = useState('')
+  const [selectedSpec, setSelectedSpec] = useState('All')
 
   // Dynamic state loaded from Supabase / REST API
   const [doctors, setDoctors] = useState<any[]>([])
   const [centers, setCenters] = useState<any[]>([])
   const [centersLoaded, setCentersLoaded] = useState(false)
   const [selectedMapCenterId, setSelectedMapCenterId] = useState<string>('')
+  const [selectedQueueCenterId, setSelectedQueueCenterId] = useState<string>('')
+  const [queueDropdownOpen, setQueueDropdownOpen] = useState(false)
+  const [queueDropdownOpenUp, setQueueDropdownOpenUp] = useState(false)
+  const queueSelectRef = useRef<HTMLDivElement>(null)
   const [subscribedIds, setSubscribedIds] = useState<string[]>([])
   const [signingOut, setSigningOut] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -324,13 +331,57 @@ export default function PatientDashboard() {
     return type === recordFilter
   })
 
+  const filteredDoctors = doctors.filter(doctor => {
+    const doctorName = doctor.name || ''
+    const doctorSpec = doctor.spec || doctor.specialization || ''
+    const query = docSearch.trim().toLowerCase()
+    const matchesSearch = !query ||
+      doctorName.toLowerCase().includes(query) ||
+      doctorSpec.toLowerCase().includes(query) ||
+      (doctor.centerName || '').toLowerCase().includes(query)
+    const matchesSpec = selectedSpec === 'All' ||
+      doctorSpec.toLowerCase().includes(selectedSpec.toLowerCase())
+    return matchesSearch && matchesSpec
+  })
+
   /** Live, undismissed delay notices — what the overview banner shows. */
   const activeDelayAlerts = delayAlerts.filter(a => a.isActive && !dismissedAlerts.includes(a.id))
+  const approvedQueueCenters = centers.filter(c => !c.approval_status || c.approval_status === 'approved')
+  const queueCenterId = selectedQueueCenterId || approvedQueueCenters[0]?.id || ''
+  const selectedQueueCenter = approvedQueueCenters.find(c => c.id === queueCenterId)
+  const queueAppointments = myAppointments.filter(appointment =>
+    appointment.centerId === queueCenterId ||
+    (!appointment.centerId && appointment.centerName === selectedQueueCenter?.name)
+  )
+  const queueWaitingCount = queueAppointments.filter(appointment => appointment.status === 'waiting' || appointment.status === 'booked').length
+  const lastCalledQueueToken = queueAppointments.find(appointment => appointment.status === 'in_consultation' || appointment.status === 'waiting')?.queueToken
+
+  useEffect(() => {
+    if (!queueDropdownOpen) return
+
+    const updateDropdownDirection = () => {
+      const selectBounds = queueSelectRef.current?.getBoundingClientRect()
+      if (!selectBounds) return
+
+      const menuHeight = Math.min(220, Math.max(1, approvedQueueCenters.length) * 38 + 10)
+      const spaceBelow = window.innerHeight - selectBounds.bottom
+      const spaceAbove = selectBounds.top
+      setQueueDropdownOpenUp(spaceBelow < menuHeight + 12 && spaceAbove > spaceBelow)
+    }
+
+    updateDropdownDirection()
+    window.addEventListener('resize', updateDropdownDirection)
+    window.addEventListener('scroll', updateDropdownDirection, true)
+    return () => {
+      window.removeEventListener('resize', updateDropdownDirection)
+      window.removeEventListener('scroll', updateDropdownDirection, true)
+    }
+  }, [queueDropdownOpen, approvedQueueCenters.length])
 
 
 
   return (
-    <div className="mobile-layout-flex" style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
+    <div className="mobile-layout-flex patient-dashboard-shell" style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
 
       {/* Modals */}
       <PrescriptionModal
@@ -395,7 +446,7 @@ export default function PatientDashboard() {
       }}>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-4)', paddingLeft: 4 }}>Patient Navigation</div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-4)', paddingLeft: 4 }}>Patient Portal</div>
             <button onClick={() => setSidebarOpen(false)} className="hamburger-btn" style={{ width: 28, height: 28, borderRadius: 6 }} title="Close menu">
               <X size={14} />
             </button>
@@ -440,6 +491,12 @@ export default function PatientDashboard() {
           <button className="hamburger-btn" onClick={() => setSidebarOpen(true)} title="Open menu">
             <Menu size={18} />
           </button>
+
+          <div className="patient-global-search">
+            <Search size={14} />
+            <span>Search doctors, clinics, or specialties...</span>
+            <kbd>Ctrl K</kbd>
+          </div>
 
           {/* Live token alert banner — displays only when user is in other tabs (not Overview) */}
           {activeNav !== 'overview' && (
@@ -491,7 +548,7 @@ export default function PatientDashboard() {
           {nav === 'overview' && (
             <>
               {/* ── CLEAN HUMAN-DESIGNED WELCOME BANNER ── */}
-              <div className="card glass-form-card" style={{
+              <div className="card glass-form-card patient-welcome-banner" style={{
                 padding: '24px 28px',
                 background: '#ffffff',
                 border: '1px solid var(--border-md)',
@@ -512,23 +569,32 @@ export default function PatientDashboard() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => setShowBookModal(true)}
-                      className="btn btn-primary"
-                      style={{ height: 42, padding: '0 20px', borderRadius: 10, gap: 8, fontWeight: 700, fontSize: 13.5 }}
-                    >
-                      <Calendar size={15} /> Book Appointment
-                    </button>
-                    <button
-                      onClick={() => setShowUploadModal(true)}
-                      className="btn btn-ghost"
-                      style={{ height: 42, padding: '0 18px', borderRadius: 10, gap: 8, fontWeight: 600, fontSize: 13.5, background: 'var(--bg)', border: '1px solid var(--border-md)' }}
-                    >
-                      <FileUp size={15} color="var(--text-2)" /> Upload Medical Report
-                    </button>
-                  </div>
                 </div>
+              </div>
+
+              <div className="patient-summary-grid">
+                <div className="patient-summary-card summary-blue">
+                  <span className="summary-icon"><Calendar size={17} /></span>
+                  <div><strong>{myAppointments.length}</strong><small>Appointments today</small></div>
+                </div>
+                <div className="patient-summary-card summary-violet">
+                  <span className="summary-icon"><Ticket size={17} /></span>
+                  <div><strong>{activeAppointment?.queueToken ?? 0}</strong><small>Currently in queue</small></div>
+                </div>
+                <div className="patient-summary-card summary-green">
+                  <span className="summary-icon"><ShieldCheck size={17} /></span>
+                  <div><strong>{myAppointments.filter(a => a.status === 'completed').length}</strong><small>Completed visits</small></div>
+                </div>
+                <button type="button" className="patient-summary-card summary-action" onClick={() => setNav('history')}>
+                  <span className="summary-icon"><FileText size={17} /></span>
+                  <div><strong>View</strong><small>Medical history</small></div>
+                  <span className="summary-arrow">→</span>
+                </button>
+                <button type="button" className="patient-book-card" onClick={() => setShowBookModal(true)}>
+                  <span className="summary-icon"><Calendar size={17} /></span>
+                  <div><strong>Book an Appointment</strong><small>Find a doctor and choose a date and time</small></div>
+                  <span className="summary-arrow">→</span>
+                </button>
               </div>
 
               {/* ── LIVE DELAY NOTICES FROM SUBSCRIBED DOCTORS (BR-05 / FR-07) ──
@@ -650,7 +716,7 @@ export default function PatientDashboard() {
                   </div>
                 </div>
               ) : (
-                <div className="card glass-form-card" style={{ padding: 24, textAlign: 'center' }}>
+                <div className="card glass-form-card patient-empty-token" style={{ padding: 24, textAlign: 'center' }}>
                   <Ticket size={32} color="var(--text-4)" style={{ margin: '0 auto 8px' }} />
                   <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>No Active Token for Today</div>
                   <p style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 4, marginBottom: 14 }}>Browse medical centers below or click 'Book Appointment' to schedule a consultation slot.</p>
@@ -660,19 +726,64 @@ export default function PatientDashboard() {
                 </div>
               )}
 
+              <div className="patient-overview-content-grid">
+              <div className="patient-overview-browse card glass-form-card">
+                <div className="patient-overview-panel-heading">
+                  <div>
+                    <h3><Calendar size={16} /> Find &amp; Browse Doctors</h3>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNav('doctors')}>View all <span aria-hidden="true">→</span></button>
+                </div>
+                <div className="patient-doctor-search">
+                  <Search size={15} color="var(--blue)" />
+                  <input
+                    value={docSearch}
+                    onChange={event => setDocSearch(event.target.value)}
+                    placeholder="Search by doctor name, specialty, or clinic..."
+                    aria-label="Search by doctor name, specialty, or clinic"
+                  />
+                </div>
+                <div className="patient-specialty-chips">
+                  {['All', 'Cardiology', 'General Medicine', 'Pediatrics', 'Neurology', 'Orthopedics', 'Dermatology'].map(specialty => (
+                    <button
+                      key={specialty}
+                      type="button"
+                      className={selectedSpec === specialty || (specialty === 'General Medicine' && selectedSpec === 'General') ? 'is-selected' : ''}
+                      onClick={() => setSelectedSpec(specialty === 'General Medicine' ? 'General' : specialty)}
+                    >
+                      {specialty}
+                    </button>
+                  ))}
+                </div>
+                <div className="patient-doctor-preview-list">
+                  {filteredDoctors.slice(0, 3).map(doc => (
+                    <div className="patient-doctor-preview" key={doc.id}>
+                      <Avatar name={doc.name} size={34} />
+                      <div className="patient-doctor-info">
+                        <strong>{doc.name}</strong>
+                        <small>{doc.spec || doc.specialization || 'General Medicine'}</small>
+                        {(doc.rating != null || doc.reviewCount != null || doc.reviews != null) && (
+                          <span className="patient-doctor-rating">★ {doc.rating ?? '—'} {doc.reviewCount || doc.reviews ? `(${doc.reviewCount ?? doc.reviews} reviews)` : ''}</span>
+                        )}
+                      </div>
+                      <em className="patient-doctor-duration">~ {doc.avgConsultMinutes ?? 15} min<br />per consultation</em>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => { setSelectedDoctorForBooking(doc.id); setShowBookModal(true) }}>Book Slot</button>
+                    </div>
+                  ))}
+                  {filteredDoctors.length === 0 && <div className="patient-doctor-empty">Doctors will appear here when available.</div>}
+                </div>
+                {filteredDoctors.length > 3 && (
+                  <button type="button" className="patient-more-doctors" onClick={() => setNav('doctors')}>
+                    View more doctors <span aria-hidden="true">→</span>
+                  </button>
+                )}
+              </div>
+
               {/* INTERACTIVE CLINIC NAVIGATOR MAP + UPCOMING APPOINTMENTS */}
               <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 18 }}>
                 
                 {/* REAL INTERACTIVE LEAFLET OPENSTREETMAP CARD */}
                 <div className="card glass-form-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <MapIcon size={16} color="var(--blue)" />
-                      <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>Interactive Live Clinic Navigator & Locator</span>
-                    </div>
-                    <StatusBadge status="active" />
-                  </div>
-
                   <LiveClinicMap
                     centers={centers}
                     doctors={doctors}
@@ -682,52 +793,77 @@ export default function PatientDashboard() {
                   />
                 </div>
 
-                {/* UPCOMING APPOINTMENTS CARD */}
-                <div className="card glass-form-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>Upcoming Appointments</div>
-                    <button onClick={() => setShowBookModal(true)} className="btn btn-ghost btn-sm" style={{ gap: 4, fontSize: 11 }}>
-                      <Plus size={13} /> Book New
-                    </button>
+              </div>
+              </div>
+
+              <div className="patient-bottom-panels">
+                <div className="patient-bottom-panel patient-queue-panel">
+                  <div className="patient-bottom-panel-heading">
+                    <h3><Ticket size={16} /> Live Queue Status</h3>
+                    <span className="patient-live-pill"><span /> Live</span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 380, overflowY: 'auto', paddingRight: 2 }}>
-                    {myAppointments.length > 0 ? (
-                      myAppointments.map(u => (
-                        <div key={u.id} style={{ padding: 12, background: '#ffffff', borderRadius: 10, border: '1px solid var(--border-md)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{u.doctorName}</div>
-                              <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>{[u.specialization, u.centerName].filter(Boolean).join(' · ') || '—'}</div>
-                            </div>
-                            <span className="badge badge-blue" style={{ fontSize: 11 }}>{u.queueToken ?? '—'}</span>
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <Calendar size={12} /> {u.appointmentDate} at {formatSlotTime(u.slotHour)}
-                            </div>
-                            {u.status !== 'cancelled' && u.status !== 'completed' && (
-                              <button
-                                onClick={() => setCancellingAppt({ id: u.id, docName: u.doctorName, token: u.queueToken })}
-                                className="btn btn-sm"
-                                style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '2px 8px', fontSize: 10.5 }}
-                              >
-                                Cancel Booking
-                              </button>
-                            )}
-                            {u.status === 'cancelled' && (
-                              <span style={{ fontSize: 10.5, color: '#ef4444', fontWeight: 700, background: 'rgba(239, 68, 68, 0.15)', padding: '2px 6px', borderRadius: 6 }}>
-                                Cancelled
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
-                        No upcoming appointments. Click "Book New" to schedule.
+                  <p className="patient-bottom-panel-subtitle">
+                    Select a medical center to see current queue status
+                  </p>
+                  <div ref={queueSelectRef} className={`patient-queue-select ${queueDropdownOpen ? 'is-open' : ''} ${queueDropdownOpenUp ? 'open-up' : ''}`}>
+                    <button
+                      type="button"
+                      className="patient-queue-select-trigger"
+                      onClick={() => setQueueDropdownOpen(open => !open)}
+                      disabled={approvedQueueCenters.length === 0}
+                      aria-haspopup="listbox"
+                      aria-expanded={queueDropdownOpen}
+                    >
+                      <span>{selectedQueueCenter?.name || 'No medical center selected'}{selectedQueueCenter?.city ? ` (${selectedQueueCenter.city})` : ''}</span>
+                      <ChevronDown size={15} aria-hidden="true" />
+                    </button>
+                    {queueDropdownOpen && approvedQueueCenters.length > 0 && (
+                      <div className="patient-queue-options" role="listbox" aria-label="Medical centers">
+                        {approvedQueueCenters.map(center => (
+                          <button
+                            key={center.id}
+                            type="button"
+                            role="option"
+                            aria-selected={center.id === queueCenterId}
+                            className={center.id === queueCenterId ? 'is-selected' : ''}
+                            onClick={() => {
+                              setSelectedQueueCenterId(center.id)
+                              setQueueDropdownOpen(false)
+                            }}
+                          >
+                            <span>{center.name}</span>
+                            {center.city && <small>{center.city}</small>}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
+                  <div className="patient-queue-metrics">
+                    <div><Users size={18} /><strong>{queueAppointments.length}</strong><small>Patients today</small></div>
+                    <div><Clock size={18} /><strong>{queueWaitingCount}</strong><small>Currently waiting</small></div>
+                    <div><Hourglass size={18} /><strong>~ 25 min</strong><small>Average waiting time</small></div>
+                    <div><Ticket size={18} /><strong>{lastCalledQueueToken ?? '—'}</strong><small>Last called token</small></div>
+                  </div>
+                </div>
+
+                <div className="patient-bottom-panel patient-empty-panel">
+                  <div className="patient-bottom-panel-heading">
+                    <h3><Calendar size={16} /> Upcoming Appointments</h3>
+                    <button type="button" onClick={() => setShowBookModal(true)} className="patient-panel-action"><Plus size={13} /> Book New</button>
+                  </div>
+                  <Calendar size={34} className="patient-empty-panel-icon" />
+                  <strong>{myAppointments.length > 0 ? `${myAppointments.length} appointment${myAppointments.length === 1 ? '' : 's'} scheduled` : 'No upcoming appointments'}</strong>
+                  <p>{myAppointments.length > 0 ? 'Review your scheduled visits above.' : 'Click “Book New” to schedule your next visit.'}</p>
+                </div>
+
+                <div className="patient-bottom-panel patient-empty-panel">
+                  <div className="patient-bottom-panel-heading">
+                    <h3><Bell size={16} /> Notifications</h3>
+                    <button type="button" onClick={() => setNav('subscriptions')} className="patient-panel-action">View All</button>
+                  </div>
+                  <Bell size={34} className="patient-empty-panel-icon" />
+                  <strong>{activeDelayAlerts.length > 0 ? `${activeDelayAlerts.length} active notification${activeDelayAlerts.length === 1 ? '' : 's'}` : "You're all caught up!"}</strong>
+                  <p>{activeDelayAlerts.length > 0 ? 'Review the latest queue and doctor updates.' : "We'll notify you about appointments, queue updates, and important messages."}</p>
                 </div>
               </div>
             </>

@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import LandingPage from './pages/LandingPage'
 import PatientDashboard from './pages/PatientDashboard'
@@ -30,6 +31,10 @@ export default function App() {
 function AppFrame() {
   const location = useLocation()
   const isLandingPage = location.pathname === '/'
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0)
+  }, [location.pathname, location.search])
 
   return (
     <div style={{ paddingTop: isLandingPage ? 0 : 46 }}>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Navigation, Phone, Calendar, Compass, Megaphone } from 'lucide-react'
+import { Map, MapPin, Navigation, Phone, Calendar, Compass, Search, X, Megaphone } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiCenterNotice } from '../lib/api'
 
@@ -26,15 +26,18 @@ interface LiveClinicMapProps {
 }
 
 function calculateHaversineKm(lat1: number, lon1: number, lat2: number, lon2: number): string {
-  const R = 6371; // Earth radius in km
+  return calculateHaversineDistance(lat1, lon1, lat2, lon2).toFixed(1) + ' km'
+}
+
+function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth radius in km;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const d = R * c;
-  return d.toFixed(1) + ' km';
+  return R * c
 }
 
 export function LiveClinicMap({
@@ -57,8 +60,43 @@ export function LiveClinicMap({
   // `mapDbCenterToPublic` (backend) returns this field as `approvalStatus`
   // (camelCase) — filtering on `approval_status` here always fell through to
   // "approved" and never actually excluded a pending/rejected center.
-  const approvedCenters = (centers || []).filter(c => (c.approvalStatus ?? 'approved') === 'approved')
-  const selectedCenter = approvedCenters.find(c => c.id === selectedCenterId) || approvedCenters[0]
+  const [centerSearch, setCenterSearch] = useState('')
+
+  const approvedCenters = (centers || []).filter(c => (c.approvalStatus ?? c.approval_status ?? 'approved') === 'approved')
+  const selectedCenter = approvedCenters.find(c => c.id === selectedCenterId)
+  const referenceLocation = userLocation || { lat: 6.9271, lng: 79.8612 }
+  const cityFallbacks: Record<string, { lat: number; lng: number }> = {
+    'kandy': { lat: 7.2906, lng: 80.6337 },
+    'galle': { lat: 6.0535, lng: 80.2210 },
+    'jaffna': { lat: 9.6615, lng: 80.0255 },
+    'negombo': { lat: 7.2008, lng: 79.8737 },
+    'kurunegala': { lat: 7.4863, lng: 80.3647 },
+    'matara': { lat: 5.9549, lng: 80.5550 },
+    'gampaha': { lat: 7.0840, lng: 79.9925 },
+    'batticaloa': { lat: 7.7310, lng: 81.6747 },
+    'trincomalee': { lat: 8.5874, lng: 81.2152 },
+    'anuradhapura': { lat: 8.3114, lng: 80.4037 },
+    'ratnapura': { lat: 6.6828, lng: 80.4016 },
+    'colombo': { lat: 6.9271, lng: 79.8612 }
+  }
+  const centersByDistance = approvedCenters
+    .map(center => {
+      const cityKey = Object.keys(cityFallbacks).find(key => (center.city || center.name || '').toLowerCase().includes(key)) || 'colombo'
+      const fallback = cityFallbacks[cityKey]
+      const lat = center.latitude !== null && center.latitude !== undefined && !isNaN(Number(center.latitude))
+        ? Number(center.latitude)
+        : fallback.lat
+      const lng = center.longitude !== null && center.longitude !== undefined && !isNaN(Number(center.longitude))
+        ? Number(center.longitude)
+        : fallback.lng
+      return { center, lat, lng, distance: calculateHaversineDistance(referenceLocation.lat, referenceLocation.lng, lat, lng) }
+    })
+    .sort((a, b) => a.distance - b.distance)
+  const nearestCenters = centersByDistance.slice(0, 5)
+  const centersToDisplay = centersByDistance
+  const matchingCenters = centerSearch.trim()
+    ? centersByDistance.filter(({ center }) => `${center.name || ''} ${center.city || ''} ${center.address || ''}`.toLowerCase().includes(centerSearch.trim().toLowerCase())).slice(0, 6)
+    : []
 
   // Notices/promotions the selected center's receptionist has posted.
   useEffect(() => {
@@ -109,31 +147,7 @@ export function LiveClinicMap({
     Object.values(markersRef.current).forEach(m => m.remove())
     markersRef.current = {}
 
-    const cityFallbacks: Record<string, { lat: number; lng: number }> = {
-      'kandy': { lat: 7.2906, lng: 80.6337 },
-      'galle': { lat: 6.0535, lng: 80.2210 },
-      'jaffna': { lat: 9.6615, lng: 80.0255 },
-      'negombo': { lat: 7.2008, lng: 79.8737 },
-      'kurunegala': { lat: 7.4863, lng: 80.3647 },
-      'matara': { lat: 5.9549, lng: 80.5550 },
-      'gampaha': { lat: 7.0840, lng: 79.9925 },
-      'batticaloa': { lat: 7.7310, lng: 81.6747 },
-      'trincomalee': { lat: 8.5874, lng: 81.2152 },
-      'anuradhapura': { lat: 8.3114, lng: 80.4037 },
-      'ratnapura': { lat: 6.6828, lng: 80.4016 },
-      'colombo': { lat: 6.9271, lng: 79.8612 }
-    }
-
-    approvedCenters.forEach(c => {
-      const cityKey = Object.keys(cityFallbacks).find(k => (c.city || c.name || '').toLowerCase().includes(k)) || 'colombo'
-      const cityDefault = cityFallbacks[cityKey]
-
-      const rawLat = c.latitude ?? c.lat
-      const rawLng = c.longitude ?? c.lng
-
-      const lat = rawLat !== null && rawLat !== undefined && !isNaN(Number(rawLat)) ? Number(rawLat) : cityDefault.lat
-      const lng = rawLng !== null && rawLng !== undefined && !isNaN(Number(rawLng)) ? Number(rawLng) : cityDefault.lng
-
+    centersToDisplay.forEach(({ center: c, lat, lng }) => {
       const centerDocs = doctors.filter(d => !d.centerId || d.centerId === c.id || d.center_id === c.id || doctors.length <= 2)
       const docListHtml = centerDocs.map(d => `<li style="font-size:11px; margin-top:2px; color:#10b981; font-weight:700;">👨‍⚕️ ${d.name} (${d.spec})</li>`).join('')
 
@@ -176,16 +190,17 @@ export function LiveClinicMap({
       markersRef.current[c.id] = marker
     })
 
-    // Pan map to selected center
-    if (selectedCenter) {
-      const sLat = Number(selectedCenter.latitude) || 6.9147
-      const sLng = Number(selectedCenter.longitude) || 79.8732
-      map.setView([sLat, sLng], 13, { animate: true })
-      if (markersRef.current[selectedCenter.id]) {
-        markersRef.current[selectedCenter.id].openPopup()
-      }
+
+    const markerPoints = nearestCenters
+      .map(({ center }) => markersRef.current[center.id]?.getLatLng())
+      .filter((point): point is L.LatLng => Boolean(point))
+
+    if (markerPoints.length > 1) {
+      map.fitBounds(L.latLngBounds(markerPoints), { padding: [28, 28], maxZoom: 13, animate: false })
+    } else if (markerPoints.length === 1) {
+      map.setView(markerPoints[0], 13, { animate: false })
     }
-  }, [centers, doctors, selectedCenterId])
+  }, [centers, doctors, userLocation])
 
   // GPS Geolocation Handler
   const handleLocateUser = () => {
@@ -237,28 +252,30 @@ export function LiveClinicMap({
     ? calculateHaversineKm(userLocation.lat, userLocation.lng, Number(selectedCenter.latitude) || 6.9147, Number(selectedCenter.longitude) || 79.8732)
     : null
 
+  const handleCenterSearchSelect = (centerId: string) => {
+    const result = centersByDistance.find(({ center }) => center.id === centerId)
+    const map = mapInstanceRef.current
+    const marker = markersRef.current[centerId]
+
+    onSelectCenter(centerId)
+    setCenterSearch(result?.center.name || '')
+
+    if (map && result && marker) {
+      map.setView([result.lat, result.lng], 14, { animate: true })
+      marker.openPopup()
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* Map Header & Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {approvedCenters.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => onSelectCenter(c.id)}
-              className="btn btn-sm"
-              style={{
-                background: selectedCenterId === c.id ? 'var(--blue)' : '#ffffff',
-                color: selectedCenterId === c.id ? '#ffffff' : 'var(--text-2)',
-                border: '1px solid var(--border-md)', fontSize: 11.5, gap: 5
-              }}
-            >
-              <MapPin size={12} /> {c.name} ({c.city || 'Branch'})
-            </button>
-          ))}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <Map size={16} color="var(--blue)" />
+          <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Interactive Live Clinic Navigator &amp; Locator
+          </span>
         </div>
-
         <button
           type="button"
           onClick={handleLocateUser}
@@ -266,8 +283,50 @@ export function LiveClinicMap({
           className="btn btn-ghost btn-sm"
           style={{ gap: 5, fontSize: 11.5, color: 'var(--blue)', fontWeight: 700 }}
         >
-          <Compass size={14} /> {geoLocating ? 'Locating GPS...' : '📍 My Location'}
+          <Compass size={14} /> {geoLocating ? 'Locating GPS...' : 'Track my location'}
         </button>
+      </div>
+
+      <div style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 11px', background: '#fff', border: '1px solid var(--border-md)', borderRadius: 9 }}>
+          <Search size={15} color="var(--text-4)" />
+          <input
+            type="search"
+            value={centerSearch}
+            onChange={event => setCenterSearch(event.target.value)}
+            placeholder="Search medical centers by name or city"
+            aria-label="Search medical centers by name or city"
+            style={{ width: '100%', border: 0, outline: 0, background: 'transparent', color: 'var(--text-1)', fontSize: 12 }}
+          />
+          {centerSearch && (
+            <button type="button" onClick={() => setCenterSearch('')} aria-label="Clear center search" style={{ display: 'grid', placeItems: 'center', padding: 0, border: 0, background: 'transparent', color: 'var(--text-4)', cursor: 'pointer' }}>
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        {matchingCenters.length > 0 && (
+          <div style={{ position: 'absolute', top: 42, left: 0, right: 0, zIndex: 20, padding: 5, background: '#fff', border: '1px solid var(--border-md)', borderRadius: 9, boxShadow: '0 10px 24px rgba(15, 23, 42, .14)' }}>
+            {matchingCenters.map(({ center, distance }) => (
+              <button
+                key={center.id}
+                type="button"
+                onClick={() => handleCenterSearchSelect(center.id)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '8px 9px', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--text-1)', textAlign: 'left', cursor: 'pointer' }}
+              >
+                <span>
+                  <strong style={{ display: 'block', fontSize: 12 }}>{center.name}</strong>
+                  <small style={{ color: 'var(--text-4)', fontSize: 10 }}>{center.city || center.address || 'Medical center'}</small>
+                </span>
+                <small style={{ color: 'var(--blue)', fontSize: 10, fontWeight: 700 }}>{distance.toFixed(1)} km</small>
+              </button>
+            ))}
+          </div>
+        )}
+        {centerSearch.trim() && matchingCenters.length === 0 && (
+          <div style={{ position: 'absolute', top: 42, left: 0, right: 0, zIndex: 20, padding: '10px 12px', background: '#fff', border: '1px solid var(--border-md)', borderRadius: 9, color: 'var(--text-4)', fontSize: 11, boxShadow: '0 10px 24px rgba(15, 23, 42, .14)' }}>
+            No medical centers found.
+          </div>
+        )}
       </div>
 
       {geoError && (
@@ -277,8 +336,8 @@ export function LiveClinicMap({
       )}
 
       {/* Live Leaflet Map Container */}
-      <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-md)' }}>
-        <div ref={mapContainerRef} style={{ height: 260, width: '100%', zIndex: 1 }} />
+      <div className="patient-clinic-map" style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-md)' }}>
+        <div ref={mapContainerRef} style={{ height: 340, width: '100%', zIndex: 1 }} />
 
         {distanceText && (
           <div style={{

@@ -6,7 +6,8 @@ import {
   Smartphone, Stethoscope, UserRoundCheck, Users, X, Clock3, BarChart3,
   PhoneCall, Mail, MapPin, Star,
 } from 'lucide-react'
-import bgLobby from '../imports/mediqueue_bg_lobby.png'
+import heroBackground from '../imports/mediqueue_hero_background.png'
+import MolecularParticles from '../components/MolecularParticles'
 
 const patientBenefits = [
   'Book appointments with your preferred doctor',
@@ -55,21 +56,85 @@ function scrollToSection(id: string, closeMenu?: () => void) {
 export default function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
+  const [scrollProgress, setScrollProgress] = useState(0)
 
   useEffect(() => {
-    const handleScroll = () => setIsScrolled(window.scrollY > 18)
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 18)
+      const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight
+      setScrollProgress(scrollableHeight > 0 ? (window.scrollY / scrollableHeight) * 100 : 0)
+    }
     handleScroll()
     window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  useEffect(() => {
+    const revealTargets = document.querySelectorAll<HTMLElement>(
+      '.marketing-section, .marketing-cta, .contact-strip, .marketing-footer, ' +
+      '.audience-card, .step-card, .feature-detail-grid article, .story-card, .metric-band > div',
+    )
+    const staggerGroups = document.querySelectorAll<HTMLElement>(
+      '.audience-grid, .steps-grid, .feature-detail-grid, .stories-grid, .metric-band',
+    )
+
+    revealTargets.forEach((element) => element.classList.add('scroll-reveal'))
+    staggerGroups.forEach((group) => {
+      Array.from(group.children).forEach((child, index) => {
+        const element = child as HTMLElement
+        element.classList.add('scroll-reveal')
+        element.style.setProperty('--reveal-delay', `${Math.min(index, 5) * 90}ms`)
+      })
+    })
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible')
+          observer.unobserve(entry.target)
+        }
+      })
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' })
+
+    revealTargets.forEach((element) => observer.observe(element))
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const hero = document.querySelector<HTMLElement>('.marketing-hero')
+    if (!hero || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const bounds = hero.getBoundingClientRect()
+      const x = (event.clientX - bounds.left) / bounds.width - 0.5
+      const y = (event.clientY - bounds.top) / bounds.height - 0.5
+      hero.style.setProperty('--pointer-x', `${x * 18}px`)
+      hero.style.setProperty('--pointer-y', `${y * 14}px`)
+    }
+    const resetPointer = () => {
+      hero.style.setProperty('--pointer-x', '0px')
+      hero.style.setProperty('--pointer-y', '0px')
+    }
+
+    hero.addEventListener('pointermove', handlePointerMove, { passive: true })
+    hero.addEventListener('pointerleave', resetPointer)
+    return () => {
+      hero.removeEventListener('pointermove', handlePointerMove)
+      hero.removeEventListener('pointerleave', resetPointer)
+    }
+  }, [])
+
   const navTo = (id: string) => scrollToSection(id, () => setMenuOpen(false))
+  const goHome = () => window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })
 
   return (
     <main className="marketing-page">
+      <div className="landing-scroll-progress" aria-hidden="true">
+        <span style={{ height: `${scrollProgress}%` }} />
+      </div>
       {/* NAVIGATION */}
       <header className={`marketing-nav${isScrolled ? ' is-scrolled' : ''}`}>
-        <Link to="/" className="marketing-brand" aria-label="MediQueue home">
+        <Link to="/" className="marketing-brand" aria-label="MediQueue home" onClick={goHome}>
           <span className="brand-mark"><Activity size={21} /></span>
           <span>Medi<span>Queue</span></span>
         </Link>
@@ -157,7 +222,7 @@ export default function LandingPage() {
 
         <div className="marketing-hero-visual">
           <div className="hero-image-wrap">
-            <img src={bgLobby} alt="Modern medical center reception" />
+            <img src={heroBackground} alt="Modern medical center reception" />
           </div>
 
           <div className="hero-image-overlay" />
@@ -191,7 +256,8 @@ export default function LandingPage() {
           </div>
 
           <div className="hero-note">
-            Less waiting.<br /><b>More living.</b><br />Better healthcare.
+            Better care.<br /><b>Happier people.</b><br />Healthier communities.
+            <HeartPulse size={17} />
           </div>
         </div>
       </section>
@@ -337,10 +403,18 @@ export default function LandingPage() {
           </div>
           <Link to="/staff/register/medical-center" className="marketing-primary compact">Register your medical center <ArrowRight size={15} /></Link>
         </div>
+        <div className="clinic-growth-note" aria-label="More patients, more revenue">
+          <span>More patients<br />more revenue</span>
+          <svg viewBox="0 0 92 72" aria-hidden="true">
+            <path d="M8 62 C28 62 43 54 51 39 C59 25 69 15 86 10" />
+            <path d="M72 8 L86 10 L81 23" />
+          </svg>
+        </div>
       </section>
 
       {/* DOCTOR */}
       <section id="doctors" className="marketing-section doctor-role-section">
+        <MolecularParticles />
         <div className="doctor-role-visual">
           <div className="doctor-role-card">
             <div className="role-card-top">
@@ -461,7 +535,7 @@ export default function LandingPage() {
       {/* FOOTER */}
       <footer className="marketing-footer">
         <div className="footer-brand">
-          <Link to="/" className="marketing-brand"><span className="brand-mark"><Activity size={21} /></span><span>Medi<span>Queue</span></span></Link>
+          <Link to="/" className="marketing-brand" onClick={goHome}><span className="brand-mark"><Activity size={21} /></span><span>Medi<span>Queue</span></span></Link>
           <p>A modern healthcare platform connecting patients and medical teams through appointments and live queues.</p>
           <span className="footer-status"><i /> Healthcare workflow, thoughtfully connected</span>
         </div>
