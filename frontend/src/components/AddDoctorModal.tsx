@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Stethoscope, CheckCircle2, Inbox, UserPlus } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiDoctor } from '../lib/api'
@@ -298,23 +298,6 @@ export default function AddDoctorModal({
                   onChange={e => setSeries(e.target.value.toUpperCase())}
                   style={inputStyle}
                 />
-              </div>
-            </div>
-
-            {/* Max appointments per hour */}
-            <div>
-              <label style={labelStyle}>Max Appointments / Hour</label>
-              <input
-                className="input"
-                type="number"
-                min={1}
-                max={30}
-                value={maxPerHour}
-                onChange={e => setMaxPerHour(e.target.value)}
-                style={inputStyle}
-              />
-              <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>
-                Total daily capacity = available hours × max per hour
               </div>
             </div>
 

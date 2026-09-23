@@ -79,6 +79,18 @@ function waitTone(minutes: number): { fg: string; bg: string; border: string } {
   return { fg: '#B91C1C', bg: 'var(--crimson-dim)', border: 'var(--crimson-border)' }
 }
 
+function formatWaitTime(minutes?: number | null): string {
+  if (minutes == null) return '—'
+  if (minutes < 60) return `${minutes}m`
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  const mins = minutes % 60
+  if (days > 0) {
+    return `${days}d ${hours}h ${mins}m`
+  }
+  return `${hours}h ${mins}m`
+}
+
 /** Small pill used for the segment counts in the Active Queue header. */
 function CountChip({ label, value, tone }: { label: string; value: number; tone: 'amber' | 'emerald' | 'ghost' | 'crimson' }) {
   const tones = {
@@ -197,7 +209,7 @@ function QueueRow({
               display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
             }}
           >
-            <Timer size={10} /> {waited} min here
+            <Timer size={10} /> {formatWaitTime(waited)} here
           </span>
           {wait && (
             <span
@@ -208,7 +220,7 @@ function QueueRow({
                 whiteSpace: 'nowrap',
               }}
             >
-              ~{estWait} min to go
+              ~{formatWaitTime(estWait)} to go
             </span>
           )}
         </div>
