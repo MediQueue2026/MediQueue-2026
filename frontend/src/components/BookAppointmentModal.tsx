@@ -268,7 +268,7 @@ export function BookAppointmentModal({
             seenHours.add(h)
             addedInSession = true
 
-            const bookedCount = bookedForDocAndDate.filter((a: any) => (a.slotHour ?? a.slot_hour) === h).length
+            const bookedCount = bookedForDocAndDate.filter((a: any) => Number(a.slotHour ?? a.slot_hour) === h).length
             const rem = Math.max(0, limitPerHour - bookedCount)
 
             const formatH = (hourNum: number) => {
@@ -631,27 +631,56 @@ export function BookAppointmentModal({
                           const isSelected = slotHour === s.hour
                           const isFull = s.rem === 0
                           const isPast = slotIsPast(s.hour)
-                          const disabled = isFull || isPast
+                          const disabled = isPast
                           return (
                             <button
                               key={s.hour}
                               type="button"
                               disabled={disabled}
-                              onClick={() => setSlotHour(s.hour)}
+                              onClick={() => {
+                                if (isFull) {
+                                  setError('This slot is full. Please select another available time slot.')
+                                  return
+                                }
+                                setError('')
+                                setSlotHour(s.hour)
+                              }}
                               style={{
                                 padding: '10px 12px', borderRadius: 8, textAlign: 'left',
-                                background: isSelected ? 'var(--blue)' : disabled ? '#f5f5f5' : '#ffffff',
-                                color: isSelected ? '#ffffff' : disabled ? '#a0a0a0' : 'var(--text-1)',
-                                border: '1px solid', borderColor: isSelected ? 'var(--blue)' : 'var(--border-md)',
-                                cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
+                                background: isSelected
+                                  ? 'var(--blue)'
+                                  : isFull
+                                    ? 'rgba(239, 68, 68, 0.08)'
+                                    : isPast
+                                      ? '#f5f5f5'
+                                      : '#ffffff',
+                                color: isSelected
+                                  ? '#ffffff'
+                                  : isFull
+                                    ? '#dc2626'
+                                    : isPast
+                                      ? '#a0a0a0'
+                                      : 'var(--text-1)',
+                                border: '1px solid',
+                                borderColor: isSelected
+                                  ? 'var(--blue)'
+                                  : isFull
+                                    ? 'rgba(239, 68, 68, 0.4)'
+                                    : 'var(--border-md)',
+                                cursor: isPast ? 'not-allowed' : 'pointer',
+                                opacity: isPast ? 0.6 : 1,
                                 transition: 'all 0.2s ease'
                               }}
                             >
                               <div style={{ fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <Clock size={12} /> {s.label}
                               </div>
-                              <div style={{ fontSize: 10.5, marginTop: 2, color: isSelected ? '#e0f7f5' : isPast ? 'var(--text-4)' : isFull ? 'var(--crimson)' : 'var(--blue-dark)' }}>
-                                {isPast ? '⌛ Passed' : isFull ? `❌ Slot Full (${s.maxLimit}/${s.maxLimit} booked)` : `● ${s.rem} of ${s.maxLimit} slots available`}
+                              <div style={{
+                                fontSize: 10.5, marginTop: 2,
+                                color: isSelected ? '#e0f7f5' : isPast ? 'var(--text-4)' : isFull ? '#dc2626' : 'var(--blue-dark)',
+                                fontWeight: isFull ? 700 : 500
+                              }}>
+                                {isPast ? '⌛ Passed' : isFull ? `❌ 0 of ${s.maxLimit} slots available (Slot Full)` : `● ${s.rem} of ${s.maxLimit} slots available`}
                               </div>
                             </button>
                           )

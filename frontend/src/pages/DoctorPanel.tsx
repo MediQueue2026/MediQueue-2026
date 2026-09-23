@@ -33,6 +33,17 @@ function fmtTime(iso: string | null): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
+function formatWaitTime(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  const mins = minutes % 60
+  if (days > 0) {
+    return `${days}d ${hours}h ${mins}m`
+  }
+  return `${hours}h ${mins}m`
+}
+
 /** "35y · M" from whatever of the two we actually know; '—' when neither. */
 function describePatient(age: number | null, g: string | null): string {
   const parts = [age != null ? `${age}y` : null, g].filter(Boolean)
@@ -878,7 +889,7 @@ export default function DoctorPanel() {
                           whiteSpace: 'nowrap', padding: '2px 7px', borderRadius: 6,
                           background: `${waitColor}18`, border: `1px solid ${waitColor}35`,
                         }}>
-                          <Timer size={9} /> {waited} min waiting
+                          <Timer size={9} /> {formatWaitTime(waited)} waiting
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
