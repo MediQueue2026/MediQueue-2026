@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import {
   Activity, AlertCircle, Bell, BellRing, Building2, Camera, CheckCircle2, Clock, Hash, ImagePlus,
   Megaphone, Plus, Radio, Save, Search, Stethoscope, Ticket, Trash2, UserX, Users, Wifi, CalendarClock,
-  Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert
+  Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert, CalendarDays
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -328,6 +328,8 @@ export default function ReceptionistDesk() {
   const [delayToast, setDelayToast] = useState<string | null>(null)
   /** Closed tokens are collapsed by default — they're reference, not work. */
   const [showClosed, setShowClosed] = useState(false)
+  const [activeQueueView, setActiveQueueView] = useState<'queue' | 'appointments'>('queue')
+  const [queueAppointmentDate, setQueueAppointmentDate] = useState('')
 
   // Counter form — patients book their own online tokens from the Patient app;
   // this desk only records walk-ins against a pre-printed physical slip.
@@ -667,6 +669,12 @@ export default function ReceptionistDesk() {
   const todaysSession = useMemo(
     () => filterRows(allAppointments.filter(a => a.appointmentDate === todayIso), { dedupe: false }),
     [allAppointments, patientSearch, todayIso],
+  )
+
+  const selectedDoctorAppointments = useMemo(
+    () => allAppointments
+      .filter(a => a.doctorId === selectedDoctor?.id && a.appointmentDate === (queueAppointmentDate || todayIso)),
+    [allAppointments, queueAppointmentDate, selectedDoctor?.id, todayIso],
   )
 
   /** Table 2 — every patient who has ever booked at this center. */
@@ -1521,9 +1529,31 @@ export default function ReceptionistDesk() {
                   {/* Header: identity, segment counts, delay control */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
-                      <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)' }}>
-                        Active Queue — {selectedDoctor?.name ?? '—'}
-                      </h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                        {(['queue', 'appointments'] as const).map(view => (
+                          <button
+                            key={view}
+                            type="button"
+                            onClick={() => setActiveQueueView(view)}
+                            className="btn btn-sm"
+                            style={{
+                              border: 'none',
+                              borderBottom: activeQueueView === view ? '2px solid var(--blue)' : '2px solid transparent',
+                              borderRadius: 0,
+                              background: 'transparent',
+                              color: activeQueueView === view ? 'var(--blue)' : 'var(--text-4)',
+                              fontSize: 17,
+                              fontWeight: 800,
+                              padding: '0 0 7px',
+                            }}
+                          >
+                            {view === 'queue' ? 'Active Queue' : 'Appointments'}
+                          </button>
+                        ))}
+                        <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)' }}>
+                          — {selectedDoctor?.name ?? '—'}
+                        </span>
+                      </div>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
                         <CountChip label="waiting" value={segments.waiting.length} tone="amber" />
                         <CountChip label="in consultation" value={segments.live.length} tone="emerald" />
@@ -1533,6 +1563,31 @@ export default function ReceptionistDesk() {
                     </div>
 
                     <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      {activeQueueView === 'appointments' && (
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type="date"
+                            aria-label="Filter appointments by day"
+                            value={queueAppointmentDate || todayIso}
+                            onChange={e => setQueueAppointmentDate(e.target.value)}
+                            tabIndex={-1}
+                            style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            aria-label="Choose appointment day"
+                            onClick={e => {
+                              const input = e.currentTarget.previousElementSibling as HTMLInputElement | null
+                              input?.showPicker?.()
+                            }}
+                            style={{ gap: 5, border: '1px solid var(--border-md)' }}
+                          >
+                            <CalendarDays size={12} />
+                            {queueAppointmentDate || todayIso}
+                          </button>
+                        </div>
+                      )}
                       <button
                         onClick={queue.refresh}
                         className="btn btn-ghost btn-sm"
@@ -1584,7 +1639,8 @@ export default function ReceptionistDesk() {
                     </div>
                   )}
 
-                  {queue.loading ? (
+                  {activeQueueView === 'queue' && (
+                    queue.loading ? (
                     <QueueSkeleton />
                   ) : queue.doctorQueue.length === 0 ? (
                     <div style={{
@@ -1673,6 +1729,34 @@ export default function ReceptionistDesk() {
                         </section>
                       )}
                     </>
+                  ))}
+                  {activeQueueView === 'appointments' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {selectedDoctorAppointments.length === 0 ? (
+                        <div style={{
+                          padding: '28px 16px', borderRadius: 10, textAlign: 'center',
+                          color: 'var(--text-4)', background: 'rgba(30,41,59,0.03)',
+                          border: '1px dashed var(--border-md)',
+                        }}>
+                          No appointments for {queueAppointmentDate || todayIso}.
+                        </div>
+                      ) : selectedDoctorAppointments.map(appointment => (
+                        <div key={appointment.id} style={{
+                          padding: '13px 14px', borderRadius: 10,
+                          border: '1px solid var(--border)', background: '#ffffff',
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                            <strong style={{ color: 'var(--text-1)', fontSize: 13.5 }}>{appointment.patientName}</strong>
+                            <span style={{ color: 'var(--blue)', fontFamily: 'monospace', fontWeight: 800 }}>{appointment.queueToken}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 5, fontSize: 11.5, color: 'var(--text-3)' }}>
+                            <span>Date: {appointment.appointmentDate}</span>
+                            <span>Time: {appointment.timeLabel}</span>
+                            <span>Status: {appointment.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1689,7 +1773,9 @@ export default function ReceptionistDesk() {
               <div className="card glass-form-card" style={{ padding: 26 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
                   <div>
-                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Today's Session</h3>
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>
+                      Today's Session
+                    </h3>
                     <div style={{ fontSize: 12, color: 'var(--text-4)' }}>
                       Every appointment at {deskCenterName ?? 'this center'} dated today, whatever its status — this list resets each day.
                     </div>
