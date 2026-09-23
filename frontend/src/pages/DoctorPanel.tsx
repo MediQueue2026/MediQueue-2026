@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle, AlertTriangle, Bell, Building2, Check, CheckCheck, Clock, Eye, FileText, Phone,
-  Repeat, Search, ShieldAlert, SkipForward, Ticket, Timer, Users, UserCheck, Inbox, X
+  Repeat, Search, ShieldAlert, SkipForward, Ticket, Timer, Users, UserCheck, Inbox, X, CalendarDays
 } from 'lucide-react'
 import AccountMenu from '../components/AccountMenu'
 import PatientHistoryDrawer from '../components/PatientHistoryDrawer'
@@ -66,6 +66,7 @@ export default function DoctorPanel() {
   const [selectedAppointment, setSelectedAppointment] = useState<ApiAppointmentRow | null>(null)
   const [appointmentsLoading, setAppointmentsLoading] = useState(false)
   const [appointmentsError, setAppointmentsError] = useState<string | null>(null)
+  const [appointmentDateFilter, setAppointmentDateFilter] = useState('')
 
   /**
    * The whole console is driven by one summary payload.
@@ -146,6 +147,17 @@ export default function DoctorPanel() {
     const t = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(t)
   }, [])
+
+  const todayIso = useMemo(() => {
+    const date = new Date(now)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  }, [now])
+
+  const selectedAppointmentDate = appointmentDateFilter || todayIso
+  const filteredAppointments = useMemo(
+    () => appointments.filter(appointment => appointment.appointmentDate === selectedAppointmentDate),
+    [appointments, selectedAppointmentDate],
+  )
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -807,8 +819,33 @@ export default function DoctorPanel() {
                   {label}
                 </button>
               ))}
-              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-4)' }}>
-                {appointmentView === 'queue' ? `${openCount} open` : `${appointments.length} total`}
+              {appointmentView === 'appointments' && (
+                <div style={{ position: 'relative', marginLeft: 'auto' }}>
+                  <input
+                    type="date"
+                    aria-label="Filter appointments by day"
+                    value={selectedAppointmentDate}
+                    onChange={e => setAppointmentDateFilter(e.target.value)}
+                    tabIndex={-1}
+                    style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    aria-label="Choose appointment day"
+                    onClick={e => {
+                      const input = e.currentTarget.previousElementSibling as HTMLInputElement | null
+                      input?.showPicker?.()
+                    }}
+                    style={{ gap: 6, padding: '5px 8px', color: 'var(--text-3)' }}
+                  >
+                    <CalendarDays size={15} />
+                    <span style={{ fontSize: 11.5 }}>{selectedAppointmentDate === todayIso ? 'Today' : selectedAppointmentDate}</span>
+                  </button>
+                </div>
+              )}
+              <span style={{ marginLeft: 8, fontSize: 11.5, color: 'var(--text-4)' }}>
+                {appointmentView === 'queue' ? `${openCount} open` : `${filteredAppointments.length} total`}
               </span>
             </div>
           </div>
@@ -955,9 +992,11 @@ export default function DoctorPanel() {
                 <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-4)' }}>Loading appointments…</div>
               ) : appointmentsError ? (
                 <div style={{ padding: 40, textAlign: 'center', color: 'var(--crimson)' }}>{appointmentsError}</div>
-              ) : appointments.length === 0 ? (
-                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-4)' }}>No appointments found.</div>
-              ) : appointments.map(appointment => (
+              ) : filteredAppointments.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-4)' }}>
+                  No appointments found for {selectedAppointmentDate}.
+                </div>
+              ) : filteredAppointments.map(appointment => (
                 <button
                   key={appointment.id}
                   onClick={() => setSelectedAppointment(appointment)}
