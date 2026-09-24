@@ -266,6 +266,23 @@ export default function AdminPanel() {
       .finally(() => setCenterRequestsLoading(false))
   }
 
+  // Pending New Doctor Requests State (Receptionist -> System Admin approval)
+  const [pendingDoctorRequests, setPendingDoctorRequests] = useState<import('../lib/api').ApiDoctorRequest[]>([])
+  const [doctorRequestsLoading, setDoctorRequestsLoading] = useState(false)
+  const [rejectingDoctorRequest, setRejectingDoctorRequest] = useState<import('../lib/api').ApiDoctorRequest | null>(null)
+  const [doctorRejectionReasonInput, setDoctorRejectionReasonInput] = useState('')
+
+  const fetchPendingNewDoctorRequests = () => {
+    setDoctorRequestsLoading(true)
+    api.getDoctorRequests({ status: 'pending' })
+      .then(r => setPendingDoctorRequests((r.requests || []).filter((req: import('../lib/api').ApiDoctorRequest) => req.requestType === 'CREATE_NEW')))
+      .catch(err => {
+        console.error('Failed to load pending doctor requests', err)
+        setPendingDoctorRequests([])
+      })
+      .finally(() => setDoctorRequestsLoading(false))
+  }
+
   useEffect(() => {
     if (nav === 'health') {
       fetchSystemStats()
@@ -304,6 +321,7 @@ export default function AdminPanel() {
     if (nav === 'roles') {
       let active = true
       setLoadingUsers(true)
+      fetchPendingNewDoctorRequests()
       api.getUsers()
         .then(r => {
           if (!active) return
@@ -557,6 +575,30 @@ export default function AdminPanel() {
     } catch (error) {
       console.error('Failed to reject medical center request', error)
       alert('Could not reject medical center request. Please try again.')
+    }
+  }
+
+  const handleApproveDoctorRequest = async (requestId: string) => {
+    try {
+      await api.adminApproveDoctorRequest(requestId)
+      fetchPendingNewDoctorRequests()
+      alert('Doctor request approved! Account created and credentials sent via SMS.')
+    } catch (error: any) {
+      console.error('Failed to approve doctor request', error)
+      alert(error?.message || 'Could not approve doctor request. Please try again.')
+    }
+  }
+
+  const handleConfirmRejectDoctorRequest = async () => {
+    if (!rejectingDoctorRequest) return
+    try {
+      await api.adminRejectDoctorRequest(rejectingDoctorRequest.id, doctorRejectionReasonInput.trim() || undefined)
+      setRejectingDoctorRequest(null)
+      setDoctorRejectionReasonInput('')
+      fetchPendingNewDoctorRequests()
+    } catch (error) {
+      console.error('Failed to reject doctor request', error)
+      alert('Could not reject doctor request. Please try again.')
     }
   }
 
@@ -888,6 +930,83 @@ export default function AdminPanel() {
                 </button>
               </div>
 
+              {/* PENDING NEW DOCTOR REQUESTS (Receptionist → System Admin approval) */}
+              {!doctorRequestsLoading && (
+                <div style={{ marginBottom: 24 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', marginBottom: 4 }}>
+                    Pending New Doctor Requests ({pendingDoctorRequests.length})
+                  </h4>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 14 }}>
+                    Submitted by receptionists to register a new doctor. Once approved, a user account is created and credentials are sent to the doctor via SMS.
+                  </div>
+                  {pendingDoctorRequests.length === 0 ? (
+                    <div style={{
+                      padding: 24, textAlign: 'center', background: 'rgba(245, 158, 11, 0.04)',
+                      border: '1px dashed rgba(245, 158, 11, 0.28)', borderRadius: 14, color: 'var(--text-4)', fontSize: 13
+                    }}>
+                      No pending new doctor requests at this time.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 8 }}>
+                      {pendingDoctorRequests.map(req => (
+                        <div key={req.id} style={{
+                          background: 'rgba(245, 158, 11, 0.04)', border: '1px solid rgba(245, 158, 11, 0.28)',
+                          borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                              <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--blue-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <Stethoscope size={18} color="var(--blue)" />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-1)' }}>{req.doctorName}</div>
+                                <div style={{ fontSize: 12, color: 'var(--text-4)' }}>{req.specialization}</div>
+                              </div>
+                            </div>
+                            <span style={{
+                              fontSize: 10.5, fontWeight: 800, padding: '3px 8px', borderRadius: 6,
+                              background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)',
+                              color: '#d97706', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap'
+                            }}>
+                              Pending
+                            </span>
+                          </div>
+
+                          <div style={{
+                            background: 'rgba(30, 41, 59, 0.03)', border: '1px solid var(--border-md)',
+                            borderRadius: 10, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6
+                          }}>
+                            <div>SLMC Reg. No.: <strong style={{ color: 'var(--text-1)' }}>{req.slmcRegNo || '—'}</strong></div>
+                            <div>Phone: <strong style={{ color: 'var(--text-1)' }}>{req.phone || '—'}</strong></div>
+                            <div>Email: <strong style={{ color: 'var(--text-1)' }}>{req.email || 'Auto-generate'}</strong></div>
+                            <div>Medical Center: <strong style={{ color: 'var(--text-2)' }}>{req.centerName}</strong></div>
+                            <div>Requested By: <strong style={{ color: 'var(--text-2)' }}>{req.receptionistName}</strong></div>
+                            <div>Date: <strong style={{ color: 'var(--text-2)' }}>{new Date(req.createdAt).toLocaleDateString()}</strong></div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <button
+                              onClick={() => handleApproveDoctorRequest(req.id)}
+                              className="btn btn-emerald btn-sm"
+                              style={{ flex: 1, justifyContent: 'center', gap: 6, height: 38 }}
+                            >
+                              <CheckCircle2 size={14} /> Approve
+                            </button>
+                            <button
+                              onClick={() => { setRejectingDoctorRequest(req); setDoctorRejectionReasonInput('') }}
+                              className="btn btn-ghost btn-sm"
+                              style={{ flex: 1, justifyContent: 'center', gap: 6, height: 38, color: 'var(--crimson)' }}
+                            >
+                              <UserX size={14} /> Reject
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 18 }}>
                 {staffSummaryCards.map(card => (
                   <StatCard key={card.label} icon={card.icon} label={card.label} value={card.value} sub={card.sub} accent={card.accent} />
@@ -1130,6 +1249,35 @@ export default function AdminPanel() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
                       <button onClick={() => setRejectingCenterRequest(null)} className="btn btn-ghost btn-sm">Cancel</button>
                       <button onClick={handleConfirmRejectCenterRequest} className="btn btn-primary btn-sm" style={{ background: 'var(--crimson)', borderColor: 'var(--crimson)' }}>
+                        Confirm Rejection
+                      </button>
+                    </div>
+                  </div>
+                </div>, document.body)
+              )}
+
+              {/* Doctor Request Rejection Modal */}
+              {rejectingDoctorRequest && (
+                createPortal(<div style={{
+                  position: 'fixed', inset: 0, zIndex: 10000,
+                  background: 'rgba(6, 35, 33, 0.65)', backdropFilter: 'blur(10px)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+                }}>
+                  <div className="card glass-form-card" style={{ width: '100%', maxWidth: 440, padding: 28, background: '#ffffff', borderRadius: 16 }}>
+                    <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)', marginBottom: 8 }}>Reject New Doctor Request</h3>
+                    <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 14 }}>
+                      Rejecting the request for <strong>{rejectingDoctorRequest.doctorName}</strong>. Provide an optional reason to inform the receptionist.
+                    </p>
+                    <textarea
+                      className="input"
+                      placeholder="e.g. Incomplete SLMC details, duplicate submission..."
+                      value={doctorRejectionReasonInput}
+                      onChange={e => setDoctorRejectionReasonInput(e.target.value)}
+                      style={{ height: 80, fontSize: 13, padding: 10, marginBottom: 16, width: '100%' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                      <button onClick={() => setRejectingDoctorRequest(null)} className="btn btn-ghost btn-sm">Cancel</button>
+                      <button onClick={handleConfirmRejectDoctorRequest} className="btn btn-primary btn-sm" style={{ background: 'var(--crimson)', borderColor: 'var(--crimson)' }}>
                         Confirm Rejection
                       </button>
                     </div>

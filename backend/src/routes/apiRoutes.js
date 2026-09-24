@@ -19,7 +19,7 @@ import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueu
 import { uploadHealthRecord, getPatientRecords, createPrescriptionRecord } from '../controllers/recordController.js';
 import { updateSlotConfig, getAuditLogs, createAuditLog, updateAuditLogStatus, getUsers, updateUser, deleteUser, getSystemStats, getSettings, setMaintenanceMode } from '../controllers/adminController.js';
 import { getPatientProfile, updatePatientProfile, getDoctorSubscriptions, toggleDoctorSubscription } from '../controllers/userController.js';
-import { createDoctorRequest, getDoctorRequests, getMyDoctorRequests, acceptDoctorRequest, declineDoctorRequest } from '../controllers/doctorRequestController.js';
+import { createDoctorRequest, getDoctorRequests, getMyDoctorRequests, acceptDoctorRequest, declineDoctorRequest, approveAdminDoctorRequest, rejectAdminDoctorRequest } from '../controllers/doctorRequestController.js';
 import { createDelayAlert, getDelayAlerts, clearDelayAlert } from '../controllers/delayAlertController.js';
 import { uploadFile } from '../controllers/uploadController.js';
 import multer from 'multer';
@@ -226,6 +226,9 @@ router.post('/doctor-requests', authMiddleware, requireRole(['receptionist', 'ad
 router.get('/doctor-requests', authMiddleware, requireRole(['admin']), getDoctorRequests);  // read-only audit
 router.patch('/doctor-requests/:id/accept', authMiddleware, requireRole(['doctor']), acceptDoctorRequest);
 router.patch('/doctor-requests/:id/decline', authMiddleware, requireRole(['doctor']), declineDoctorRequest);
+// Admin-level approval for CREATE_NEW doctor requests
+router.patch('/doctor-requests/:id/admin-approve', authMiddleware, requireRole(['admin']), approveAdminDoctorRequest);
+router.patch('/doctor-requests/:id/admin-reject', authMiddleware, requireRole(['admin']), rejectAdminDoctorRequest);
 
 // ── Upload Routes ────────────────────────────────────────────────────────────
 router.post('/uploads', upload.single('file'), uploadFile);
