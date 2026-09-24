@@ -371,13 +371,14 @@ export interface AuditLog {
 
 export interface ApiDoctorRequest {
   id: string
-  requestType: 'ASSIGN_EXISTING' | 'REGISTER_NEW'
+  requestType: 'ASSIGN_EXISTING' | 'REGISTER_NEW' | 'CREATE_NEW'
   receptionistId?: string | null
   receptionistName: string
   centerId: string
   centerName: string
   doctorId?: string | null
   doctorName: string
+  slmcRegNo?: string | null
   email?: string | null
   phone?: string | null
   specialization: string
@@ -652,17 +653,31 @@ export const api = {
   getMyDoctorRequests: () =>
     request<{ requests: ApiDoctorRequest[] }>('/doctor-requests/mine'),
 
-  createDoctorRequest: (input: {
-    requestType: 'ASSIGN_EXISTING'
-    centerId: string
-    centerName?: string
-    doctorId: string
-    doctorName: string
-    specialization: string
-    roomNumber?: string
-    series?: string
-    maxAppointmentsPerHour?: number
-  }) =>
+  createDoctorRequest: (input: (
+    {
+      requestType: 'ASSIGN_EXISTING'
+      centerId: string
+      centerName?: string
+      doctorId: string
+      doctorName: string
+      specialization: string
+      roomNumber?: string
+      series?: string
+      maxAppointmentsPerHour?: number
+    } | {
+      requestType: 'CREATE_NEW'
+      centerId: string
+      centerName?: string
+      doctorName: string
+      specialization: string
+      slmcRegNo?: string
+      phone?: string
+      email?: string
+      roomNumber?: string
+      series?: string
+      maxAppointmentsPerHour?: number
+    }
+  )) =>
     request<{ message: string; request: ApiDoctorRequest }>('/doctor-requests', {
       method: 'POST',
       body: JSON.stringify(input),
@@ -677,6 +692,19 @@ export const api = {
   /** Doctor declines a join request */
   declineDoctorRequest: (id: string, reason?: string) =>
     request<{ message: string; requestId: string; status: 'rejected'; reason?: string }>(`/doctor-requests/${id}/decline`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason }),
+    }),
+
+  /** Admin approves a CREATE_NEW doctor request — creates user account and sends SMS credentials */
+  adminApproveDoctorRequest: (id: string) =>
+    request<{ message: string; requestId: string; status: 'approved'; generatedEmail: string; generatedPassword: string }>(`/doctor-requests/${id}/admin-approve`, {
+      method: 'PATCH',
+    }),
+
+  /** Admin rejects a CREATE_NEW doctor request */
+  adminRejectDoctorRequest: (id: string, reason?: string) =>
+    request<{ message: string; requestId: string; status: 'rejected' }>(`/doctor-requests/${id}/admin-reject`, {
       method: 'PATCH',
       body: JSON.stringify({ reason }),
     }),

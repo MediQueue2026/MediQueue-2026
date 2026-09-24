@@ -1,18 +1,15 @@
-﻿import { supabase } from '../config/supabase.js';
+import { supabase } from '../config/supabase.js';
 import { notificationProvider } from '../config/notification.js';
 import { nextSeriesLetterForCenter, formatDoctorFullName } from '../services/doctorLookup.js';
+import bcrypt from 'bcryptjs';
 
-// RECEPTIONIST: Create a join request targeted at a specific registered doctor
+// RECEPTIONIST: Create a join request targeted at a specific registered doctor OR create new doctor request for admin
 export async function createDoctorRequest(req, res, next) {
   try {
-    const { requestType, centerId, centerName, doctorId, doctorName, email, phone, specialization, roomNumber, series, maxAppointmentsPerHour } = req.body;
+    const { requestType, centerId, centerName, doctorId, doctorName, email, phone, specialization, slmcRegNo, roomNumber, series, maxAppointmentsPerHour } = req.body;
 
     if (!requestType || !centerId || !doctorName || !specialization) {
       return res.status(400).json({ error: 'requestType, centerId, doctorName, and specialization are required' });
-    }
-
-    if (requestType !== 'ASSIGN_EXISTING' || !doctorId) {
-      return res.status(400).json({ error: 'Only existing registered doctors can be invited via this flow. Select a doctor from the list.' });
     }
 
     const receptionistName = req.user?.fullName || req.user?.email || 'Receptionist';
@@ -24,40 +21,77 @@ export async function createDoctorRequest(req, res, next) {
       if (centerRow) finalCenterName = centerRow.name;
     }
 
-    const { data: doctorRow } = await supabase.from('doctors').select('id, user_id, users(full_name, email)').eq('id', doctorId).maybeSingle();
-    if (!doctorRow) return res.status(404).json({ error: 'Doctor not found in the system.' });
+    if (requestType === 'ASSIGN_EXISTING') {
+      if (!doctorId) {
+        return res.status(400).json({ error: 'Select an existing doctor from the list.' });
+      }
 
-    const { data: existing } = await supabase.from('doctor_requests').select('id, status').eq('doctor_id', doctorId).eq('center_id', centerId).eq('status', 'pending').maybeSingle();
-    if (existing) return res.status(409).json({ error: 'A pending join request for this doctor at this center already exists.' });
+      const { data: doctorRow } = await supabase.from('doctors').select('id, user_id, users(full_name, email)').eq('id', doctorId).maybeSingle();
+      if (!doctorRow) return res.status(404).json({ error: 'Doctor not found in the system.' });
 
-    const newRequestData = {
-      request_type: 'ASSIGN_EXISTING',
-      receptionist_id: receptionistId,
-      receptionist_name: receptionistName,
-      center_id: centerId,
-      center_name: finalCenterName || 'Medical Center',
-      doctor_id: doctorId,
-      doctor_name: formatDoctorFullName(doctorRow.users?.full_name || doctorName),
-      email: doctorRow.users?.email || email || null,
-      phone: phone || null,
-      specialization,
-      room_number: roomNumber || null,
-      series: series || null,
-      max_appointments_per_hour: maxAppointmentsPerHour || 4,
-      status: 'pending'
-    };
+      const { data: existing } = await supabase.from('doctor_requests').select('id, status').eq('doctor_id', doctorId).eq('center_id', centerId).eq('status', 'pending').maybeSingle();
+      if (existing) return res.status(409).json({ error: 'A pending join request for this doctor at this center already exists.' });
 
-    const { data, error } = await supabase.from('doctor_requests').insert([newRequestData]).select().single();
+      const newRequestData = {
+        request_type: 'ASSIGN_EXISTING',
+        receptionist_id: receptionistId,
+        receptionist_name: receptionistName,
+        center_id: centerId,
+        center_name: finalCenterName || 'Medical Center',
+        doctor_id: doctorId,
+        doctor_name: formatDoctorFullName(doctorRow.users?.full_name || doctorName),
+        email: doctorRow.users?.email || email || null,
+        phone: phone || null,
+        specialization,
+        slmc_reg_no: slmcRegNo || null,
+        room_number: roomNumber || null,
+        series: series || null,
+        max_appointments_per_hour: maxAppointmentsPerHour || 4,
+        status: 'pending'
+      };
 
-    if (error) {
-      console.error('DB insert error:', error.message);
-      return res.status(500).json({ error: 'Failed to save request to the database. ' + error.message });
+      const { data, error } = await supabase.from('doctor_requests').insert([newRequestData]).select().single();
+      if (error) {
+        console.error('DB insert error:', error.message);
+        return res.status(500).json({ error: 'Failed to save request to the database. ' + error.message });
+      }
+
+      return res.status(201).json({
+        message: `Join request sent to ${formatDoctorFullName(doctorRow.users?.full_name || doctorName)}. They will see it in their dashboard.`,
+        request: mapDbRequestToPublic(data),
+      });
+    } else if (requestType === 'CREATE_NEW') {
+      const newRequestData = {
+        request_type: 'CREATE_NEW',
+        receptionist_id: receptionistId,
+        receptionist_name: receptionistName,
+        center_id: centerId,
+        center_name: finalCenterName || 'Medical Center',
+        doctor_id: null,
+        doctor_name: formatDoctorFullName(doctorName),
+        email: email || null,
+        phone: phone || null,
+        specialization,
+        slmc_reg_no: slmcRegNo || null,
+        room_number: roomNumber || null,
+        series: series || null,
+        max_appointments_per_hour: maxAppointmentsPerHour || 4,
+        status: 'pending'
+      };
+
+      const { data, error } = await supabase.from('doctor_requests').insert([newRequestData]).select().single();
+      if (error) {
+        console.error('DB insert error:', error.message);
+        return res.status(500).json({ error: 'Failed to save request to the database. ' + error.message });
+      }
+
+      return res.status(201).json({
+        message: `Doctor creation request for ${formatDoctorFullName(doctorName)} submitted to System Admin for approval.`,
+        request: mapDbRequestToPublic(data),
+      });
+    } else {
+      return res.status(400).json({ error: 'Invalid requestType.' });
     }
-
-    res.status(201).json({
-      message: `Join request sent to ${formatDoctorFullName(doctorRow.users?.full_name || doctorName)}. They will see it in their dashboard.`,
-      request: mapDbRequestToPublic(data),
-    });
   } catch (err) { next(err); }
 }
 
@@ -215,6 +249,127 @@ export async function declineDoctorRequest(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ADMIN: Approve doctor creation or assignment request
+export async function approveAdminDoctorRequest(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { data: dbReq } = await supabase.from('doctor_requests').select('*').eq('id', id).maybeSingle();
+    if (!dbReq) return res.status(404).json({ error: 'Doctor request not found' });
+    if (dbReq.status === 'approved') return res.status(400).json({ error: 'Request is already approved' });
+
+    let email = dbReq.email;
+    if (!email) {
+      const cleanName = (dbReq.doctor_name || 'doctor').toLowerCase().replace(/[^a-z0-9]/g, '');
+      email = `${cleanName}@mediqueue.lk`;
+    }
+
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', email).maybeSingle();
+    let userId;
+    let tempPassword = '';
+
+    if (existingUser) {
+      userId = existingUser.id;
+    } else {
+      const randStr = Math.random().toString(36).substring(2, 8);
+      tempPassword = `Doc#${randStr}`;
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      const { data: newUser, error: userError } = await supabase.from('users').insert([{
+        email,
+        password_hash: passwordHash,
+        full_name: dbReq.doctor_name,
+        phone: dbReq.phone || null,
+        role: 'doctor',
+        is_active: true,
+      }]).select('id').single();
+
+      if (userError) {
+        return res.status(500).json({ error: 'Failed to create user account: ' + userError.message });
+      }
+      userId = newUser.id;
+    }
+
+    let { data: doctorRow } = await supabase.from('doctors').select('id').eq('user_id', userId).maybeSingle();
+    if (!doctorRow) {
+      const { data: newDoc, error: docErr } = await supabase.from('doctors').insert([{
+        user_id: userId,
+        specialization: dbReq.specialization,
+        slmc_reg_no: dbReq.slmc_reg_no || null,
+      }]).select('id').single();
+      if (docErr) {
+        return res.status(500).json({ error: 'Failed to create doctor profile: ' + docErr.message });
+      }
+      doctorRow = newDoc;
+    } else if (dbReq.slmc_reg_no || dbReq.specialization) {
+      await supabase.from('doctors').update({
+        ...(dbReq.slmc_reg_no ? { slmc_reg_no: dbReq.slmc_reg_no } : {}),
+        ...(dbReq.specialization ? { specialization: dbReq.specialization } : {}),
+      }).eq('id', doctorRow.id);
+    }
+
+    const series = dbReq.series || await nextSeriesLetterForCenter(dbReq.center_id);
+    const postingFields = {
+      doctor_id: doctorRow.id,
+      center_id: dbReq.center_id,
+      room_number: dbReq.room_number || null,
+      series,
+      max_appointments_per_hour: dbReq.max_appointments_per_hour || 4,
+      current_status: 'active',
+      approval_status: 'approved',
+      requested_by_name: dbReq.receptionist_name || 'System Admin',
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: existingAssignment } = await supabase.from('doctor_center_assignments').select('id').eq('doctor_id', doctorRow.id).eq('center_id', dbReq.center_id).maybeSingle();
+
+    if (existingAssignment) {
+      await supabase.from('doctor_center_assignments').update(postingFields).eq('id', existingAssignment.id);
+    } else {
+      await supabase.from('doctor_center_assignments').insert([postingFields]);
+    }
+
+    await supabase.from('doctor_requests').update({ status: 'approved', updated_at: new Date().toISOString() }).eq('id', id);
+
+    if (dbReq.phone) {
+      const smsMsg = `Your MediQueue Doctor Account has been approved! Login Email: ${email}${tempPassword ? `, Password: ${tempPassword}` : ''}. Sign in at mediqueue.lk/login`;
+      await notificationProvider.sendSMS(dbReq.phone, smsMsg);
+    }
+
+    try {
+      await supabase.from('audit_logs').insert([{
+        actor_name: req.user?.fullName || req.user?.email || 'System Admin',
+        actor_role: 'admin',
+        event_type: 'doctor_approved',
+        action: `Approved new doctor ${dbReq.doctor_name} for ${dbReq.center_name}`,
+        center_name: dbReq.center_name,
+        status: 'approved',
+      }]);
+    } catch (_) {}
+
+    res.json({
+      message: `Doctor account for ${dbReq.doctor_name} approved successfully. Credentials sent via SMS.`,
+      requestId: id,
+      status: 'approved',
+      generatedEmail: email,
+      generatedPassword: tempPassword,
+    });
+  } catch (err) { next(err); }
+}
+
+// ADMIN: Reject doctor request
+export async function rejectAdminDoctorRequest(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const { data: dbReq } = await supabase.from('doctor_requests').select('*').eq('id', id).maybeSingle();
+    if (!dbReq) return res.status(404).json({ error: 'Doctor request not found' });
+
+    await supabase.from('doctor_requests').update({ status: 'rejected', rejection_reason: reason || 'Rejected by System Admin', updated_at: new Date().toISOString() }).eq('id', id);
+
+    res.json({ message: 'Doctor request rejected.', requestId: id, status: 'rejected' });
+  } catch (err) { next(err); }
+}
+
 function mapDbRequestToPublic(row) {
   return {
     id: row.id,
@@ -225,6 +380,7 @@ function mapDbRequestToPublic(row) {
     centerName: row.center_name || row.centerName || 'Medical Center',
     doctorId: row.doctor_id || row.doctorId || null,
     doctorName: row.doctor_name || row.doctorName,
+    slmcRegNo: row.slmc_reg_no || row.slmcRegNo || null,
     email: row.email || null,
     phone: row.phone || null,
     specialization: row.specialization,
