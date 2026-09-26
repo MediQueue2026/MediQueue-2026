@@ -68,6 +68,14 @@ export interface ReceptionDoctor {
   centerName?: string | null
   email?: string | null
   phone?: string | null
+  slmcRegNo?: string | null
+  qualifications?: string | null
+  experienceStartYear?: number | null
+  yearsOfExperience?: number | null
+  gender?: string | null
+  dateOfBirth?: string | null
+  nic?: string | null
+  joinedDate?: string | null
 }
 
 export interface IssueTokenInput {

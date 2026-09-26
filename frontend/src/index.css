@@ -7,6 +7,7 @@
    washes already hardcoded across the app); surfaces read as crisp dashboard
    panels rather than uniformly fogged glass. */
 :root {
+  color-scheme: light;
   --bg:        linear-gradient(180deg, #eef0fd 0%, #e8f8f3 55%, #dff5ee 100%);
   --surface:   rgba(255, 255, 255, 0.7);
   --card:      rgba(255, 255, 255, 0.72);

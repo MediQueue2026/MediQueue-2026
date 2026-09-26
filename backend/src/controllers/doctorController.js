@@ -116,9 +116,31 @@ export async function updateDoctor(req, res, next) {
     }
 
     // Doctor-wide fields.
-    if (typeof req.body.specialization === 'string') {
-      await supabase.from('doctors').update({ specialization: req.body.specialization }).eq('id', doctorId);
+    const docUpdates = {};
+    if (typeof req.body.specialization === 'string') docUpdates.specialization = req.body.specialization;
+    if (typeof req.body.slmcRegNo === 'string') docUpdates.slmc_reg_no = req.body.slmcRegNo.trim();
+    if (typeof req.body.qualifications === 'string') docUpdates.qualifications = req.body.qualifications.trim();
+    if (req.body.experienceStartYear !== undefined) {
+      docUpdates.experience_start_year = req.body.experienceStartYear ? Number(req.body.experienceStartYear) : null;
     }
+    if (req.body.yearsOfExperience !== undefined) {
+      docUpdates.years_of_experience = req.body.yearsOfExperience ? Number(req.body.yearsOfExperience) : null;
+    }
+    if (typeof req.body.gender === 'string') docUpdates.gender = req.body.gender;
+    if (typeof req.body.dateOfBirth === 'string') docUpdates.date_of_birth = req.body.dateOfBirth || null;
+    if (typeof req.body.nic === 'string') docUpdates.nic = req.body.nic.trim();
+
+    if (Object.keys(docUpdates).length > 0) {
+      await supabase.from('doctors').update(docUpdates).eq('id', doctorId);
+    }
+
+    // User account updates.
+    const userUpdates = {};
+    if (typeof req.body.fullName === 'string' && req.body.fullName.trim()) {
+      userUpdates.full_name = formatDoctorFullName(req.body.fullName);
+    }
+    if (typeof req.body.phone === 'string') userUpdates.phone = req.body.phone.trim();
+    if (typeof req.body.nic === 'string') userUpdates.nic = req.body.nic.trim();
 
     if (typeof req.body.email === 'string') {
       const newEmail = req.body.email.trim();
@@ -129,14 +151,22 @@ export async function updateDoctor(req, res, next) {
           if (conflictUser) {
             return res.status(409).json({ error: 'This email is already in use by another account.' });
           }
-          await supabase.from('users').update({ email: newEmail }).eq('id', docData.user_id);
+          userUpdates.email = newEmail;
         }
+      }
+    }
+
+    if (Object.keys(userUpdates).length > 0) {
+      const { data: docData } = await supabase.from('doctors').select('user_id').eq('id', doctorId).maybeSingle();
+      if (docData?.user_id) {
+        await supabase.from('users').update(userUpdates).eq('id', docData.user_id);
       }
     }
 
     // Per-center posting fields.
     const posting = {};
     if (typeof req.body.roomNumber === 'string') posting.room_number = req.body.roomNumber;
+    if (typeof req.body.joinedDate === 'string') posting.joined_date = req.body.joinedDate || null;
     if (typeof req.body.series === 'string') {
       const cleanSeries = req.body.series.trim().toUpperCase();
       posting.series = cleanSeries;
@@ -184,7 +214,7 @@ export async function updateDoctor(req, res, next) {
           .from('doctor_center_assignments')
           .insert([{ doctor_id: doctorId, center_id: centerId, approval_status: 'approved', ...posting, series }]);
       }
-    } else if (Object.keys(posting).length === 0 && typeof req.body.specialization !== 'string' && typeof req.body.email !== 'string') {
+    } else if (Object.keys(posting).length === 0 && Object.keys(docUpdates).length === 0 && Object.keys(userUpdates).length === 0) {
       return res.status(400).json({ error: 'No valid fields provided for update' });
     }
 
@@ -1000,6 +1030,7 @@ function mapAssignment(a) {
     centerName: a.medical_centers?.name ?? null,
     room: a.room_number ?? '—',
     series: a.series ?? '?',
+    joinedDate: a.joined_date ?? null,
     status: a.current_status ?? 'active',
     onDuty: isOnDutyNow(a.available_hours, a.current_status ?? 'active'),
     delayMinutes: a.delay_minutes ?? 0,
@@ -1017,6 +1048,11 @@ function mapAssignment(a) {
 function mapDoctor(d, posting, centersList) {
   const u = d.users;
   const maxPerHour = posting?.maxAppointmentsPerHour ?? d.max_appointments_per_hour ?? 4;
+  const currentYear = new Date().getFullYear();
+  const experienceYears = d.experience_start_year
+    ? Math.max(0, currentYear - Number(d.experience_start_year))
+    : (d.years_of_experience ?? null);
+
   return {
     id: d.id,
     userId: d.user_id,
@@ -1025,6 +1061,14 @@ function mapDoctor(d, posting, centersList) {
     phone: u?.phone ?? null,
     dept: d.specialization || 'General Medicine',
     specialization: d.specialization || 'General Medicine',
+    slmcRegNo: d.slmc_reg_no || null,
+    qualifications: d.qualifications || null,
+    experienceStartYear: d.experience_start_year || null,
+    yearsOfExperience: experienceYears,
+    gender: d.gender || null,
+    dateOfBirth: d.date_of_birth || null,
+    nic: d.nic || u?.nic || null,
+    joinedDate: posting?.joinedDate ?? posting?.joined_date ?? null,
     room: posting?.room ?? d.room_number ?? '—',
     series: posting?.series ?? d.series ?? '?',
     status: posting?.status ?? d.current_status ?? 'active',

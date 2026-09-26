@@ -36,10 +36,14 @@ export async function generateUniqueDoctorEmail(doctorName) {
   }
 }
 
-// RECEPTIONIST: Create a join request targeted at a specific registered doctor OR create new doctor request for admin
 export async function createDoctorRequest(req, res, next) {
   try {
-    const { requestType, centerId, centerName, doctorId, doctorName, email, phone, specialization, slmcRegNo, roomNumber, series, maxAppointmentsPerHour } = req.body;
+    const {
+      requestType, centerId, centerName, doctorId, doctorName,
+      email, phone, specialization, slmcRegNo, roomNumber, series,
+      maxAppointmentsPerHour, joinedDate, gender, dateOfBirth,
+      qualifications, experienceStartYear, yearsOfExperience, nic
+    } = req.body;
 
     if (!requestType || !centerId || !doctorName || !specialization) {
       return res.status(400).json({ error: 'requestType, centerId, doctorName, and specialization are required' });
@@ -56,6 +60,7 @@ export async function createDoctorRequest(req, res, next) {
 
     // Auto-generate series for this medical center if not explicitly provided
     const autoSeries = (series && String(series).trim().toUpperCase()) || await nextSeriesLetterForCenter(centerId);
+    const finalJoinedDate = joinedDate || new Date().toISOString().split('T')[0];
 
     if (requestType === 'ASSIGN_EXISTING') {
       if (!doctorId) {
@@ -77,14 +82,19 @@ export async function createDoctorRequest(req, res, next) {
         doctor_id: doctorId,
         doctor_name: formatDoctorFullName(doctorRow.users?.full_name || doctorName),
         email: doctorRow.users?.email || email || null,
-        phone: doctorRow.users?.phone || phone || null,
+        phone: (phone && String(phone).trim()) || doctorRow.users?.phone || null,
         specialization,
         slmc_reg_no: slmcRegNo || null,
         room_number: roomNumber || null,
         series: autoSeries,
         max_appointments_per_hour: maxAppointmentsPerHour || 4,
+        joined_date: finalJoinedDate,
         status: 'pending'
       };
+
+      if (phone && String(phone).trim() && doctorRow.user_id) {
+        await supabase.from('users').update({ phone: String(phone).trim() }).eq('id', doctorRow.user_id);
+      }
 
       const { data, error } = await supabase.from('doctor_requests').insert([newRequestData]).select().single();
       if (error) {
@@ -114,6 +124,13 @@ export async function createDoctorRequest(req, res, next) {
         room_number: roomNumber || null,
         series: autoSeries,
         max_appointments_per_hour: maxAppointmentsPerHour || 4,
+        gender: gender || null,
+        date_of_birth: dateOfBirth || null,
+        qualifications: qualifications?.trim() || null,
+        experience_start_year: experienceStartYear ? Number(experienceStartYear) : null,
+        years_of_experience: yearsOfExperience ? Number(yearsOfExperience) : null,
+        nic: nic?.trim() || null,
+        joined_date: finalJoinedDate,
         status: 'pending'
       };
 
@@ -211,6 +228,7 @@ export async function acceptDoctorRequest(req, res, next) {
     const basePosting = {
       room_number: dbReq.room_number || null,
       max_appointments_per_hour: dbReq.max_appointments_per_hour || 4,
+      joined_date: dbReq.joined_date || new Date().toISOString().split('T')[0],
       current_status: 'active',
       approval_status: 'approved',
       requested_by_name: dbReq.receptionist_name || null,
@@ -332,16 +350,30 @@ export async function approveAdminDoctorRequest(req, res, next) {
         user_id: userId,
         specialization: dbReq.specialization,
         slmc_reg_no: dbReq.slmc_reg_no || null,
+        qualifications: dbReq.qualifications || null,
+        experience_start_year: dbReq.experience_start_year || null,
+        years_of_experience: dbReq.years_of_experience || null,
+        gender: dbReq.gender || null,
+        date_of_birth: dbReq.date_of_birth || null,
+        nic: dbReq.nic || null,
       }]).select('id').single();
       if (docErr) {
         return res.status(500).json({ error: 'Failed to create doctor profile: ' + docErr.message });
       }
       doctorRow = newDoc;
-    } else if (dbReq.slmc_reg_no || dbReq.specialization) {
-      await supabase.from('doctors').update({
-        ...(dbReq.slmc_reg_no ? { slmc_reg_no: dbReq.slmc_reg_no } : {}),
-        ...(dbReq.specialization ? { specialization: dbReq.specialization } : {}),
-      }).eq('id', doctorRow.id);
+    } else {
+      const docUpdates = {};
+      if (dbReq.slmc_reg_no) docUpdates.slmc_reg_no = dbReq.slmc_reg_no;
+      if (dbReq.specialization) docUpdates.specialization = dbReq.specialization;
+      if (dbReq.qualifications) docUpdates.qualifications = dbReq.qualifications;
+      if (dbReq.experience_start_year) docUpdates.experience_start_year = dbReq.experience_start_year;
+      if (dbReq.years_of_experience) docUpdates.years_of_experience = dbReq.years_of_experience;
+      if (dbReq.gender) docUpdates.gender = dbReq.gender;
+      if (dbReq.date_of_birth) docUpdates.date_of_birth = dbReq.date_of_birth;
+      if (dbReq.nic) docUpdates.nic = dbReq.nic;
+      if (Object.keys(docUpdates).length > 0) {
+        await supabase.from('doctors').update(docUpdates).eq('id', doctorRow.id);
+      }
     }
 
     const series = dbReq.series || await nextSeriesLetterForCenter(dbReq.center_id);
@@ -351,6 +383,7 @@ export async function approveAdminDoctorRequest(req, res, next) {
       room_number: dbReq.room_number || null,
       series,
       max_appointments_per_hour: dbReq.max_appointments_per_hour || 4,
+      joined_date: dbReq.joined_date || new Date().toISOString().split('T')[0],
       current_status: 'active',
       approval_status: 'approved',
       requested_by_name: dbReq.receptionist_name || 'System Admin',
@@ -418,6 +451,13 @@ function mapDbRequestToPublic(row) {
     doctorId: row.doctor_id || row.doctorId || null,
     doctorName: row.doctor_name || row.doctorName,
     slmcRegNo: row.slmc_reg_no || row.slmcRegNo || null,
+    qualifications: row.qualifications || null,
+    experienceStartYear: row.experience_start_year || null,
+    yearsOfExperience: row.years_of_experience || null,
+    gender: row.gender || null,
+    dateOfBirth: row.date_of_birth || null,
+    nic: row.nic || null,
+    joinedDate: row.joined_date || row.joinedDate || null,
     email: row.email || null,
     phone: row.phone || null,
     specialization: row.specialization,

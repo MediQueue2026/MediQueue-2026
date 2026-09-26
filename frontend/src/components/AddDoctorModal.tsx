@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { X, Stethoscope, CheckCircle2, Inbox, UserPlus, UserCheck, Clock } from 'lucide-react'
+import { X, Stethoscope, CheckCircle2, Inbox, UserPlus, UserCheck, Clock, User, Award, Calendar, Building2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiDoctor } from '../lib/api'
+import CleanDatePicker from './CleanDatePicker'
 
 const SPECIALISATIONS = [
   'General Medicine', 'Cardiology', 'Pediatrics', 'Orthopedics',
@@ -9,6 +10,113 @@ const SPECIALISATIONS = [
   'Gynecology', 'Psychiatry', 'Oncology', 'Radiology',
   'Gastroenterology', 'Urology', 'Endocrinology', 'Other',
 ]
+
+const GENDER_OPTIONS = ['Male', 'Female', 'Other']
+
+const MONTHS = [
+  { value: '01', label: 'Jan' },
+  { value: '02', label: 'Feb' },
+  { value: '03', label: 'Mar' },
+  { value: '04', label: 'Apr' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'Jun' },
+  { value: '07', label: 'Jul' },
+  { value: '08', label: 'Aug' },
+  { value: '09', label: 'Sep' },
+  { value: '10', label: 'Oct' },
+  { value: '11', label: 'Nov' },
+  { value: '12', label: 'Dec' },
+]
+
+function FlexibleDateInput({
+  value,
+  onChange,
+  maxYear = new Date().getFullYear(),
+  minYear = 1940,
+  align = 'right',
+}: {
+  value: string
+  onChange: (val: string) => void
+  maxYear?: number
+  minYear?: number
+  align?: 'left' | 'right'
+}) {
+  const parts = (value || '').split('-')
+  const yearVal = parts[0] || ''
+  const monthVal = parts[1] || ''
+  const dayVal = parts[2] || ''
+
+  const handleYearChange = (newY: string) => {
+    if (!newY && !monthVal && !dayVal) {
+      onChange('')
+      return
+    }
+    const yNum = parseInt(newY, 10)
+    const yStr = isNaN(yNum) ? '' : String(yNum)
+    onChange(`${yStr ? yStr.padStart(4, '0') : ''}-${monthVal || '01'}-${dayVal || '01'}`)
+  }
+
+  const handleMonthChange = (newM: string) => {
+    const yStr = yearVal || String(maxYear - 30)
+    onChange(`${yStr}-${newM || '01'}-${dayVal || '01'}`)
+  }
+
+  const handleDayChange = (newD: string) => {
+    const yStr = yearVal || String(maxYear - 30)
+    const dNum = Math.min(31, Math.max(1, parseInt(newD, 10) || 1))
+    const dStr = String(dNum).padStart(2, '0')
+    onChange(`${yStr}-${monthVal || '01'}-${dStr}`)
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <input
+        className="input"
+        type="number"
+        placeholder="YYYY"
+        min={minYear}
+        max={maxYear}
+        value={yearVal ? parseInt(yearVal, 10) : ''}
+        onChange={e => handleYearChange(e.target.value)}
+        style={{ ...inputStyle, width: 70, padding: '0 6px', textAlign: 'center' }}
+        title="Type birth year"
+      />
+      <select
+        className="input"
+        value={monthVal}
+        onChange={e => handleMonthChange(e.target.value)}
+        style={{ ...inputStyle, flex: 1, minWidth: 62, padding: '0 4px' }}
+        title="Select birth month"
+      >
+        <option value="">Month</option>
+        {MONTHS.map(m => (
+          <option key={m.value} value={m.value}>{m.label}</option>
+        ))}
+      </select>
+      <input
+        className="input"
+        type="number"
+        placeholder="DD"
+        min={1}
+        max={31}
+        value={dayVal ? parseInt(dayVal, 10) : ''}
+        onChange={e => handleDayChange(e.target.value)}
+        style={{ ...inputStyle, width: 50, padding: '0 4px', textAlign: 'center' }}
+        title="Type birth day"
+      />
+      <div style={{ width: 85, flexShrink: 0 }}>
+        <CleanDatePicker
+          value={value}
+          onChange={onChange}
+          minYear={minYear}
+          maxYear={maxYear}
+          placeholder="Pick"
+          align={align}
+        />
+      </div>
+    </div>
+  )
+}
 
 export default function AddDoctorModal({
   isOpen,
@@ -26,28 +134,48 @@ export default function AddDoctorModal({
   editDoctor?: ApiDoctor | null
 }) {
   const isEdit = !!editDoctor
+  const todayStr = new Date().toISOString().split('T')[0]
 
   // ── Tab state (only relevant when not in Edit mode) ──
   const [activeTab, setActiveTab] = useState<'invite' | 'create'>('invite')
 
   // ── Invite Existing Doctor state ──
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('')
-  const [specialization, setSpecialization] = useState(editDoctor?.dept ?? 'General Medicine')
+  const [specialization, setSpecialization] = useState('General Medicine')
   const [customSpec, setCustomSpec] = useState('')
-  const [roomNumber, setRoomNumber] = useState(editDoctor?.room ?? '')
-  const [series, setSeries] = useState(editDoctor?.series ?? '')
-  const [editEmail, setEditEmail] = useState(editDoctor?.email ?? '')
-  const [maxPerHour, setMaxPerHour] = useState(String(editDoctor?.maxAppointmentsPerHour ?? 4))
+  const [roomNumber, setRoomNumber] = useState('')
+  const [series, setSeries] = useState('')
+  const [inviteJoinedDate, setInviteJoinedDate] = useState(todayStr)
+  const [invitePhone, setInvitePhone] = useState('')
+  const [maxPerHour, setMaxPerHour] = useState('4')
   const [systemDoctors, setSystemDoctors] = useState<ApiDoctor[]>([])
 
   // ── Create New Doctor state ──
   const [newDoctorName, setNewDoctorName] = useState('')
+  const [newGender, setNewGender] = useState('Male')
+  const [newDob, setNewDob] = useState('')
+  const [newNic, setNewNic] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [newEmail, setNewEmail] = useState('')
   const [newSpecialization, setNewSpecialization] = useState('General Medicine')
   const [newCustomSpec, setNewCustomSpec] = useState('')
   const [newSlmcRegNo, setNewSlmcRegNo] = useState('')
-  const [newPhone, setNewPhone] = useState('')
-  const [newEmail, setNewEmail] = useState('')
+  const [newQualifications, setNewQualifications] = useState('')
+  const [newStartYear, setNewStartYear] = useState('')
   const [newRoomNumber, setNewRoomNumber] = useState('')
+  const [newJoinedDate, setNewJoinedDate] = useState(todayStr)
+
+  // ── Edit Doctor state ──
+  const [editName, setEditName] = useState('')
+  const [editGender, setEditGender] = useState('')
+  const [editDob, setEditDob] = useState('')
+  const [editNic, setEditNic] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editSlmc, setEditSlmc] = useState('')
+  const [editQuals, setEditQuals] = useState('')
+  const [editStartYear, setEditStartYear] = useState('')
+  const [editJoinedDate, setEditJoinedDate] = useState(todayStr)
 
   // ── Shared state ──
   const [saving, setSaving] = useState(false)
@@ -68,13 +196,31 @@ export default function AddDoctorModal({
 
   useEffect(() => {
     if (editDoctor) {
-      setSpecialization(editDoctor.dept || 'General Medicine')
+      setEditName(editDoctor.name || '')
+      setEditGender(editDoctor.gender || 'Male')
+      setEditDob(editDoctor.dateOfBirth ? editDoctor.dateOfBirth.split('T')[0] : '')
+      setEditNic(editDoctor.nic || '')
+      setEditPhone(editDoctor.phone || '')
+      setEditEmail(editDoctor.email || '')
+      setSpecialization(editDoctor.dept || editDoctor.specialization || 'General Medicine')
+      setEditSlmc(editDoctor.slmcRegNo || '')
+      setEditQuals(editDoctor.qualifications || '')
+      setEditStartYear(editDoctor.experienceStartYear ? String(editDoctor.experienceStartYear) : '')
       setRoomNumber(editDoctor.room || '')
       setSeries(editDoctor.series || '')
-      setEditEmail(editDoctor.email || '')
+      setEditJoinedDate(editDoctor.joinedDate ? editDoctor.joinedDate.split('T')[0] : todayStr)
       setMaxPerHour(String(editDoctor.maxAppointmentsPerHour || 4))
     }
-  }, [editDoctor])
+  }, [editDoctor, todayStr])
+
+  useEffect(() => {
+    if (selectedDoctorId && systemDoctors.length > 0) {
+      const doc = systemDoctors.find(d => d.id === selectedDoctorId)
+      if (doc) {
+        setInvitePhone(doc.phone || '')
+      }
+    }
+  }, [selectedDoctorId, systemDoctors])
 
   const resetState = () => {
     setActiveTab('invite')
@@ -83,15 +229,32 @@ export default function AddDoctorModal({
     setCustomSpec('')
     setRoomNumber('')
     setSeries('')
+    setInviteJoinedDate(todayStr)
+    setInvitePhone('')
     setEditEmail('')
+    setEditName('')
+    setEditGender('Male')
+    setEditDob('')
+    setEditNic('')
+    setEditPhone('')
+    setEditSlmc('')
+    setEditQuals('')
+    setEditStartYear('')
+    setEditJoinedDate(todayStr)
     setMaxPerHour('4')
     setNewDoctorName('')
+    setNewGender('Male')
+    setNewDob('')
+    setNewNic('')
+    setNewPhone('')
+    setNewEmail('')
     setNewSpecialization('General Medicine')
     setNewCustomSpec('')
     setNewSlmcRegNo('')
-    setNewPhone('')
-    setNewEmail('')
+    setNewQualifications('')
+    setNewStartYear('')
     setNewRoomNumber('')
+    setNewJoinedDate(todayStr)
     setSaving(false)
     setDone(false)
     setSuccessMsg('')
@@ -107,6 +270,8 @@ export default function AddDoctorModal({
 
   // Find currently selected existing doctor for auto-fill in Tab 1
   const selectedExistingDoc = systemDoctors.find(d => d.id === selectedDoctorId)
+
+  const currentYear = new Date().getFullYear()
 
   // ── Invite Existing Doctor submit ──
   const handleInviteSubmit = async (e: React.FormEvent) => {
@@ -131,7 +296,9 @@ export default function AddDoctorModal({
         doctorId: selectedExistingDoc.id,
         doctorName: selectedExistingDoc.name,
         specialization: selectedExistingDoc.dept || finalSpec || 'General Medicine',
+        phone: invitePhone.trim() || undefined,
         roomNumber: roomNumber.trim() || undefined,
+        joinedDate: inviteJoinedDate || undefined,
         maxAppointmentsPerHour: Number(maxPerHour) || 4,
       })
       setSuccessMsg(`Join request sent to ${selectedExistingDoc.name}! They will see it in their dashboard and can accept or decline.`)
@@ -158,12 +325,25 @@ export default function AddDoctorModal({
         return
       }
 
+      const startYearNum = editStartYear ? parseInt(editStartYear, 10) : undefined
+      const expYears = startYearNum ? Math.max(0, currentYear - startYearNum) : undefined
+
       const res = await api.updateDoctor(editDoctor.id, {
         centerId: centerId ?? editDoctor.centerId ?? undefined,
+        fullName: editName.trim() || undefined,
+        phone: editPhone.trim() || undefined,
+        gender: editGender || undefined,
+        dateOfBirth: editDob || undefined,
+        nic: editNic.trim() || undefined,
         specialization: finalSpec,
+        slmcRegNo: editSlmc.trim() || undefined,
+        qualifications: editQuals.trim() || undefined,
+        experienceStartYear: startYearNum,
+        yearsOfExperience: expYears,
         roomNumber: roomNumber.trim() || undefined,
         series: cleanSeries || undefined,
         email: editEmail.trim() || undefined,
+        joinedDate: editJoinedDate || undefined,
         maxAppointmentsPerHour: Number(maxPerHour) || 4,
       })
       setSuccessMsg('Doctor profile updated successfully.')
@@ -197,16 +377,47 @@ export default function AddDoctorModal({
         setSaving(false)
         return
       }
+      if (!newSlmcRegNo.trim()) {
+        setError('SLMC Registration Number is required.')
+        setSaving(false)
+        return
+      }
+      if (!newQualifications.trim()) {
+        setError('Doctor qualifications are required.')
+        setSaving(false)
+        return
+      }
+      if (!newStartYear.trim()) {
+        setError('Career start year is required.')
+        setSaving(false)
+        return
+      }
+      if (!newPhone.trim()) {
+        setError('Phone number is required to send login credentials via SMS.')
+        setSaving(false)
+        return
+      }
+
+      const startYearNum = newStartYear ? parseInt(newStartYear, 10) : undefined
+      const expYears = startYearNum ? Math.max(0, currentYear - startYearNum) : undefined
+
       await api.createDoctorRequest({
         requestType: 'CREATE_NEW',
         centerId: targetCenterId!,
         centerName: _centerName || undefined,
         doctorName: newDoctorName.trim(),
-        specialization: finalNewSpec,
-        slmcRegNo: newSlmcRegNo.trim() || undefined,
+        gender: newGender || undefined,
+        dateOfBirth: newDob || undefined,
+        nic: newNic.trim() || undefined,
         phone: newPhone.trim() || undefined,
         email: newEmail.trim() || undefined,
+        specialization: finalNewSpec,
+        slmcRegNo: newSlmcRegNo.trim() || undefined,
+        qualifications: newQualifications.trim() || undefined,
+        experienceStartYear: startYearNum,
+        yearsOfExperience: expYears,
         roomNumber: newRoomNumber.trim() || undefined,
+        joinedDate: newJoinedDate || undefined,
       })
       setSuccessMsg(`Doctor creation request for ${newDoctorName.trim()} submitted to System Admin for approval. The doctor will receive an SMS with login credentials once approved.`)
       setDone(true)
@@ -227,12 +438,12 @@ export default function AddDoctorModal({
       padding: 16,
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 540, maxHeight: '92vh',
-        background: 'rgba(255,255,255,0.95)',
+        width: '100%', maxWidth: 580, maxHeight: '92vh',
+        background: 'rgba(255,255,255,0.96)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(18, 198, 186, 0.28)',
-        borderRadius: 20, padding: '36px 32px',
+        borderRadius: 20, padding: '32px 28px',
         boxShadow: '0 24px 64px rgba(8,48,45,0.18), inset 0 1px 0 rgba(255,255,255,0.7)',
         position: 'relative', overflowY: 'auto',
       }}>
@@ -262,7 +473,7 @@ export default function AddDoctorModal({
               {isEdit ? 'Edit Doctor Profile' : 'Add Doctor to Center'}
             </h3>
             <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>
-              {isEdit ? "Update doctor's room, schedule parameters, and email." : 'Invite an existing doctor or register a new one.'}
+              {isEdit ? "Update doctor's personal, professional, and center assignment details." : 'Invite an existing doctor or register a new one.'}
             </div>
           </div>
         </div>
@@ -329,7 +540,45 @@ export default function AddDoctorModal({
         ) : isEdit ? (
           /* ── Edit Doctor Form ── */
           <form onSubmit={handleEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Specialisation */}
+            {/* Section: Personal Information */}
+            <div style={sectionHeaderStyle}>
+              <User size={14} color="var(--blue)" /> Personal Information
+            </div>
+
+            <div>
+              <label style={labelStyle}>Full Name</label>
+              <input className="input" value={editName} onChange={e => setEditName(e.target.value)} required style={inputStyle} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Gender</label>
+                <select className="input" value={editGender} onChange={e => setEditGender(e.target.value)} style={inputStyle}>
+                  {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Date of Birth</label>
+                <FlexibleDateInput value={editDob} onChange={setEditDob} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>NIC Number</label>
+                <input className="input" placeholder="e.g. 198512345678" value={editNic} onChange={e => setEditNic(e.target.value)} style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Phone Number</label>
+                <input className="input" placeholder="e.g. 0771234567" value={editPhone} onChange={e => setEditPhone(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+
+            {/* Section: Professional Credentials */}
+            <div style={sectionHeaderStyle}>
+              <Award size={14} color="var(--blue)" /> Professional Credentials
+            </div>
+
             <div>
               <label style={labelStyle}>Specialisation</label>
               <select className="input" value={specialization} onChange={e => setSpecialization(e.target.value)} style={inputStyle}>
@@ -343,23 +592,45 @@ export default function AddDoctorModal({
               </div>
             )}
 
-            {/* Work Email (Editable) */}
             <div>
-              <label style={labelStyle}>Work Email</label>
+              <label style={labelStyle}>SLMC Registration No.</label>
+              <input className="input" placeholder="e.g. SLMC-12345" value={editSlmc} onChange={e => setEditSlmc(e.target.value)} style={inputStyle} />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Qualifications</label>
+              <input className="input" placeholder="e.g. MBBS, MD (Medicine), FRCP" value={editQuals} onChange={e => setEditQuals(e.target.value)} style={inputStyle} />
+            </div>
+
+            <div>
+              <label style={labelStyle}>
+                Career Start Year (Practicing Since)
+                {editStartYear && !isNaN(Number(editStartYear)) && Number(editStartYear) > 1950 && (
+                  <span style={{ marginLeft: 8, color: '#10B981', fontWeight: 600, textTransform: 'none' }}>
+                    ({Math.max(0, currentYear - Number(editStartYear))} years of clinical experience)
+                  </span>
+                )}
+              </label>
               <input
                 className="input"
-                type="email"
-                placeholder="e.g. doctor@mediqueue.lk"
-                value={editEmail}
-                onChange={e => setEditEmail(e.target.value)}
+                type="number"
+                min="1960"
+                max={currentYear}
+                placeholder={`e.g. 2012`}
+                value={editStartYear}
+                onChange={e => setEditStartYear(e.target.value)}
                 style={inputStyle}
               />
             </div>
 
-            {/* Room + Token Series */}
+            {/* Section: Center Assignment */}
+            <div style={sectionHeaderStyle}>
+              <Building2 size={14} color="var(--blue)" /> Center Assignment & Posting
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={labelStyle}>Consultation Room Number</label>
+                <label style={labelStyle}>Consultation Room</label>
                 <input className="input" placeholder="e.g. Room 04" value={roomNumber} onChange={e => setRoomNumber(e.target.value)} style={inputStyle} />
               </div>
               <div>
@@ -370,6 +641,28 @@ export default function AddDoctorModal({
                   value={series}
                   maxLength={1}
                   onChange={e => setSeries(e.target.value.toUpperCase())}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Center Joined Date</label>
+                <CleanDatePicker
+                  value={editJoinedDate}
+                  onChange={setEditJoinedDate}
+                  placeholder="Select Joined Date"
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Work Email</label>
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="e.g. doctor@mediqueue.lk"
+                  value={editEmail}
+                  onChange={e => setEditEmail(e.target.value)}
                   style={inputStyle}
                 />
               </div>
@@ -411,16 +704,16 @@ export default function AddDoctorModal({
               )}
             </div>
 
-            {/* Auto-filled Doctor Phone and Work Email */}
+            {/* Doctor Phone (Editable) and Work Email */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={labelStyle}>Phone Number</label>
                 <input
                   className="input"
-                  value={selectedExistingDoc?.phone || '—'}
-                  disabled
-                  readOnly
-                  style={{ ...inputStyle, background: 'rgba(241,245,249,0.7)', color: 'var(--text-2)', cursor: 'not-allowed' }}
+                  placeholder="e.g. 0771234567"
+                  value={invitePhone}
+                  onChange={e => setInvitePhone(e.target.value)}
+                  style={inputStyle}
                 />
               </div>
               <div>
@@ -452,6 +745,17 @@ export default function AddDoctorModal({
                 />
               </div>
             </div>
+
+            {/* Center Joined Date */}
+            <div>
+              <label style={labelStyle}>Center Joined Date</label>
+              <CleanDatePicker
+                value={inviteJoinedDate}
+                onChange={setInviteJoinedDate}
+                placeholder="Select Joined Date"
+              />
+            </div>
+
             {error && <div style={{ background: '#fff1f1', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626' }}>{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
               <button type="button" onClick={() => { resetState(); onClose() }} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
@@ -468,10 +772,46 @@ export default function AddDoctorModal({
               <Clock size={18} style={{ flexShrink: 0 }} />
               <span>This request will be sent to the <strong>System Admin</strong> for approval. Once approved, the doctor will receive login credentials via SMS.</span>
             </div>
+
+            {/* Section: Personal Information */}
+            <div style={sectionHeaderStyle}>
+              <User size={14} color="var(--blue)" /> Personal Information
+            </div>
+
             <div>
               <label style={labelStyle}>Full Name <span style={{ color: '#dc2626' }}>*</span></label>
               <input className="input" placeholder="e.g. Dr. Amila Perera" value={newDoctorName} onChange={e => setNewDoctorName(e.target.value)} required style={inputStyle} />
             </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Gender</label>
+                <select className="input" value={newGender} onChange={e => setNewGender(e.target.value)} style={inputStyle}>
+                  {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Date of Birth</label>
+                <FlexibleDateInput value={newDob} onChange={setNewDob} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>NIC Number</label>
+                <input className="input" placeholder="e.g. 199012345678" value={newNic} onChange={e => setNewNic(e.target.value)} style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Phone Number <span style={{ color: '#dc2626' }}>*</span></label>
+                <input className="input" placeholder="e.g. 0771234567" value={newPhone} onChange={e => setNewPhone(e.target.value)} required style={inputStyle} />
+              </div>
+            </div>
+
+            {/* Section: Professional Credentials */}
+            <div style={sectionHeaderStyle}>
+              <Award size={14} color="var(--blue)" /> Professional Credentials
+            </div>
+
             <div>
               <label style={labelStyle}>Specialization <span style={{ color: '#dc2626' }}>*</span></label>
               <select className="input" value={newSpecialization} onChange={e => setNewSpecialization(e.target.value)} style={inputStyle}>
@@ -484,14 +824,70 @@ export default function AddDoctorModal({
                 <input className="input" placeholder="e.g. Sports Medicine" value={newCustomSpec} onChange={e => setNewCustomSpec(e.target.value)} required style={inputStyle} />
               </div>
             )}
+
             <div>
-              <label style={labelStyle}>SLMC Register No.</label>
-              <input className="input" placeholder="e.g. SLMC-98765" value={newSlmcRegNo} onChange={e => setNewSlmcRegNo(e.target.value)} style={inputStyle} />
+              <label style={labelStyle}>SLMC Register No. <span style={{ color: '#dc2626' }}>*</span></label>
+              <input className="input" placeholder="e.g. SLMC-98765" value={newSlmcRegNo} onChange={e => setNewSlmcRegNo(e.target.value)} required style={inputStyle} />
             </div>
+
+            <div>
+              <label style={labelStyle}>Qualifications <span style={{ color: '#dc2626' }}>*</span></label>
+              <input className="input" placeholder="e.g. MBBS, MD, FRCS" value={newQualifications} onChange={e => setNewQualifications(e.target.value)} required style={inputStyle} />
+            </div>
+
+            <div>
+              <label style={labelStyle}>
+                Career Start Year (Practicing Since) <span style={{ color: '#dc2626' }}>*</span>
+                {newStartYear && !isNaN(Number(newStartYear)) && Number(newStartYear) > 1950 && (
+                  <span style={{ marginLeft: 8, color: '#10B981', fontWeight: 600, textTransform: 'none' }}>
+                    ({Math.max(0, currentYear - Number(newStartYear))} years of clinical experience)
+                  </span>
+                )}
+              </label>
+              <input
+                className="input"
+                type="number"
+                min="1960"
+                max={currentYear}
+                placeholder="e.g. 2015"
+                value={newStartYear}
+                onChange={e => setNewStartYear(e.target.value)}
+                required
+                style={inputStyle}
+              />
+            </div>
+
+            {/* Section: Center Assignment */}
+            <div style={sectionHeaderStyle}>
+              <Building2 size={14} color="var(--blue)" /> Center Assignment
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={labelStyle}>Phone Number</label>
-                <input className="input" placeholder="e.g. 0771234567" value={newPhone} onChange={e => setNewPhone(e.target.value)} style={inputStyle} />
+                <label style={labelStyle}>Consultation Room</label>
+                <input className="input" placeholder="e.g. Room 04" value={newRoomNumber} onChange={e => setNewRoomNumber(e.target.value)} style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Center Joined Date</label>
+                <CleanDatePicker
+                  value={newJoinedDate}
+                  onChange={setNewJoinedDate}
+                  placeholder="Select Joined Date"
+                  align="right"
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Token Series (A–Z)</label>
+                <input
+                  className="input"
+                  value="Auto-generated"
+                  disabled
+                  readOnly
+                  style={{ ...inputStyle, background: 'rgba(241,245,249,0.7)', color: 'var(--text-4)', cursor: 'not-allowed', fontStyle: 'italic' }}
+                />
               </div>
               <div>
                 <label style={labelStyle}>Work Email (optional)</label>
@@ -505,22 +901,7 @@ export default function AddDoctorModal({
                 />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={labelStyle}>Consultation Room</label>
-                <input className="input" placeholder="e.g. Room 04" value={newRoomNumber} onChange={e => setNewRoomNumber(e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Token Series (A–Z)</label>
-                <input
-                  className="input"
-                  value="Auto-generated"
-                  disabled
-                  readOnly
-                  style={{ ...inputStyle, background: 'rgba(241,245,249,0.7)', color: 'var(--text-4)', cursor: 'not-allowed', fontStyle: 'italic' }}
-                />
-              </div>
-            </div>
+
             {error && <div style={{ background: '#fff1f1', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626' }}>{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
               <button type="button" onClick={() => { resetState(); onClose() }} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
@@ -542,4 +923,25 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 6, letterSpacing: '0.05em',
 }
 
-const inputStyle: React.CSSProperties = { height: 44, fontSize: 14 }
+const inputStyle: React.CSSProperties = {
+  height: 42,
+  fontSize: 13.5,
+  colorScheme: 'light',
+  background: '#ffffff',
+  color: '#1e293b',
+}
+
+const sectionHeaderStyle: React.CSSProperties = {
+  fontSize: 11.5,
+  fontWeight: 800,
+  color: 'var(--text-2)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  marginTop: 4,
+  marginBottom: -4,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  borderBottom: '1px solid rgba(18, 198, 186, 0.15)',
+  paddingBottom: 4,
+}

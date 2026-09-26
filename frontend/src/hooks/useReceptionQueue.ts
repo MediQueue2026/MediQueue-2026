@@ -46,6 +46,14 @@ function fromApiDoctor(d: ApiDoctor): ReceptionDoctor {
     centerName: d.centerName ?? null,
     email: d.email ?? null,
     phone: d.phone ?? null,
+    slmcRegNo: d.slmcRegNo ?? null,
+    qualifications: d.qualifications ?? null,
+    experienceStartYear: d.experienceStartYear ?? null,
+    yearsOfExperience: d.yearsOfExperience ?? null,
+    gender: d.gender ?? null,
+    dateOfBirth: d.dateOfBirth ?? null,
+    nic: d.nic ?? null,
+    joinedDate: d.joinedDate ?? null,
   }
 }
 

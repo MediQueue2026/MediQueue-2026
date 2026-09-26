@@ -157,12 +157,16 @@ export async function fetchDoctorsList(): Promise<any[]> {
     const res = await fetch(`${API_BASE}/doctors`);
     if (res.ok) {
       const data = await res.json();
-      return (data.doctors ?? []).map((d: any) => ({
-        id: d.id,
-        userId: d.userId ?? d.user_id ?? null,
-        name: d.name ?? 'Doctor',
-        spec: d.specialization ?? d.dept ?? null,
-        room: d.room && d.room !== '—' ? d.room : null,
+      return (data.doctors ?? []).map((d: any) => {
+        const specVal = d.specialization ?? d.dept ?? d.spec ?? null;
+        return {
+          id: d.id,
+          userId: d.userId ?? d.user_id ?? null,
+          name: d.name ?? 'Doctor',
+          spec: specVal,
+          specialization: specVal,
+          dept: specVal,
+          room: d.room && d.room !== '—' ? d.room : null,
         series: d.series && d.series !== '?' ? d.series : null,
         centerId: d.centerId ?? d.center_id ?? null,
         centerName: d.centerName ?? null,
@@ -172,7 +176,16 @@ export async function fetchDoctorsList(): Promise<any[]> {
         avgConsultMinutes: typeof d.avgConsultMinutes === 'number' ? d.avgConsultMinutes : null,
         delayMinutes: typeof d.delayMinutes === 'number' ? d.delayMinutes : 0,
         status: d.status ?? d.current_status ?? 'active',
-      }));
+        slmcRegNo: d.slmcRegNo ?? d.slmc_reg_no ?? null,
+        qualifications: d.qualifications ?? null,
+        experienceStartYear: d.experienceStartYear ?? d.experience_start_year ?? null,
+        yearsOfExperience: d.yearsOfExperience ?? d.years_of_experience ?? null,
+        gender: d.gender ?? null,
+        dateOfBirth: d.dateOfBirth ?? d.date_of_birth ?? null,
+        nic: d.nic ?? null,
+        joinedDate: d.joinedDate ?? d.joined_date ?? null,
+      };
+    });
     }
   } catch (e) {
     console.warn('Doctors API error:', e);
