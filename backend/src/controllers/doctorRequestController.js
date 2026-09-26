@@ -3,6 +3,39 @@ import { notificationProvider } from '../config/notification.js';
 import { nextSeriesLetterForCenter, formatDoctorFullName } from '../services/doctorLookup.js';
 import bcrypt from 'bcryptjs';
 
+export async function generateUniqueDoctorEmail(doctorName) {
+  if (!doctorName) return `doctor@mediqueue.lk`;
+  
+  const clean = doctorName.trim().replace(/^dr\.?\s*/i, '').replace(/^prof\.?\s*/i, '');
+  const parts = clean.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+  
+  let basePrefix = '';
+  if (parts.length >= 2) {
+    basePrefix = `${parts[0]}.${parts[parts.length - 1]}`;
+  } else if (parts.length === 1) {
+    basePrefix = parts[0];
+  } else {
+    basePrefix = 'doctor';
+  }
+
+  let candidate = `${basePrefix}@mediqueue.lk`;
+  let suffix = 1;
+
+  while (true) {
+    const [userRes, reqRes] = await Promise.all([
+      supabase.from('users').select('id').eq('email', candidate).maybeSingle(),
+      supabase.from('doctor_requests').select('id').eq('email', candidate).eq('status', 'pending').maybeSingle()
+    ]);
+
+    if (!userRes.data && !reqRes.data) {
+      return candidate;
+    }
+
+    suffix++;
+    candidate = `${basePrefix}${suffix}@mediqueue.lk`;
+  }
+}
+
 // RECEPTIONIST: Create a join request targeted at a specific registered doctor OR create new doctor request for admin
 export async function createDoctorRequest(req, res, next) {
   try {
@@ -21,12 +54,15 @@ export async function createDoctorRequest(req, res, next) {
       if (centerRow) finalCenterName = centerRow.name;
     }
 
+    // Auto-generate series for this medical center if not explicitly provided
+    const autoSeries = (series && String(series).trim().toUpperCase()) || await nextSeriesLetterForCenter(centerId);
+
     if (requestType === 'ASSIGN_EXISTING') {
       if (!doctorId) {
         return res.status(400).json({ error: 'Select an existing doctor from the list.' });
       }
 
-      const { data: doctorRow } = await supabase.from('doctors').select('id, user_id, users(full_name, email)').eq('id', doctorId).maybeSingle();
+      const { data: doctorRow } = await supabase.from('doctors').select('id, user_id, users(full_name, email, phone)').eq('id', doctorId).maybeSingle();
       if (!doctorRow) return res.status(404).json({ error: 'Doctor not found in the system.' });
 
       const { data: existing } = await supabase.from('doctor_requests').select('id, status').eq('doctor_id', doctorId).eq('center_id', centerId).eq('status', 'pending').maybeSingle();
@@ -41,11 +77,11 @@ export async function createDoctorRequest(req, res, next) {
         doctor_id: doctorId,
         doctor_name: formatDoctorFullName(doctorRow.users?.full_name || doctorName),
         email: doctorRow.users?.email || email || null,
-        phone: phone || null,
+        phone: doctorRow.users?.phone || phone || null,
         specialization,
         slmc_reg_no: slmcRegNo || null,
         room_number: roomNumber || null,
-        series: series || null,
+        series: autoSeries,
         max_appointments_per_hour: maxAppointmentsPerHour || 4,
         status: 'pending'
       };
@@ -61,6 +97,8 @@ export async function createDoctorRequest(req, res, next) {
         request: mapDbRequestToPublic(data),
       });
     } else if (requestType === 'CREATE_NEW') {
+      const generatedEmail = email?.trim() || await generateUniqueDoctorEmail(doctorName);
+
       const newRequestData = {
         request_type: 'CREATE_NEW',
         receptionist_id: receptionistId,
@@ -69,12 +107,12 @@ export async function createDoctorRequest(req, res, next) {
         center_name: finalCenterName || 'Medical Center',
         doctor_id: null,
         doctor_name: formatDoctorFullName(doctorName),
-        email: email || null,
+        email: generatedEmail,
         phone: phone || null,
         specialization,
         slmc_reg_no: slmcRegNo || null,
         room_number: roomNumber || null,
-        series: series || null,
+        series: autoSeries,
         max_appointments_per_hour: maxAppointmentsPerHour || 4,
         status: 'pending'
       };
@@ -259,8 +297,7 @@ export async function approveAdminDoctorRequest(req, res, next) {
 
     let email = dbReq.email;
     if (!email) {
-      const cleanName = (dbReq.doctor_name || 'doctor').toLowerCase().replace(/[^a-z0-9]/g, '');
-      email = `${cleanName}@mediqueue.lk`;
+      email = await generateUniqueDoctorEmail(dbReq.doctor_name);
     }
 
     const { data: existingUser } = await supabase.from('users').select('id').eq('email', email).maybeSingle();

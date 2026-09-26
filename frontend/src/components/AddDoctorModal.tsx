@@ -36,6 +36,7 @@ export default function AddDoctorModal({
   const [customSpec, setCustomSpec] = useState('')
   const [roomNumber, setRoomNumber] = useState(editDoctor?.room ?? '')
   const [series, setSeries] = useState(editDoctor?.series ?? '')
+  const [editEmail, setEditEmail] = useState(editDoctor?.email ?? '')
   const [maxPerHour, setMaxPerHour] = useState(String(editDoctor?.maxAppointmentsPerHour ?? 4))
   const [systemDoctors, setSystemDoctors] = useState<ApiDoctor[]>([])
 
@@ -47,7 +48,6 @@ export default function AddDoctorModal({
   const [newPhone, setNewPhone] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [newRoomNumber, setNewRoomNumber] = useState('')
-  const [newSeries, setNewSeries] = useState('')
 
   // ── Shared state ──
   const [saving, setSaving] = useState(false)
@@ -71,6 +71,7 @@ export default function AddDoctorModal({
       setSpecialization(editDoctor.dept || 'General Medicine')
       setRoomNumber(editDoctor.room || '')
       setSeries(editDoctor.series || '')
+      setEditEmail(editDoctor.email || '')
       setMaxPerHour(String(editDoctor.maxAppointmentsPerHour || 4))
     }
   }, [editDoctor])
@@ -82,6 +83,7 @@ export default function AddDoctorModal({
     setCustomSpec('')
     setRoomNumber('')
     setSeries('')
+    setEditEmail('')
     setMaxPerHour('4')
     setNewDoctorName('')
     setNewSpecialization('General Medicine')
@@ -90,7 +92,6 @@ export default function AddDoctorModal({
     setNewPhone('')
     setNewEmail('')
     setNewRoomNumber('')
-    setNewSeries('')
     setSaving(false)
     setDone(false)
     setSuccessMsg('')
@@ -104,6 +105,9 @@ export default function AddDoctorModal({
   const targetCenterId = centerId || null
   const noCenter = !isEdit && !targetCenterId
 
+  // Find currently selected existing doctor for auto-fill in Tab 1
+  const selectedExistingDoc = systemDoctors.find(d => d.id === selectedDoctorId)
+
   // ── Invite Existing Doctor submit ──
   const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -115,8 +119,7 @@ export default function AddDoctorModal({
         setSaving(false)
         return
       }
-      const selectedDoc = systemDoctors.find(d => d.id === selectedDoctorId)
-      if (!selectedDoc) {
+      if (!selectedExistingDoc) {
         setError('Please select an existing doctor from the list.')
         setSaving(false)
         return
@@ -125,14 +128,13 @@ export default function AddDoctorModal({
         requestType: 'ASSIGN_EXISTING',
         centerId: targetCenterId!,
         centerName: _centerName || undefined,
-        doctorId: selectedDoc.id,
-        doctorName: selectedDoc.name,
-        specialization: selectedDoc.dept || finalSpec || 'General Medicine',
+        doctorId: selectedExistingDoc.id,
+        doctorName: selectedExistingDoc.name,
+        specialization: selectedExistingDoc.dept || finalSpec || 'General Medicine',
         roomNumber: roomNumber.trim() || undefined,
-        series: series.trim().toUpperCase() || undefined,
         maxAppointmentsPerHour: Number(maxPerHour) || 4,
       })
-      setSuccessMsg(`Join request sent to ${selectedDoc.name}! They will see it in their dashboard and can accept or decline.`)
+      setSuccessMsg(`Join request sent to ${selectedExistingDoc.name}! They will see it in their dashboard and can accept or decline.`)
       setDone(true)
       setTimeout(() => { resetState(); onClose() }, 2500)
     } catch (err: unknown) {
@@ -141,25 +143,33 @@ export default function AddDoctorModal({
     }
   }
 
-  // ── Edit Doctor submit (unchanged) ──
+  // ── Edit Doctor submit ──
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     setError(null)
     try {
-      if (editDoctor) {
-        const res = await api.updateDoctor(editDoctor.id, {
-          centerId: centerId ?? editDoctor.centerId ?? undefined,
-          specialization: finalSpec,
-          roomNumber: roomNumber.trim() || undefined,
-          series: series.trim().toUpperCase() || undefined,
-          maxAppointmentsPerHour: Number(maxPerHour) || 4,
-        })
-        setSuccessMsg('Doctor profile updated successfully.')
-        setDone(true)
-        onCreated?.(res.doctor)
-        setTimeout(() => { resetState(); onClose() }, 2500)
+      if (!editDoctor) return
+
+      const cleanSeries = series.trim().toUpperCase()
+      if (cleanSeries && (!/^[A-Z]$/.test(cleanSeries))) {
+        setError('Token series must be a single letter from A to Z.')
+        setSaving(false)
+        return
       }
+
+      const res = await api.updateDoctor(editDoctor.id, {
+        centerId: centerId ?? editDoctor.centerId ?? undefined,
+        specialization: finalSpec,
+        roomNumber: roomNumber.trim() || undefined,
+        series: cleanSeries || undefined,
+        email: editEmail.trim() || undefined,
+        maxAppointmentsPerHour: Number(maxPerHour) || 4,
+      })
+      setSuccessMsg('Doctor profile updated successfully.')
+      setDone(true)
+      onCreated?.(res.doctor)
+      setTimeout(() => { resetState(); onClose() }, 2500)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not save. Please try again.')
       setSaving(false)
@@ -197,7 +207,6 @@ export default function AddDoctorModal({
         phone: newPhone.trim() || undefined,
         email: newEmail.trim() || undefined,
         roomNumber: newRoomNumber.trim() || undefined,
-        series: newSeries.trim().toUpperCase() || undefined,
       })
       setSuccessMsg(`Doctor creation request for ${newDoctorName.trim()} submitted to System Admin for approval. The doctor will receive an SMS with login credentials once approved.`)
       setDone(true)
@@ -253,7 +262,7 @@ export default function AddDoctorModal({
               {isEdit ? 'Edit Doctor Profile' : 'Add Doctor to Center'}
             </h3>
             <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>
-              {isEdit ? "Update doctor's room and schedule parameters." : 'Invite an existing doctor or register a new one.'}
+              {isEdit ? "Update doctor's room, schedule parameters, and email." : 'Invite an existing doctor or register a new one.'}
             </div>
           </div>
         </div>
@@ -318,7 +327,7 @@ export default function AddDoctorModal({
             )}
           </div>
         ) : isEdit ? (
-          /* ── Edit Doctor Form (unchanged) ── */
+          /* ── Edit Doctor Form ── */
           <form onSubmit={handleEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Specialisation */}
             <div>
@@ -333,6 +342,21 @@ export default function AddDoctorModal({
                 <input className="input" placeholder="e.g. Sports Medicine" value={customSpec} onChange={e => setCustomSpec(e.target.value)} required style={inputStyle} />
               </div>
             )}
+
+            {/* Work Email (Editable) */}
+            <div>
+              <label style={labelStyle}>Work Email</label>
+              <input
+                className="input"
+                type="email"
+                placeholder="e.g. doctor@mediqueue.lk"
+                value={editEmail}
+                onChange={e => setEditEmail(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            {/* Room + Token Series */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={labelStyle}>Consultation Room Number</label>
@@ -340,9 +364,17 @@ export default function AddDoctorModal({
               </div>
               <div>
                 <label style={labelStyle}>Token Series Letter (A–Z)</label>
-                <input className="input" placeholder="Auto-assigned if left blank" value={series} maxLength={1} onChange={e => setSeries(e.target.value.toUpperCase())} style={inputStyle} />
+                <input
+                  className="input"
+                  placeholder="e.g. A"
+                  value={series}
+                  maxLength={1}
+                  onChange={e => setSeries(e.target.value.toUpperCase())}
+                  style={inputStyle}
+                />
               </div>
             </div>
+
             {error && <div style={{ background: '#fff1f1', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626' }}>{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
               <button type="button" onClick={() => { resetState(); onClose() }} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
@@ -378,6 +410,32 @@ export default function AddDoctorModal({
                 </select>
               )}
             </div>
+
+            {/* Auto-filled Doctor Phone and Work Email */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Phone Number</label>
+                <input
+                  className="input"
+                  value={selectedExistingDoc?.phone || '—'}
+                  disabled
+                  readOnly
+                  style={{ ...inputStyle, background: 'rgba(241,245,249,0.7)', color: 'var(--text-2)', cursor: 'not-allowed' }}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Work Email</label>
+                <input
+                  className="input"
+                  value={selectedExistingDoc?.email || '—'}
+                  disabled
+                  readOnly
+                  style={{ ...inputStyle, background: 'rgba(241,245,249,0.7)', color: 'var(--text-2)', cursor: 'not-allowed' }}
+                />
+              </div>
+            </div>
+
+            {/* Room + Auto-generated Token Series */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={labelStyle}>Consultation Room Number</label>
@@ -385,13 +443,19 @@ export default function AddDoctorModal({
               </div>
               <div>
                 <label style={labelStyle}>Token Series Letter (A–Z)</label>
-                <input className="input" placeholder="Auto-assigned if left blank" value={series} maxLength={1} onChange={e => setSeries(e.target.value.toUpperCase())} style={inputStyle} />
+                <input
+                  className="input"
+                  value="Auto-generated"
+                  disabled
+                  readOnly
+                  style={{ ...inputStyle, background: 'rgba(241,245,249,0.7)', color: 'var(--text-4)', cursor: 'not-allowed', fontStyle: 'italic' }}
+                />
               </div>
             </div>
             {error && <div style={{ background: '#fff1f1', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626' }}>{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
               <button type="button" onClick={() => { resetState(); onClose() }} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={saving || noCenter} style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}>
+              <button type="submit" className="btn btn-primary" disabled={saving || noCenter || systemDoctors.length === 0} style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}>
                 {saving ? <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} /> : <UserCheck size={16} />}
                 {saving ? 'Sending…' : 'Send Join Request'}
               </button>
@@ -431,7 +495,14 @@ export default function AddDoctorModal({
               </div>
               <div>
                 <label style={labelStyle}>Work Email (optional)</label>
-                <input className="input" type="email" placeholder="Auto-generated if blank" value={newEmail} onChange={e => setNewEmail(e.target.value)} style={inputStyle} />
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="Auto-generated if blank"
+                  value={newEmail}
+                  onChange={e => setNewEmail(e.target.value)}
+                  style={inputStyle}
+                />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -441,7 +512,13 @@ export default function AddDoctorModal({
               </div>
               <div>
                 <label style={labelStyle}>Token Series (A–Z)</label>
-                <input className="input" placeholder="Auto-assigned" value={newSeries} maxLength={1} onChange={e => setNewSeries(e.target.value.toUpperCase())} style={inputStyle} />
+                <input
+                  className="input"
+                  value="Auto-generated"
+                  disabled
+                  readOnly
+                  style={{ ...inputStyle, background: 'rgba(241,245,249,0.7)', color: 'var(--text-4)', cursor: 'not-allowed', fontStyle: 'italic' }}
+                />
               </div>
             </div>
             {error && <div style={{ background: '#fff1f1', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626' }}>{error}</div>}

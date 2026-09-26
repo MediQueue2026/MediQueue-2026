@@ -170,7 +170,7 @@ router.patch(
   optionalAuth,
   updateDoctorStatus,
 );
-router.put('/doctors/:doctorId', authMiddleware, requireRole(['admin']), updateDoctor);
+router.put('/doctors/:doctorId', authMiddleware, requireRole(['receptionist', 'admin']), updateDoctor);
 router.post('/doctors', authMiddleware, requireRole(['receptionist', 'admin']), createDoctor);
 router.get('/doctors/:doctorId/summary', getDoctorSummary);
 router.get('/doctors/:doctorId/hours', getDoctorHours);

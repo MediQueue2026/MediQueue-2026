@@ -35,16 +35,15 @@ export function formatDoctorFullName(rawName) {
  * explicit series typed by the receptionist always takes priority over this.
  */
 export async function nextSeriesLetterForCenter(centerId) {
-  const { data } = await supabase
-    .from('doctor_center_assignments')
-    .select('series')
-    .eq('center_id', centerId);
+  const [assignmentsRes, requestsRes] = await Promise.all([
+    supabase.from('doctor_center_assignments').select('series').eq('center_id', centerId),
+    supabase.from('doctor_requests').select('series').eq('center_id', centerId).eq('status', 'pending')
+  ]);
 
-  const used = new Set(
-    (data || [])
-      .map(row => String(row.series || '').trim().toUpperCase())
-      .filter(Boolean),
-  );
+  const used = new Set([
+    ...(assignmentsRes.data || []).map(row => String(row.series || '').trim().toUpperCase()),
+    ...(requestsRes.data || []).map(row => String(row.series || '').trim().toUpperCase()),
+  ].filter(Boolean));
 
   for (let n = 0; n < 26; n++) {
     const letter = String.fromCharCode(65 + n);

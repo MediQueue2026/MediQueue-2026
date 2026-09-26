@@ -613,7 +613,7 @@ export const api = {
     return request<{ doctors: ApiDoctor[] }>(`/doctors${qs ? `?${qs}` : ''}`)
   },
 
-  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; removeCenterId?: string; roomNumber?: string; specialization?: string; currentStatus?: string; maxAppointmentsPerHour?: number; series?: string }>) =>
+  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; removeCenterId?: string; roomNumber?: string; specialization?: string; currentStatus?: string; maxAppointmentsPerHour?: number; series?: string; email?: string }>) =>
     request<{ doctor?: ApiDoctor; message?: string }>(`/doctors/${id}`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -624,6 +624,7 @@ export const api = {
         currentStatus: updates.currentStatus,
         maxAppointmentsPerHour: updates.maxAppointmentsPerHour,
         series: updates.series,
+        email: updates.email,
       }),
     }),
 

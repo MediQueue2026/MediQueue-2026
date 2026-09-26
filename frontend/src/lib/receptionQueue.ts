@@ -66,6 +66,8 @@ export interface ReceptionDoctor {
   delayMinutes?: number
   centerId?: string | null
   centerName?: string | null
+  email?: string | null
+  phone?: string | null
 }
 
 export interface IssueTokenInput {
