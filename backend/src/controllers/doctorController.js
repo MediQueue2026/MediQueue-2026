@@ -115,15 +115,48 @@ export async function updateDoctor(req, res, next) {
       return res.json({ message: 'Doctor removed from center' });
     }
 
-    // Doctor-wide field.
+    // Doctor-wide fields.
     if (typeof req.body.specialization === 'string') {
       await supabase.from('doctors').update({ specialization: req.body.specialization }).eq('id', doctorId);
+    }
+
+    if (typeof req.body.email === 'string') {
+      const newEmail = req.body.email.trim();
+      if (newEmail) {
+        const { data: docData } = await supabase.from('doctors').select('user_id').eq('id', doctorId).maybeSingle();
+        if (docData?.user_id) {
+          const { data: conflictUser } = await supabase.from('users').select('id').eq('email', newEmail).neq('id', docData.user_id).maybeSingle();
+          if (conflictUser) {
+            return res.status(409).json({ error: 'This email is already in use by another account.' });
+          }
+          await supabase.from('users').update({ email: newEmail }).eq('id', docData.user_id);
+        }
+      }
     }
 
     // Per-center posting fields.
     const posting = {};
     if (typeof req.body.roomNumber === 'string') posting.room_number = req.body.roomNumber;
-    if (typeof req.body.series === 'string') posting.series = req.body.series;
+    if (typeof req.body.series === 'string') {
+      const cleanSeries = req.body.series.trim().toUpperCase();
+      posting.series = cleanSeries;
+
+      if (cleanSeries && centerId) {
+        const { data: conflictAssignment } = await supabase
+          .from('doctor_center_assignments')
+          .select('id, doctor_id')
+          .eq('center_id', centerId)
+          .eq('series', cleanSeries)
+          .neq('doctor_id', doctorId)
+          .maybeSingle();
+
+        if (conflictAssignment) {
+          return res.status(409).json({
+            error: 'This token series is already in use at this medical center. Please choose another letter.'
+          });
+        }
+      }
+    }
     if (typeof req.body.currentStatus === 'string') posting.current_status = req.body.currentStatus;
     if (typeof req.body.maxAppointmentsPerHour === 'number') posting.max_appointments_per_hour = req.body.maxAppointmentsPerHour;
 
@@ -151,7 +184,7 @@ export async function updateDoctor(req, res, next) {
           .from('doctor_center_assignments')
           .insert([{ doctor_id: doctorId, center_id: centerId, approval_status: 'approved', ...posting, series }]);
       }
-    } else if (Object.keys(posting).length === 0 && typeof req.body.specialization !== 'string') {
+    } else if (Object.keys(posting).length === 0 && typeof req.body.specialization !== 'string' && typeof req.body.email !== 'string') {
       return res.status(400).json({ error: 'No valid fields provided for update' });
     }
 

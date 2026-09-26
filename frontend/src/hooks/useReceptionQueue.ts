@@ -44,6 +44,8 @@ function fromApiDoctor(d: ApiDoctor): ReceptionDoctor {
     delayMinutes: (d as ApiDoctor & { delayMinutes?: number }).delayMinutes ?? 0,
     centerId: d.centerId ?? null,
     centerName: d.centerName ?? null,
+    email: d.email ?? null,
+    phone: d.phone ?? null,
   }
 }
 

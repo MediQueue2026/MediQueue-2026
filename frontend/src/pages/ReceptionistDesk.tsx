@@ -2263,7 +2263,7 @@ export default function ReceptionistDesk() {
                     No doctors match "{doctorSearch}".
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 18 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 18 }}>
                     {filteredDoctors.map(d => {
                       const serving = currentFor(queue.entries, d.id)
                       const docWaiting = waitingFor(queue.entries, d.id)
@@ -2312,25 +2312,25 @@ export default function ReceptionistDesk() {
                           </div>
 
                           {/* Action buttons */}
-                          <div style={{ display: 'flex', gap: 6 }}>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             <button
                               onClick={() => { queue.setSelectedDoctorId(d.id); setActiveTab('checkin'); queue.clearError() }}
                               className="btn btn-primary btn-sm"
-                              style={{ flex: '1 1 auto', justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
+                              style={{ flex: '1 1 auto', minWidth: 75, justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
                             >
                               <Ticket size={12} /> Queue
                             </button>
                             <button
                               onClick={() => setEditingDoctor(d)}
                               className="btn btn-ghost btn-sm"
-                              style={{ flex: '0.8 1 auto', justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
+                              style={{ flex: '1.4 1 auto', minWidth: 135, justifyContent: 'center', gap: 4, fontSize: 12, padding: '0 8px', whiteSpace: 'nowrap' }}
                             >
-                              <Pencil size={12} /> Edit
+                              <Pencil size={12} /> Edit Doctor Profile
                             </button>
                             <button
                               onClick={() => setHoursDoctor(d)}
                               className="btn btn-ghost btn-sm"
-                              style={{ flex: '1.4 1 auto', justifyContent: 'center', gap: 4, fontSize: 11.5, padding: '0 8px', whiteSpace: 'nowrap', color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
+                              style={{ flex: '1.2 1 auto', minWidth: 110, justifyContent: 'center', gap: 4, fontSize: 11.5, padding: '0 8px', whiteSpace: 'nowrap', color: 'var(--amber, #f59e0b)', borderColor: 'rgba(245,158,11,0.3)' }}
                             >
                               <CalendarClock size={12} /> Available Hours
                             </button>
