@@ -13,6 +13,7 @@ import { BookAppointmentModal } from '../components/BookAppointmentModal'
 import { ViewReportModal, downloadRecordFile, isRealFileUrl } from '../components/ViewReportModal'
 import { LiveClinicMap } from '../components/LiveClinicMap'
 import CenterProfilePage from '../components/CenterProfilePage'
+import DoctorProfileModal from '../components/DoctorProfileModal'
 import {
   fetchPatientProfile,
   savePatientProfile,
@@ -76,6 +77,7 @@ export default function PatientDashboard() {
   const [selectedReport, setSelectedReport] = useState<HealthRecordItem | null>(null)
   const [selectedCenterForBooking, setSelectedCenterForBooking] = useState('')
   const [selectedDoctorForBooking, setSelectedDoctorForBooking] = useState('')
+  const [viewingDoctorProfile, setViewingDoctorProfile] = useState<any | null>(null)
 
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -413,6 +415,11 @@ export default function PatientDashboard() {
         isOpen={showViewReportModal}
         onClose={() => setShowViewReportModal(false)}
         record={selectedReport}
+      />
+      <DoctorProfileModal
+        isOpen={!!viewingDoctorProfile}
+        doctor={viewingDoctorProfile}
+        onClose={() => setViewingDoctorProfile(null)}
       />
       {/* Toast Notification */}
       {toastMessage && (
@@ -762,8 +769,27 @@ export default function PatientDashboard() {
                           <span className="patient-doctor-rating">★ {doc.rating ?? '—'} {doc.reviewCount || doc.reviews ? `(${doc.reviewCount ?? doc.reviews} reviews)` : ''}</span>
                         )}
                       </div>
-                      <em className="patient-doctor-duration">~ {doc.avgConsultMinutes ?? 15} min<br />per consultation</em>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => { setSelectedDoctorForBooking(doc.id); setShowBookModal(true) }}>Book Slot</button>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          style={{
+                            background: '#10B981', color: '#fff', border: '1px solid #10B981',
+                            fontWeight: 700, borderRadius: 8, whiteSpace: 'nowrap'
+                          }}
+                          onClick={() => setViewingDoctorProfile(doc)}
+                        >
+                          View Doctor Profile
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          style={{ whiteSpace: 'nowrap' }}
+                          onClick={() => { setSelectedDoctorForBooking(doc.id); setShowBookModal(true) }}
+                        >
+                          Book Appointment
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {filteredDoctors.length === 0 && <div className="patient-doctor-empty">Doctors will appear here when available.</div>}

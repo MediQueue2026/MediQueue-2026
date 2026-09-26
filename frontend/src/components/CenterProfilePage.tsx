@@ -4,10 +4,11 @@ import {
   ArrowLeft, Building2, Calendar, Clock, Globe, Heart, MapPin, Megaphone, Navigation, Phone, Stethoscope,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import type { ApiCenterNotice, ApiDoctorHour } from '../lib/api'
+import type { ApiCenterNotice, ApiDoctor, ApiDoctorHour } from '../lib/api'
 import { SERVICE_GROUPS } from '../lib/medicalServices'
 import { Avatar, StatusBadge } from './UIPrimitives'
 import CenterLocationMap from './CenterLocationMap'
+import DoctorProfileModal from './DoctorProfileModal'
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -101,6 +102,7 @@ export default function CenterProfilePage({
   const [notices, setNotices] = useState<ApiCenterNotice[]>([])
   const [doctorHoursById, setDoctorHoursById] = useState<Record<string, ApiDoctorHour[]>>({})
   const [doctorHoursLoading, setDoctorHoursLoading] = useState(false)
+  const [viewingDoctor, setViewingDoctor] = useState<ApiDoctor | null>(null)
 
   useEffect(() => {
     if (!center?.id) { setNotices([]); return }
@@ -335,14 +337,28 @@ export default function CenterProfilePage({
 
                       <DoctorSchedule hours={doctorHoursById[d.id] ?? []} loading={doctorHoursLoading} />
 
-                      <button
-                        type="button"
-                        onClick={() => onBook(center.id, d.id)}
-                        className="btn btn-primary btn-sm"
-                        style={{ justifyContent: 'center', gap: 6, marginTop: 'auto', minHeight: 36, whiteSpace: 'normal' }}
-                      >
-                        <Calendar size={13} /> Book with {d.name}
-                      </button>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => setViewingDoctor(d as ApiDoctor)}
+                          className="btn btn-sm"
+                          style={{
+                            flex: 1, minHeight: 36, justifyContent: 'center', gap: 6,
+                            background: '#10B981', color: '#fff', border: '1px solid #10B981',
+                            fontWeight: 700, borderRadius: 10,
+                          }}
+                        >
+                          <Stethoscope size={13} /> View Profile
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onBook(center.id, d.id)}
+                          className="btn btn-primary btn-sm"
+                          style={{ flex: 1, justifyContent: 'center', gap: 6, minHeight: 36, whiteSpace: 'normal', borderRadius: 10 }}
+                        >
+                          <Calendar size={13} /> Book with {d.name}
+                        </button>
+                      </div>
                     </div>
                   )
                 })}
@@ -354,6 +370,12 @@ export default function CenterProfilePage({
         </div>
 
       </div>
+
+      <DoctorProfileModal
+        isOpen={!!viewingDoctor}
+        doctor={viewingDoctor}
+        onClose={() => setViewingDoctor(null)}
+      />
     </div>
   )
 }

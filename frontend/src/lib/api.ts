@@ -175,6 +175,7 @@ export interface ApiDoctorCenter {
   centerName: string | null
   room: string
   series: string
+  joinedDate?: string | null
   status: 'active' | 'delayed' | 'break' | 'offline'
   /** Shift status AND today's available_hours window both say this doctor is
    *  working right now — not just that the shift flag defaults to 'active'. */
@@ -188,6 +189,7 @@ export interface ApiDoctor {
   id: string
   name: string
   dept: string
+  specialization?: string | null
   room: string
   series: string
   status: 'active' | 'delayed' | 'break' | 'offline'
@@ -197,6 +199,14 @@ export interface ApiDoctor {
   rejectionReason?: string | null
   email?: string | null
   phone?: string | null
+  slmcRegNo?: string | null
+  qualifications?: string | null
+  experienceStartYear?: number | null
+  yearsOfExperience?: number | null
+  gender?: string | null
+  dateOfBirth?: string | null
+  nic?: string | null
+  joinedDate?: string | null
   avgConsultMinutes: number
   maxAppointmentsPerHour?: number
   /** Flattened from the posting for the scoped center, or the first posting. */
@@ -379,6 +389,13 @@ export interface ApiDoctorRequest {
   doctorId?: string | null
   doctorName: string
   slmcRegNo?: string | null
+  qualifications?: string | null
+  experienceStartYear?: number | null
+  yearsOfExperience?: number | null
+  gender?: string | null
+  dateOfBirth?: string | null
+  nic?: string | null
+  joinedDate?: string | null
   email?: string | null
   phone?: string | null
   specialization: string
@@ -613,19 +630,29 @@ export const api = {
     return request<{ doctors: ApiDoctor[] }>(`/doctors${qs ? `?${qs}` : ''}`)
   },
 
-  updateDoctor: (id: string, updates: Partial<{ centerId?: string | null; removeCenterId?: string; roomNumber?: string; specialization?: string; currentStatus?: string; maxAppointmentsPerHour?: number; series?: string; email?: string }>) =>
+  updateDoctor: (id: string, updates: Partial<{
+    centerId?: string | null
+    removeCenterId?: string
+    roomNumber?: string
+    specialization?: string
+    slmcRegNo?: string
+    qualifications?: string
+    experienceStartYear?: number
+    yearsOfExperience?: number
+    gender?: string
+    dateOfBirth?: string
+    nic?: string
+    joinedDate?: string
+    currentStatus?: string
+    maxAppointmentsPerHour?: number
+    series?: string
+    email?: string
+    fullName?: string
+    phone?: string
+  }>) =>
     request<{ doctor?: ApiDoctor; message?: string }>(`/doctors/${id}`, {
       method: 'PUT',
-      body: JSON.stringify({
-        centerId: updates.centerId,
-        removeCenterId: updates.removeCenterId,
-        roomNumber: updates.roomNumber,
-        specialization: updates.specialization,
-        currentStatus: updates.currentStatus,
-        maxAppointmentsPerHour: updates.maxAppointmentsPerHour,
-        series: updates.series,
-        email: updates.email,
-      }),
+      body: JSON.stringify(updates),
     }),
 
   createDoctor: (input: {
@@ -662,8 +689,10 @@ export const api = {
       doctorId: string
       doctorName: string
       specialization: string
+      phone?: string
       roomNumber?: string
       series?: string
+      joinedDate?: string
       maxAppointmentsPerHour?: number
     } | {
       requestType: 'CREATE_NEW'
@@ -672,6 +701,13 @@ export const api = {
       doctorName: string
       specialization: string
       slmcRegNo?: string
+      qualifications?: string
+      experienceStartYear?: number
+      yearsOfExperience?: number
+      gender?: string
+      dateOfBirth?: string
+      nic?: string
+      joinedDate?: string
       phone?: string
       email?: string
       roomNumber?: string
