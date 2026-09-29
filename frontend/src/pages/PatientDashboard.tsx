@@ -501,10 +501,16 @@ export default function PatientDashboard() {
             <Menu size={18} />
           </button>
 
-          <div className="patient-global-search">
-            <Search size={14} />
-            <span>Search doctors, clinics, or specialties...</span>
-            <kbd>Ctrl K</kbd>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'rgba(13, 148, 136, 0.08)',
+            border: '1px solid rgba(13, 148, 136, 0.20)',
+            padding: '5px 13px', borderRadius: 20,
+            fontSize: 11.5, fontWeight: 700, color: 'var(--teal-dark)',
+            letterSpacing: '-0.01em', flexShrink: 0
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 8px #10B981', flexShrink: 0 }} />
+            <span>MediQueue Network Live · Real-Time Sync</span>
           </div>
 
           {/* Live token alert banner — displays only when user is in other tabs (not Overview) */}
@@ -730,81 +736,127 @@ export default function PatientDashboard() {
               )}
 
               <div className="patient-overview-content-grid">
-              <div className="patient-overview-browse card glass-form-card">
-                <div className="patient-overview-panel-heading">
-                  <div>
-                    <h3><Calendar size={16} /> Find &amp; Browse Doctors</h3>
-                  </div>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNav('centers')}>View all <span aria-hidden="true">→</span></button>
-                </div>
-                <div className="patient-doctor-search">
-                  <Search size={15} color="var(--blue)" />
-                  <input
-                    value={docSearch}
-                    onChange={event => setDocSearch(event.target.value)}
-                    placeholder="Search by doctor name, specialty, or clinic..."
-                    aria-label="Search by doctor name, specialty, or clinic"
-                  />
-                </div>
-                <div className="patient-specialty-chips">
-                  {['All', 'Cardiology', 'General Medicine', 'Pediatrics', 'Neurology', 'Orthopedics', 'Dermatology'].map(specialty => (
-                    <button
-                      key={specialty}
-                      type="button"
-                      className={selectedSpec === specialty || (specialty === 'General Medicine' && selectedSpec === 'General') ? 'is-selected' : ''}
-                      onClick={() => setSelectedSpec(specialty === 'General Medicine' ? 'General' : specialty)}
-                    >
-                      {specialty}
-                    </button>
-                  ))}
-                </div>
-                <div className="patient-doctor-preview-list">
-                  {filteredDoctors.slice(0, 3).map(doc => (
-                    <div className="patient-doctor-preview" key={doc.id}>
-                      <Avatar name={doc.name} size={34} />
-                      <div className="patient-doctor-info">
-                        <strong>{doc.name}</strong>
-                        <small>{doc.spec || doc.specialization || 'General Medicine'}</small>
-                        {(doc.rating != null || doc.reviewCount != null || doc.reviews != null) && (
-                          <span className="patient-doctor-rating">★ {doc.rating ?? '—'} {doc.reviewCount || doc.reviews ? `(${doc.reviewCount ?? doc.reviews} reviews)` : ''}</span>
-                        )}
+                {/* ROW 1: FIND & BROWSE DOCTORS + UPCOMING APPOINTMENTS SIDE-BY-SIDE */}
+                <div className="patient-side-by-side-row">
+                  {/* FIND & BROWSE DOCTORS CARD */}
+                  <div className="patient-overview-browse card glass-form-card" style={{ margin: 0 }}>
+                    <div className="patient-overview-panel-heading">
+                      <div>
+                        <h3><Calendar size={16} /> Find &amp; Browse Doctors</h3>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          style={{
-                            background: '#10B981', color: '#fff', border: '1px solid #10B981',
-                            fontWeight: 700, borderRadius: 8, whiteSpace: 'nowrap'
-                          }}
-                          onClick={() => setViewingDoctorProfile(doc)}
-                        >
-                          View Doctor Profile
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          style={{ whiteSpace: 'nowrap' }}
-                          onClick={() => { setSelectedDoctorForBooking(doc.id); setShowBookModal(true) }}
-                        >
-                          Book Appointment
-                        </button>
-                      </div>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNav('centers')}>View all <span aria-hidden="true">→</span></button>
                     </div>
-                  ))}
-                  {filteredDoctors.length === 0 && <div className="patient-doctor-empty">Doctors will appear here when available.</div>}
-                </div>
-                {filteredDoctors.length > 3 && (
-                  <button type="button" className="patient-more-doctors" onClick={() => setNav('centers')}>
-                    View more doctors <span aria-hidden="true">→</span>
-                  </button>
-                )}
-              </div>
+                    <div className="patient-doctor-search">
+                      <Search size={15} color="var(--blue)" />
+                      <input
+                        value={docSearch}
+                        onChange={event => setDocSearch(event.target.value)}
+                        placeholder="Search by doctor name, specialty, or clinic..."
+                        aria-label="Search by doctor name, specialty, or clinic"
+                      />
+                    </div>
+                    <div className="patient-specialty-chips">
+                      {['All', 'Cardiology', 'General Medicine', 'Pediatrics', 'Neurology', 'Orthopedics', 'Dermatology'].map(specialty => (
+                        <button
+                          key={specialty}
+                          type="button"
+                          className={selectedSpec === specialty || (specialty === 'General Medicine' && selectedSpec === 'General') ? 'is-selected' : ''}
+                          onClick={() => setSelectedSpec(specialty === 'General Medicine' ? 'General' : specialty)}
+                        >
+                          {specialty}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="patient-doctor-preview-list">
+                      {filteredDoctors.slice(0, 3).map(doc => (
+                        <div className="patient-doctor-preview" key={doc.id}>
+                          <Avatar name={doc.name} size={34} />
+                          <div className="patient-doctor-info">
+                            <strong>{doc.name}</strong>
+                            <small>{doc.spec || doc.specialization || 'General Medicine'}</small>
+                            {(doc.rating != null || doc.reviewCount != null || doc.reviews != null) && (
+                              <span className="patient-doctor-rating">★ {doc.rating ?? '—'} {doc.reviewCount || doc.reviews ? `(${doc.reviewCount ?? doc.reviews} reviews)` : ''}</span>
+                            )}
+                          </div>
+                          <em className="patient-doctor-duration">~ {doc.avgConsultMinutes ?? 15} min<br />per consultation</em>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: '4px 8px', fontSize: 12 }}
+                              onClick={() => setViewingDoctorProfile(doc)}
+                            >
+                              Profile
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => { setSelectedDoctorForBooking(doc.id); setShowBookModal(true) }}
+                            >
+                              Book Slot
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {filteredDoctors.length === 0 && <div className="patient-doctor-empty">Doctors will appear here when available.</div>}
+                    </div>
+                    {filteredDoctors.length > 3 && (
+                      <button type="button" className="patient-more-doctors" onClick={() => setNav('centers')}>
+                        View more doctors <span aria-hidden="true">→</span>
+                      </button>
+                    )}
+                  </div>
 
-              {/* INTERACTIVE CLINIC NAVIGATOR MAP + UPCOMING APPOINTMENTS */}
-              <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 18 }}>
-                
-                {/* REAL INTERACTIVE LEAFLET OPENSTREETMAP CARD */}
+                  {/* UPCOMING APPOINTMENTS CARD */}
+                  <div className="card glass-form-card" style={{ padding: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>Upcoming Appointments</div>
+                      <button onClick={() => setShowBookModal(true)} className="btn btn-ghost btn-sm" style={{ gap: 4, fontSize: 11 }}>
+                        <Plus size={13} /> Book New
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 380, overflowY: 'auto', paddingRight: 2 }}>
+                      {myAppointments.length > 0 ? (
+                        myAppointments.map(u => (
+                          <div key={u.id} style={{ padding: 12, background: '#ffffff', borderRadius: 10, border: '1px solid var(--border-md)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{u.doctorName}</div>
+                                <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>{[u.specialization, u.centerName].filter(Boolean).join(' · ') || '—'}</div>
+                              </div>
+                              <span className="badge badge-blue" style={{ fontSize: 11 }}>{u.queueToken ?? '—'}</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Calendar size={12} /> {u.appointmentDate} at {formatSlotTime(u.slotHour)}
+                              </div>
+                              {u.status !== 'cancelled' && u.status !== 'completed' && (
+                                <button
+                                  onClick={() => setCancellingAppt({ id: u.id, docName: u.doctorName, token: u.queueToken })}
+                                  className="btn btn-sm"
+                                  style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 8px', fontSize: 10.5 }}
+                                >
+                                  Cancel Booking
+                                </button>
+                              )}
+                              {u.status === 'cancelled' && (
+                                <span style={{ fontSize: 10.5, color: '#ef4444', fontWeight: 700, background: 'rgba(239,68,68,0.15)', padding: '2px 6px', borderRadius: 6 }}>
+                                  Cancelled
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
+                          No upcoming appointments. Click "Book New" to schedule.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ROW 2: REAL INTERACTIVE LEAFLET OPENSTREETMAP CARD */}
                 <div className="card glass-form-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <LiveClinicMap
                     centers={centers}
@@ -814,56 +866,6 @@ export default function PatientDashboard() {
                     onBookCenter={cId => openBookingForCenter(cId)}
                   />
                 </div>
-
-                {/* UPCOMING APPOINTMENTS CARD */}
-                <div className="card glass-form-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)' }}>Upcoming Appointments</div>
-                    <button onClick={() => setShowBookModal(true)} className="btn btn-ghost btn-sm" style={{ gap: 4, fontSize: 11 }}>
-                      <Plus size={13} /> Book New
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 380, overflowY: 'auto', paddingRight: 2 }}>
-                    {myAppointments.length > 0 ? (
-                      myAppointments.map(u => (
-                        <div key={u.id} style={{ padding: 12, background: '#ffffff', borderRadius: 10, border: '1px solid var(--border-md)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{u.doctorName}</div>
-                              <div style={{ fontSize: 11.5, color: 'var(--blue-dark)' }}>{[u.specialization, u.centerName].filter(Boolean).join(' · ') || '—'}</div>
-                            </div>
-                            <span className="badge badge-blue" style={{ fontSize: 11 }}>{u.queueToken ?? '—'}</span>
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <Calendar size={12} /> {u.appointmentDate} at {formatSlotTime(u.slotHour)}
-                            </div>
-                            {u.status !== 'cancelled' && u.status !== 'completed' && (
-                              <button
-                                onClick={() => setCancellingAppt({ id: u.id, docName: u.doctorName, token: u.queueToken })}
-                                className="btn btn-sm"
-                                style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 8px', fontSize: 10.5 }}
-                              >
-                                Cancel Booking
-                              </button>
-                            )}
-                            {u.status === 'cancelled' && (
-                              <span style={{ fontSize: 10.5, color: '#ef4444', fontWeight: 700, background: 'rgba(239,68,68,0.15)', padding: '2px 6px', borderRadius: 6 }}>
-                                Cancelled
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
-                        No upcoming appointments. Click "Book New" to schedule.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-              </div>
               </div>
 
               <div className="patient-bottom-panels">
