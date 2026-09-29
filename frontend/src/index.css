@@ -1652,6 +1652,14 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
   margin-top: 18px;
 }
 
+.patient-side-by-side-row {
+  display: grid !important;
+  grid-template-columns: 1.2fr 1fr !important;
+  gap: 18px !important;
+  align-items: stretch !important;
+  width: 100% !important;
+}
+
 .patient-overview-browse {
   padding: 18px 20px;
 }
@@ -2121,7 +2129,8 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
     gap: 16px;
   }
 
-  .patient-overview-content-grid > .responsive-grid-2 {
+  .patient-overview-content-grid > .responsive-grid-2,
+  .patient-side-by-side-row {
     display: grid !important;
     grid-template-columns: 1fr !important;
     gap: 16px !important;
