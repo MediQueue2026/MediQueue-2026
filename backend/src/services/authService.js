@@ -22,8 +22,12 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from './auditService.js';
+import { sendPasswordResetEmail } from './emailService.js';
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const ACCESS_TTL_SECONDS = 15 * 60;            // 15 minutes
 const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;  // 7 days
@@ -83,10 +87,11 @@ function toPublicUser(row) {
     centerId: row.center_id ?? null,
     rejectionReason: row.rejection_reason ?? null,
     centerApprovalStatus: row.center_approval_status ?? (row.rejection_reason ? 'rejected' : 'none'),
+    authProvider: row.auth_provider ?? 'local',
   };
 }
 
-const USER_COLUMNS = 'id, email, full_name, phone, role, avatar_url, is_active, password_hash, rejection_reason';
+const USER_COLUMNS = 'id, email, full_name, phone, role, avatar_url, is_active, password_hash, rejection_reason, auth_provider, google_id';
 /** Adds center_id — the medical center a receptionist manages (see migration 005). */
 const USER_COLUMNS_WITH_CENTER = `${USER_COLUMNS}, center_id`;
 
@@ -526,3 +531,212 @@ export async function getUserById(id) {
 export function verifyAccessToken(token) {
   return jwt.verify(token, ACCESS_SECRET());
 }
+
+/**
+ * Patient Google OAuth Authentication
+ * Strictly allows patient self-registration & sign-in via Google.
+ * Supports:
+ * - Google ID Token (credential / idToken)
+ * - Google Access Token (accessToken from popup flow)
+ */
+export async function loginWithGoogle({ credential, idToken, accessToken }, req) {
+  const token = credential || idToken || accessToken;
+  if (!token) throw new AuthError('Google authentication credential or access token is required.', 400);
+
+  let payload = null;
+
+  // 1. If accessToken passed from custom Google popup flow
+  if (accessToken) {
+    try {
+      const resp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (resp.ok) {
+        payload = await resp.json();
+      }
+    } catch (e) {
+      console.warn('[Google Auth] Access token userinfo fetch failed:', e.message);
+    }
+  }
+
+  // 2. If credential/idToken passed
+  if (!payload && (credential || idToken)) {
+    const rawIdToken = credential || idToken;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: rawIdToken,
+        audience: process.env.GOOGLE_CLIENT_ID || undefined,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      try {
+        const resp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${rawIdToken}`);
+        if (resp.ok) {
+          payload = await resp.json();
+        }
+      } catch (fallbackErr) {
+        console.error('[Google Auth] Token verification failed:', verifyErr.message, fallbackErr.message);
+      }
+    }
+  }
+
+  if (!payload || !payload.email) {
+    throw new AuthError('Failed to verify Google identity. Please try again.', 401);
+  }
+
+  const email = payload.email.toLowerCase().trim();
+  const fullName = payload.name || payload.given_name || email.split('@')[0];
+  const avatarUrl = payload.picture || payload.avatar_url || null;
+  const googleId = payload.sub || payload.id || null;
+
+  let row = await findUserByEmail(email);
+
+  if (!row) {
+    // New patient registration from Google
+    const { data: newUser, error: insertErr } = await supabase
+      .from('users')
+      .insert({
+        email,
+        full_name: fullName,
+        role: 'patient',
+        avatar_url: avatarUrl,
+        auth_provider: 'google',
+        google_id: googleId,
+        password_hash: null,
+      })
+      .select(USER_COLUMNS)
+      .single();
+
+    if (insertErr) {
+      console.error('[Google Auth] Error creating user:', insertErr.message);
+      throw new AuthError('Could not register account with Google. ' + insertErr.message, 500);
+    }
+    row = newUser;
+  } else {
+    // Existing user signing in with Google — update avatar and googleId
+    const updateData = {
+      last_login_at: new Date().toISOString(),
+      ...(googleId ? { google_id: googleId } : {}),
+      ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+    };
+
+    const { data: updatedUser, error: updateErr } = await supabase
+      .from('users')
+      .update(updateData)
+      .eq('id', row.id)
+      .select(USER_COLUMNS)
+      .maybeSingle();
+
+    if (updatedUser) {
+      row = updatedUser;
+    } else if (avatarUrl) {
+      row.avatar_url = avatarUrl;
+    }
+  }
+
+  if (row.is_active === false) {
+    throw new AuthError('This account has been suspended. Contact administrator.', 403);
+  }
+
+  const user = toPublicUser(await addReceptionistCenterStatus(row));
+  await ensurePatientProfile(user, { avatarUrl });
+  const tokens = await issueTokens(user, req);
+
+  await recordLoginAttempt({ userId: user.id, email: user.email, role: user.role, status: 'success', req });
+  return { user, ...tokens };
+}
+
+/**
+ * Request Password Reset Token & Send Email
+ */
+export async function requestPasswordReset({ email, origin }, req) {
+  if (!email) throw new AuthError('Email address is required.', 400);
+  const normalisedEmail = String(email).trim().toLowerCase();
+  const row = await findUserByEmail(normalisedEmail);
+
+  if (!row) {
+    return {
+      success: true,
+      message: 'If an account exists with that email, a password reset link has been sent.',
+    };
+  }
+
+  const resetToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      reset_password_token: resetToken,
+      reset_password_expires_at: expiresAt,
+    })
+    .eq('id', row.id);
+
+  if (error) {
+    console.error('[Password Reset] Error saving reset token:', error.message);
+    throw new AuthError('Could not process password reset request.', 500);
+  }
+
+  const frontendBase = origin || process.env.FRONTEND_URL || 'http://localhost:8443';
+  const resetUrl = `${frontendBase}/reset-password?token=${resetToken}`;
+
+  const emailRes = await sendPasswordResetEmail({
+    to: row.email,
+    userName: row.full_name,
+    resetUrl,
+  });
+
+  return {
+    success: true,
+    message: 'If an account exists with that email, a password reset link has been sent.',
+    devResetUrl: emailRes.provider === 'dev_fallback' ? resetUrl : undefined,
+  };
+}
+
+/**
+ * Reset Password using Token
+ */
+export async function resetPasswordWithToken({ token, newPassword }, req) {
+  if (!token) throw new AuthError('Reset token is required.', 400);
+  if (!newPassword || newPassword.length < 8) {
+    throw new AuthError('New password must be at least 8 characters.', 400);
+  }
+
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('id, email, full_name, reset_password_expires_at')
+    .eq('reset_password_token', token)
+    .maybeSingle();
+
+  if (error || !user) {
+    throw new AuthError('Invalid or expired password reset link.', 400);
+  }
+
+  if (user.reset_password_expires_at && new Date(user.reset_password_expires_at) < new Date()) {
+    throw new AuthError('This password reset link has expired. Please request a new one.', 400);
+  }
+
+  const newHash = newPassword;
+  const { error: updateErr } = await supabase
+    .from('users')
+    .update({
+      password_hash: newHash,
+      reset_password_token: null,
+      reset_password_expires_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', user.id);
+
+  if (updateErr) {
+    throw new AuthError('Failed to reset password. ' + updateErr.message, 500);
+  }
+
+  // Clear existing sessions so old logins are invalidated
+  await supabase.from('refresh_sessions').delete().eq('user_id', user.id);
+
+  return {
+    success: true,
+    message: 'Your password has been successfully reset. You can now sign in with your new password.',
+  };
+}
+

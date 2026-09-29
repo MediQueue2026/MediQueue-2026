@@ -9,6 +9,7 @@ import TvDisplayPage from './pages/TvDisplayPage'
 
 import PatientLoginPage from './pages/auth/PatientLoginPage'
 import RegisterPage from './pages/auth/RegisterPage'
+import ResetPasswordPage from './pages/auth/ResetPasswordPage'
 import StaffLoginPage from './pages/auth/StaffLoginPage'
 import MedicalCenterSignupPage from './pages/auth/MedicalCenterSignupPage'
 import AdminLoginPage from './pages/auth/AdminLoginPage'
@@ -46,6 +47,7 @@ function AppFrame() {
               {/* Patient Auth Portals */}
               <Route path="/login" element={<PatientLoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
 
               {/* Healthcare Staff Auth Portals */}
               <Route path="/staff/login" element={<StaffLoginPage />} />

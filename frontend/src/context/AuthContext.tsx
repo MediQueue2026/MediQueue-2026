@@ -35,6 +35,8 @@ export interface User {
   name: string
   email: string
   role: UserRole
+  avatarUrl?: string | null
+  authProvider?: 'local' | 'google'
   /** The medical center a receptionist manages — null until assigned. */
   centerId?: string | null
   /** Reason provided by an admin when the receptionist's center request was rejected. */
@@ -52,6 +54,7 @@ interface AuthContextType {
   backendOffline: boolean
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<User>
+  loginWithGoogle: (credentialOrToken: string, isAccessToken?: boolean) => Promise<User>
   /** Self-registration. `role` is gated server-side by ALLOW_STAFF_SELF_REGISTER. */
   register: (input: {
     email: string; password: string; fullName: string; phone?: string; role?: Exclude<UserRole, null>
@@ -65,7 +68,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 const DEMO_STORAGE_KEY = 'mediqueue_demo_user'
 
 /** Stand-in identities for offline preview only — these carry no real access. */
-const DEMO_USERS: Record<Exclude<UserRole, null>, { id: string; name: string; email: string }> = {
+const DEMO_USERS: Record<Exclude<UserRole, null>, { id: string; name: string; email: string; avatarUrl?: string }> = {
   patient: { id: 'demo-patient', name: 'Patient User', email: 'patient@mediqueue.io' },
   doctor: { id: 'demo-doctor', name: 'Dr. Ethan Carr', email: 'dr.carr@mediqueue.io' },
   receptionist: { id: 'demo-reception', name: 'Chamari Silva', email: 'reception@mediqueue.io' },
@@ -78,6 +81,8 @@ function fromApiUser(u: ApiUser): User {
     name: u.fullName,
     email: u.email,
     role: u.role,
+    avatarUrl: u.avatarUrl ?? null,
+    authProvider: u.authProvider ?? 'local',
     centerId: u.centerId ?? null,
     rejectionReason: u.rejectionReason ?? null,
     centerApprovalStatus: u.centerApprovalStatus ?? (u.rejectionReason ? 'rejected' : 'none'),
@@ -142,6 +147,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [])
 
+  const loginWithGoogle = useCallback(async (credentialOrToken: string, isAccessToken?: boolean): Promise<User> => {
+    try {
+      const res = await api.loginWithGoogle(credentialOrToken, isAccessToken)
+      setAccessToken(res.accessToken)
+      setBackendOffline(false)
+      const next = fromApiUser(res.user)
+      setUser(next)
+      return next
+    } catch (err) {
+      if (err instanceof ApiOfflineError) setBackendOffline(true)
+      throw err instanceof ApiError ? err : new ApiError('Google sign-in failed. Please try again.')
+    }
+  }, [])
+
   const register = useCallback(
     async (input: {
       email: string;
@@ -197,11 +216,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       backendOffline,
       isAuthenticated: !!user,
       login,
+      loginWithGoogle,
       register,
       loginAsDemo,
       logout,
     }),
-    [user, loading, backendOffline, login, register, loginAsDemo, logout],
+    [user, loading, backendOffline, login, loginWithGoogle, register, loginAsDemo, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

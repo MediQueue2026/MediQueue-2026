@@ -13,9 +13,12 @@ import {
   createStaffUser,
   getUserById,
   login,
+  loginWithGoogle,
   logout,
   refresh,
   register,
+  requestPasswordReset,
+  resetPasswordWithToken,
 } from '../services/authService.js';
 
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -107,3 +110,33 @@ export async function createStaff(req, res, next) {
     fail(res, err, next);
   }
 }
+
+export async function loginGoogleUser(req, res, next) {
+  try {
+    const { user, accessToken, refreshToken, expiresIn } = await loginWithGoogle(req.body, req);
+    res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
+    res.json({ user, accessToken, expiresIn });
+  } catch (err) {
+    fail(res, err, next);
+  }
+}
+
+export async function forgotPasswordUser(req, res, next) {
+  try {
+    const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '');
+    const result = await requestPasswordReset({ email: req.body?.email, origin }, req);
+    res.json(result);
+  } catch (err) {
+    fail(res, err, next);
+  }
+}
+
+export async function resetPasswordUser(req, res, next) {
+  try {
+    const result = await resetPasswordWithToken(req.body, req);
+    res.json(result);
+  } catch (err) {
+    fail(res, err, next);
+  }
+}
+
