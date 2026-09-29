@@ -3,11 +3,14 @@ import { supabase } from '../config/supabase.js';
 
 import {
   createStaff,
+  forgotPasswordUser,
   getMe,
+  loginGoogleUser,
   loginUser,
   logoutUser,
   refreshSession,
   registerUser,
+  resetPasswordUser,
 } from '../controllers/authController.js';
 
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
@@ -108,6 +111,9 @@ router.get('/db-check', async (req, res) => {
 
 // ── Auth Routes ─────────────────────────────────────────────────────────────
 router.post('/auth/login', loginUser);
+router.post('/auth/google', loginGoogleUser);
+router.post('/auth/forgot-password', forgotPasswordUser);
+router.post('/auth/reset-password', resetPasswordUser);
 router.post('/auth/register', registerUser);
 router.post('/auth/refresh', refreshSession);
 router.post('/auth/logout', logoutUser);

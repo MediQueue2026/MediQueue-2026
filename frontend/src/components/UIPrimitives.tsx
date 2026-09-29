@@ -1,9 +1,27 @@
 import React from 'react'
 
-export function Avatar({ name, size = 32, color = '#e2f9f7', text = '#0d968d' }: {
-  name: string; size?: number; color?: string; text?: string
+export function Avatar({ name, size = 32, color = '#e2f9f7', text = '#0d968d', src }: {
+  name: string; size?: number; color?: string; text?: string; src?: string | null
 }) {
-  const initials = name.replace(/^Dr\.?\s+/i, '').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  const [imgError, setImgError] = React.useState(false)
+
+  if (src && !imgError) {
+    return (
+      <img
+        src={src}
+        alt={name || 'Avatar'}
+        onError={() => setImgError(true)}
+        style={{
+          width: size, height: size, borderRadius: '50%',
+          objectFit: 'cover', flexShrink: 0,
+          border: '1.5px solid rgba(16, 185, 129, 0.35)',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.1)'
+        }}
+      />
+    )
+  }
+
+  const initials = (name || '').replace(/^Dr\.?\s+/i, '').split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'U'
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',

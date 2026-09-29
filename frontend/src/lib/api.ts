@@ -160,6 +160,7 @@ export interface ApiUser {
   /** Reason provided by an admin when the receptionist's center request was rejected. */
   rejectionReason?: string | null
   centerApprovalStatus?: 'none' | 'pending' | 'approved' | 'rejected'
+  authProvider?: 'local' | 'google'
 }
 
 export interface AuthSessionResponse {
@@ -564,6 +565,24 @@ export const api = {
     rawRequest<AuthSessionResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+    }),
+
+  loginWithGoogle: (credentialOrToken: string, isAccessToken = false) =>
+    rawRequest<AuthSessionResponse>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify(isAccessToken ? { accessToken: credentialOrToken } : { credential: credentialOrToken }),
+    }),
+
+  forgotPassword: (email: string) =>
+    rawRequest<{ success: boolean; message: string; devResetUrl?: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, newPassword: string) =>
+    rawRequest<{ success: boolean; message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, newPassword }),
     }),
 
   register: (input: {

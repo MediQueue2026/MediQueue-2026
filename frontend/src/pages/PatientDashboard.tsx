@@ -114,6 +114,7 @@ export default function PatientDashboard() {
     email: user?.email || '',
     fullName: user?.name || 'Patient User',
     phone: '',
+    avatarUrl: user?.avatarUrl || null,
     nic: '',
     emergencyContactName: '',
     emergencyContactPhone: '',
@@ -206,6 +207,7 @@ export default function PatientDashboard() {
           setProfile(prev => ({
             ...prev,
             ...pData,
+            avatarUrl: pData.avatarUrl || user?.avatarUrl || prev.avatarUrl || null,
             email: pData.email || prev.email || user?.email || '',
             fullName: pData.fullName || prev.fullName || user?.name || 'Patient User',
             smsAlertsEnabled: pData.smsAlertsEnabled ?? prev.smsAlertsEnabled ?? true,
@@ -473,7 +475,7 @@ export default function PatientDashboard() {
         </div>
         <hr className="divider" style={{ margin: '12px 0' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 10px' }}>
-          <Avatar name={displayName} size={32} />
+          <Avatar name={displayName} src={profile.avatarUrl || user?.avatarUrl} size={32} />
           <div style={{ overflow: 'hidden', minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {displayName}
@@ -1192,6 +1194,32 @@ export default function PatientDashboard() {
               </div>
 
               <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+                {/* Profile Photo & Account Status Banner */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px',
+                  background: '#ffffff', borderRadius: 14, border: '1px solid var(--border-md)',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                }}>
+                  <Avatar name={profile.fullName || displayName} src={profile.avatarUrl || user?.avatarUrl} size={54} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)' }}>
+                      {profile.fullName || displayName}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
+                      {profile.email || user?.email}
+                    </div>
+                    {(profile.avatarUrl || user?.avatarUrl || user?.authProvider === 'google') && (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        fontSize: 11, fontWeight: 700, color: '#0D9488',
+                        background: 'rgba(13, 148, 136, 0.1)', padding: '2px 8px', borderRadius: 6, marginTop: 6
+                      }}>
+                        ● Google Account Connected
+                      </span>
+                    )}
+                  </div>
+                </div>
 
                 {/* Section 1: Personal & Contact Information */}
                 <div style={{ padding: 18, background: '#ffffff', borderRadius: 12, border: '1px solid var(--border-md)' }}>

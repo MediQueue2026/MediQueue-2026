@@ -3,6 +3,8 @@ export interface PatientProfile {
   email: string;
   fullName: string;
   phone: string;
+  avatarUrl?: string | null;
+  authProvider?: string | null;
   nic?: string;
   emergencyContactName?: string;
   emergencyContactPhone?: string;
