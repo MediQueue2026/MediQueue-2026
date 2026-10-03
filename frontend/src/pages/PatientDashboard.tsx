@@ -29,6 +29,28 @@ import {
 } from '../services/patientService'
 import { PatientProfile, HealthRecordItem, AppointmentItem } from '../types/patient'
 import type { ApiDelayAlert } from '../lib/api'
+import DateOfBirthInput from '../components/DateOfBirthInput'
+
+/** Calculates age from ISO or YYYY-MM-DD birth date string */
+function calculateAge(dobString?: string): number | null {
+  if (!dobString || typeof dobString !== 'string') return null
+  const parts = dobString.split('-')
+  if (parts.length < 3) return null
+  const birthYear = parseInt(parts[0], 10)
+  const birthMonth = parseInt(parts[1], 10)
+  const birthDay = parseInt(parts[2], 10)
+  if (!birthYear || !birthMonth || !birthDay || isNaN(birthYear) || isNaN(birthMonth) || isNaN(birthDay)) return null
+
+  const today = new Date()
+  let age = today.getFullYear() - birthYear
+  const currentMonth = today.getMonth() + 1
+  const currentDay = today.getDate()
+
+  if (currentMonth < birthMonth || (currentMonth === birthMonth && currentDay < birthDay)) {
+    age--
+  }
+  return age >= 0 ? age : null
+}
 
 /** "just now" / "12 min ago" / "2 h ago" — for the delay feed timestamps. */
 function timeAgo(iso: string): string {
@@ -118,9 +140,11 @@ export default function PatientDashboard() {
     nic: '',
     emergencyContactName: '',
     emergencyContactPhone: '',
-    bloodGroup: 'O+',
+    bloodGroup: '',
     allergies: '',
     chronicConditions: '',
+    dateOfBirth: '',
+    gender: '',
     smsAlertsEnabled: true,
     delayAlertsEnabled: true,
   })
@@ -582,7 +606,9 @@ export default function PatientDashboard() {
                     </h2>
                     <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
                       Account: <span style={{ color: 'var(--text-2)', fontWeight: 600 }}>{profile.email}</span>
-                      {profile.bloodGroup && <span> · Blood Group: <strong style={{ color: 'var(--blue-dark)' }}>{profile.bloodGroup}</strong></span>}
+                      <span> · Blood Group: <strong style={{ color: profile.bloodGroup ? 'var(--blue-dark)' : 'var(--text-4)' }}>{profile.bloodGroup || ''}</strong></span>
+                      {profile.gender && <span> · Gender: <strong style={{ color: 'var(--blue-dark)' }}>{profile.gender}</strong></span>}
+                      {calculateAge(profile.dateOfBirth) !== null && <span> · Age: <strong style={{ color: 'var(--blue-dark)' }}>{calculateAge(profile.dateOfBirth)} yrs</strong></span>}
                     </div>
                   </div>
 
@@ -1264,6 +1290,25 @@ export default function PatientDashboard() {
                         style={{ height: 42, fontSize: 13.5 }}
                       />
                     </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Gender</label>
+                      <select
+                        className="input"
+                        value={profile.gender || 'Male'}
+                        onChange={e => setProfile({ ...profile, gender: e.target.value })}
+                        style={{ height: 42, fontSize: 13.5 }}
+                      >
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                      </select>
+                    </div>
+                    <div>
+                      <DateOfBirthInput
+                        value={profile.dateOfBirth || ''}
+                        onChange={val => setProfile({ ...profile, dateOfBirth: val })}
+                        idPrefix="settings-dob"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1306,10 +1351,11 @@ export default function PatientDashboard() {
                       <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Blood Group</label>
                       <select
                         className="input"
-                        value={profile.bloodGroup || 'O+'}
+                        value={profile.bloodGroup || ''}
                         onChange={e => setProfile({ ...profile, bloodGroup: e.target.value })}
                         style={{ height: 42, fontSize: 13.5 }}
                       >
+                        <option value="">-- Select Blood Group --</option>
                         {['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'].map(b => (
                           <option key={b} value={b}>{b}</option>
                         ))}

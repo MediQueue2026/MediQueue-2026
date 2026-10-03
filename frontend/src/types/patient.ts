@@ -11,6 +11,8 @@ export interface PatientProfile {
   bloodGroup?: string;
   allergies?: string;
   chronicConditions?: string;
+  dateOfBirth?: string;
+  gender?: string;
   smsAlertsEnabled: boolean;
   delayAlertsEnabled: boolean;
 }

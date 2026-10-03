@@ -275,6 +275,8 @@ CREATE TABLE public.patient_profiles (
   blood_group TEXT,
   allergies TEXT,
   chronic_conditions TEXT,
+  date_of_birth DATE,
+  gender TEXT,
   sms_alerts_enabled BOOLEAN DEFAULT TRUE,
   delay_alerts_enabled BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()

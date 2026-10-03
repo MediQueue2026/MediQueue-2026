@@ -28,7 +28,7 @@ export async function getPatientProfile(req, res, next) {
         .from('patient_profiles')
         .insert([{
           user_id: userId,
-          blood_group: 'O+',
+          blood_group: null,
           sms_alerts_enabled: true,
           delay_alerts_enabled: true
         }])
@@ -46,9 +46,11 @@ export async function getPatientProfile(req, res, next) {
       nic: profile?.nic || '',
       emergencyContactName: profile?.emergency_contact_name || '',
       emergencyContactPhone: profile?.emergency_contact_phone || '',
-      bloodGroup: profile?.blood_group || 'O+',
+      bloodGroup: profile?.blood_group || '',
       allergies: profile?.allergies || '',
       chronicConditions: profile?.chronic_conditions || '',
+      dateOfBirth: profile?.date_of_birth || '',
+      gender: profile?.gender || '',
       smsAlertsEnabled: profile?.sms_alerts_enabled ?? true,
       delayAlertsEnabled: profile?.delay_alerts_enabled ?? true,
     };
@@ -73,9 +75,13 @@ export async function updatePatientProfile(req, res, next) {
       bloodGroup,
       allergies,
       chronicConditions,
+      dateOfBirth,
+      gender,
       smsAlertsEnabled,
       delayAlertsEnabled
     } = req.body;
+
+    const cleanBloodGroup = (bloodGroup && typeof bloodGroup === 'string' && bloodGroup.trim()) ? bloodGroup.trim() : null;
 
     // 1. Update basic user table if present
     if (fullName || phone) {
@@ -86,24 +92,45 @@ export async function updatePatientProfile(req, res, next) {
       if (userErr) console.warn('User table update notice:', userErr.message);
     }
 
-    // 2. Upsert into patient_profiles table
-    const { data, error } = await supabase
+    // 2. Persist into patient_profiles table (Check existing -> update or insert)
+    const { data: existing } = await supabase
       .from('patient_profiles')
-      .upsert({
-        user_id: userId,
-        nic,
-        emergency_contact_name: emergencyContactName,
-        emergency_contact_phone: emergencyContactPhone,
-        blood_group: bloodGroup,
-        allergies,
-        chronic_conditions: chronicConditions,
-        sms_alerts_enabled: smsAlertsEnabled,
-        delay_alerts_enabled: delayAlertsEnabled
-      }, { onConflict: 'user_id' })
-      .select();
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
 
-    if (error) {
-      console.warn('patient_profiles upsert notice:', error.message);
+    const profileData = {
+      user_id: userId,
+      nic: nic || '',
+      emergency_contact_name: emergencyContactName || '',
+      emergency_contact_phone: emergencyContactPhone || '',
+      blood_group: cleanBloodGroup,
+      allergies: allergies || '',
+      chronic_conditions: chronicConditions || '',
+      date_of_birth: dateOfBirth || null,
+      gender: gender || null,
+      sms_alerts_enabled: smsAlertsEnabled ?? true,
+      delay_alerts_enabled: delayAlertsEnabled ?? true
+    };
+
+    let pData, pError;
+    if (existing?.id) {
+      ({ data: pData, error: pError } = await supabase
+        .from('patient_profiles')
+        .update(profileData)
+        .eq('user_id', userId)
+        .select()
+        .maybeSingle());
+    } else {
+      ({ data: pData, error: pError } = await supabase
+        .from('patient_profiles')
+        .insert([profileData])
+        .select()
+        .maybeSingle());
+    }
+
+    if (pError) {
+      console.warn('patient_profiles save error:', pError.message);
     }
 
     res.json({
@@ -117,9 +144,11 @@ export async function updatePatientProfile(req, res, next) {
         nic: nic || '',
         emergencyContactName: emergencyContactName || '',
         emergencyContactPhone: emergencyContactPhone || '',
-        bloodGroup: bloodGroup || 'O+',
+        bloodGroup: cleanBloodGroup || '',
         allergies: allergies || '',
         chronicConditions: chronicConditions || '',
+        dateOfBirth: dateOfBirth || '',
+        gender: gender || '',
         smsAlertsEnabled: smsAlertsEnabled ?? true,
         delayAlertsEnabled: delayAlertsEnabled ?? true
       }

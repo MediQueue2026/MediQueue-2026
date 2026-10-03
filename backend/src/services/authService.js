@@ -276,7 +276,7 @@ export async function login({ email, password }, req) {
   return { user, ...tokens };
 }
 
-export async function register({ email, password, fullName, phone, role, nic, emergencyContactName, emergencyContactPhone, bloodGroup, allergies }, req) {
+export async function register({ email, password, fullName, phone, role, nic, emergencyContactName, emergencyContactPhone, bloodGroup, allergies, dateOfBirth, gender }, req) {
   if (!email || !password || !fullName) {
     throw new AuthError('Full name, email and password are required.', 400);
   }
@@ -317,7 +317,7 @@ export async function register({ email, password, fullName, phone, role, nic, em
 
   const user = toPublicUser(data);
   await ensureDoctorProfile(user);
-  await ensurePatientProfile(user, { nic, emergencyContactName, emergencyContactPhone, bloodGroup, allergies });
+  await ensurePatientProfile(user, { nic, emergencyContactName, emergencyContactPhone, bloodGroup, allergies, dateOfBirth, gender });
 
   await writeAuditLog({
     actorName: user.fullName,
@@ -348,9 +348,11 @@ async function ensurePatientProfile(user, profileExtra = {}) {
       nic: profileExtra.nic || '',
       emergency_contact_name: profileExtra.emergencyContactName || '',
       emergency_contact_phone: profileExtra.emergencyContactPhone || '',
-      blood_group: profileExtra.bloodGroup || 'O+',
+      blood_group: profileExtra.bloodGroup || null,
       allergies: profileExtra.allergies || '',
       chronic_conditions: '',
+      date_of_birth: profileExtra.dateOfBirth || null,
+      gender: profileExtra.gender || null,
       sms_alerts_enabled: true,
       delay_alerts_enabled: true,
     }]);
