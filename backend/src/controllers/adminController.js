@@ -15,7 +15,20 @@ function mapAuditLogRow(row) {
   };
 }
 
-function mapDbUserToPublic(row) {
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null;
+  const dob = new Date(dateOfBirth);
+  if (isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+    age--;
+  }
+  return age >= 0 ? age : null;
+}
+
+function mapDbUserToPublic(row, extra = {}) {
   return {
     id: row.id,
     email: row.email,
@@ -25,12 +38,17 @@ function mapDbUserToPublic(row) {
     avatarUrl: row.avatar_url ?? row.avatarUrl ?? null,
     createdAt: row.created_at ?? row.createdAt ?? null,
     isActive: row.is_active !== false,
+    age: extra.age ?? null,
+    dateOfBirth: extra.dateOfBirth ?? null,
+    specialization: extra.specialization ?? null,
+    medicalCenters: extra.medicalCenters || [],
+    currentStatus: extra.currentStatus ?? null,
   };
 }
 
 export async function getUsers(req, res, next) {
   try {
-    const { data, error } = await supabase
+    const { data: usersData, error } = await supabase
       .from('users')
       .select('id, email, full_name, phone, role, avatar_url, created_at, is_active')
       .order('created_at', { ascending: false });
@@ -39,7 +57,85 @@ export async function getUsers(req, res, next) {
       return res.status(500).json({ error: error.message });
     }
 
-    res.json({ users: (data || []).map(mapDbUserToPublic) });
+    const users = usersData || [];
+    const patientIds = users.filter(u => u.role === 'patient').map(u => u.id);
+    const doctorIds = users.filter(u => u.role === 'doctor').map(u => u.id);
+
+    const patientExtras = new Map();
+    const doctorExtras = new Map();
+
+    try {
+      // 1. Fetch patient profiles & appointments
+      if (patientIds.length > 0) {
+        const [profilesRes, appointmentsRes] = await Promise.all([
+          supabase.from('patient_profiles').select('user_id, date_of_birth, nic').in('user_id', patientIds),
+          supabase.from('appointments').select('patient_id, center_id, medical_centers(id, name)').in('patient_id', patientIds),
+        ]);
+
+        for (const p of profilesRes.data || []) {
+          patientExtras.set(p.user_id, {
+            dateOfBirth: p.date_of_birth,
+            age: calculateAge(p.date_of_birth),
+            medicalCenters: [],
+          });
+        }
+
+        for (const apt of appointmentsRes.data || []) {
+          const centerName = apt.medical_centers?.name;
+          if (centerName && apt.patient_id) {
+            let extra = patientExtras.get(apt.patient_id);
+            if (!extra) {
+              extra = { dateOfBirth: null, age: null, medicalCenters: [] };
+              patientExtras.set(apt.patient_id, extra);
+            }
+            if (!extra.medicalCenters.includes(centerName)) {
+              extra.medicalCenters.push(centerName);
+            }
+          }
+        }
+      }
+
+      // 2. Fetch doctors info & center assignments
+      if (doctorIds.length > 0) {
+        const { data: doctorsData } = await supabase
+          .from('doctors')
+          .select('id, user_id, specialization, current_status, center_id, medical_centers(id, name), doctor_center_assignments(center_id, medical_centers(id, name))')
+          .in('user_id', doctorIds);
+
+        for (const doc of doctorsData || []) {
+          const centers = [];
+          if (doc.medical_centers?.name && !centers.includes(doc.medical_centers.name)) {
+            centers.push(doc.medical_centers.name);
+          }
+          if (Array.isArray(doc.doctor_center_assignments)) {
+            for (const assign of doc.doctor_center_assignments) {
+              const name = assign.medical_centers?.name;
+              if (name && !centers.includes(name)) {
+                centers.push(name);
+              }
+            }
+          }
+          doctorExtras.set(doc.user_id, {
+            specialization: doc.specialization,
+            currentStatus: doc.current_status,
+            medicalCenters: centers,
+          });
+        }
+      }
+    } catch (enrichErr) {
+      console.warn('Enriching users with patient/doctor metadata warning:', enrichErr.message);
+    }
+
+    const publicUsers = users.map(u => {
+      const extra = u.role === 'patient'
+        ? (patientExtras.get(u.id) || {})
+        : u.role === 'doctor'
+          ? (doctorExtras.get(u.id) || {})
+          : {};
+      return mapDbUserToPublic(u, extra);
+    });
+
+    res.json({ users: publicUsers });
   } catch (err) {
     next(err);
   }

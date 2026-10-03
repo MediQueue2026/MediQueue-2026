@@ -15,7 +15,7 @@ import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
 import { ViewReportModal } from '../components/ViewReportModal'
 import { api } from '../lib/api'
-import type { ApiCenter, ApiDoctor, AuditLog } from '../lib/api'
+import type { ApiCenter, ApiDoctor, ApiUser, AuditLog } from '../lib/api'
 
 const NAV_ADMIN = [
   { id: 'health', icon: <Activity size={15} />, label: 'System Health' },
@@ -28,11 +28,17 @@ const NAV_ADMIN = [
 type StaffMember = {
   id: string
   name: string
+  rawRole: string
   role: string
   dept: string
   email: string
   status: 'active' | 'suspended'
   phone: string
+  age?: number | null
+  dateOfBirth?: string | null
+  specialization?: string | null
+  medicalCenters?: string[]
+  currentStatus?: string | null
   createdAt?: string | null
 }
 
@@ -62,14 +68,20 @@ const formatDept = (role: string) => {
   }
 }
 
-const mapApiUserToStaffMember = (user: { id: string; email: string; fullName: string; phone: string | null; role: string; isActive: boolean; createdAt?: string | null }): StaffMember => ({
+const mapApiUserToStaffMember = (user: ApiUser): StaffMember => ({
   id: user.id,
   name: user.fullName || user.email || 'Unnamed User',
+  rawRole: user.role,
   role: formatRoleLabel(user.role),
-  dept: formatDept(user.role),
+  dept: user.specialization || formatDept(user.role),
   email: user.email,
   status: user.isActive ? 'active' : 'suspended',
   phone: user.phone || '',
+  age: user.age ?? null,
+  dateOfBirth: user.dateOfBirth ?? null,
+  specialization: user.specialization ?? null,
+  medicalCenters: user.medicalCenters || [],
+  currentStatus: user.currentStatus ?? null,
   createdAt: user.createdAt,
 })
 
@@ -166,7 +178,8 @@ export default function AdminPanel() {
   const [nav, setNav] = useState('health')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [staffSearch, setStaffSearch] = useState('')
-  const [staffRoleFilter, setStaffRoleFilter] = useState('all')
+  const [staffSubTab, setStaffSubTab] = useState<'patients' | 'doctors' | 'centers'>('patients')
+  const [staffStatusFilter, setStaffStatusFilter] = useState('all')
   const [showAddCenterModal, setShowAddCenterModal] = useState(false)
   const [showAssignDoctorModal, setShowAssignDoctorModal] = useState(false)
   const [showBroadcastModal, setShowBroadcastModal] = useState(false)
@@ -322,10 +335,16 @@ export default function AdminPanel() {
       let active = true
       setLoadingUsers(true)
       fetchPendingNewDoctorRequests()
-      api.getUsers()
-        .then(r => {
+      Promise.all([
+        api.getUsers(),
+        api.getCenters().catch(() => ({ centers: [] })),
+        api.getDoctors().catch(() => ({ doctors: [] })),
+      ])
+        .then(([usersRes, centersRes, docsRes]) => {
           if (!active) return
-          setStaffMembers(r.users.map(mapApiUserToStaffMember))
+          setStaffMembers(usersRes.users.map(mapApiUserToStaffMember))
+          if (centersRes?.centers) setCenters(centersRes.centers)
+          if (docsRes?.doctors) setDoctors(docsRes.doctors)
         })
         .catch(err => {
           if (!active) return
@@ -342,24 +361,48 @@ export default function AdminPanel() {
     return undefined
   }, [nav])
 
-  const filteredStaff = staffMembers.filter(s => {
-    const searchText = staffSearch.toLowerCase()
-    const matchesSearch =
-      s.name.toLowerCase().includes(searchText) ||
-      s.role.toLowerCase().includes(searchText) ||
-      s.dept.toLowerCase().includes(searchText) ||
-      s.email.toLowerCase().includes(searchText)
+  const query = staffSearch.trim().toLowerCase()
 
-    const matchesRole = staffRoleFilter === 'all' || s.role.toLowerCase() === staffRoleFilter.toLowerCase()
+  const patientsList = staffMembers.filter(s => s.rawRole === 'patient')
+  const doctorsList = staffMembers.filter(s => s.rawRole === 'doctor')
 
-    return matchesSearch && matchesRole
+  const filteredPatients = patientsList.filter(s => {
+    const matchesSearch = !query ||
+      s.name.toLowerCase().includes(query) ||
+      s.email.toLowerCase().includes(query) ||
+      s.phone.toLowerCase().includes(query) ||
+      (s.medicalCenters || []).some(c => c.toLowerCase().includes(query))
+    const matchesStatus = staffStatusFilter === 'all' || s.status === staffStatusFilter
+    return matchesSearch && matchesStatus
   })
 
-  const staffSummaryCards = [
-    { icon: <Users size={18} />, label: 'Total Users', value: staffMembers.length.toLocaleString(), sub: 'All registered accounts', accent: 'var(--text-1)' },
-    { icon: <UserCheck size={18} />, label: 'Active Users', value: staffMembers.filter(member => member.status === 'active').length.toLocaleString(), sub: 'Currently enabled', accent: '#0d968d' },
-    { icon: <UserX size={18} />, label: 'Suspended Users', value: staffMembers.filter(member => member.status === 'suspended').length.toLocaleString(), sub: 'Needs review', accent: '#f50b0b' },
-  ]
+  const filteredDoctors = doctorsList.filter(s => {
+    const matchedDoc = doctors.find(d => d.email === s.email || d.id === s.id)
+    const allDocCenters = Array.from(new Set([
+      ...(s.medicalCenters || []),
+      ...(matchedDoc?.centers?.map(c => c.centerName).filter((c): c is string => Boolean(c)) || []),
+      ...(matchedDoc?.centerName ? [matchedDoc.centerName] : [])
+    ])).filter((c): c is string => Boolean(c))
+    const matchesSearch = !query ||
+      s.name.toLowerCase().includes(query) ||
+      (s.specialization || s.dept || '').toLowerCase().includes(query) ||
+      s.email.toLowerCase().includes(query) ||
+      s.phone.toLowerCase().includes(query) ||
+      allDocCenters.some(c => c.toLowerCase().includes(query))
+    const matchesStatus = staffStatusFilter === 'all' || s.status === staffStatusFilter
+    return matchesSearch && matchesStatus
+  })
+
+  const filteredCenters = centers.filter(c => {
+    const matchesSearch = !query ||
+      c.name.toLowerCase().includes(query) ||
+      (c.province || '').toLowerCase().includes(query) ||
+      (c.city || '').toLowerCase().includes(query) ||
+      (c.email || '').toLowerCase().includes(query) ||
+      (c.phone || '').toLowerCase().includes(query)
+    const matchesStatus = staffStatusFilter === 'all' || (c.status || 'operational') === staffStatusFilter
+    return matchesSearch && matchesStatus
+  })
 
   const normalizeAuditEventType = (value?: string) => {
     const normalized = String(value ?? '').trim().toLowerCase()
@@ -925,9 +968,6 @@ export default function AdminPanel() {
                   <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Staff & Role Management</h3>
                   <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Review users, update roles, and manage access across the system.</div>
                 </div>
-                <button className="btn btn-primary" style={{ gap: 6, height: 40 }}>
-                  <Plus size={15} /> Add Staff Member
-                </button>
               </div>
 
               {/* PENDING NEW DOCTOR REQUESTS (Receptionist → System Admin approval) */}
@@ -1007,12 +1047,79 @@ export default function AdminPanel() {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 18 }}>
-                {staffSummaryCards.map(card => (
-                  <StatCard key={card.label} icon={card.icon} label={card.label} value={card.value} sub={card.sub} accent={card.accent} />
-                ))}
+              {/* THREE COLOR-CODED SUB-TABS (Patients: Blue, Doctors: Green, Medical Centers: Yellow) */}
+              <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => { setStaffSubTab('patients'); setStaffStatusFilter('all'); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 9, padding: '10px 20px', borderRadius: 12,
+                    fontSize: 13.5, fontWeight: staffSubTab === 'patients' ? 800 : 600,
+                    cursor: 'pointer', transition: 'all 0.15s ease',
+                    background: staffSubTab === 'patients' ? '#2563EB' : 'rgba(37, 99, 235, 0.06)',
+                    color: staffSubTab === 'patients' ? '#ffffff' : '#2563EB',
+                    border: `1.5px solid ${staffSubTab === 'patients' ? '#2563EB' : 'rgba(37, 99, 235, 0.25)'}`,
+                    boxShadow: staffSubTab === 'patients' ? '0 4px 12px rgba(37, 99, 235, 0.25)' : 'none'
+                  }}
+                >
+                  <Users size={16} /> Patients
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+                    background: staffSubTab === 'patients' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(37, 99, 235, 0.12)',
+                    color: staffSubTab === 'patients' ? '#ffffff' : '#2563EB'
+                  }}>
+                    {patientsList.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setStaffSubTab('doctors'); setStaffStatusFilter('all'); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 9, padding: '10px 20px', borderRadius: 12,
+                    fontSize: 13.5, fontWeight: staffSubTab === 'doctors' ? 800 : 600,
+                    cursor: 'pointer', transition: 'all 0.15s ease',
+                    background: staffSubTab === 'doctors' ? '#10B981' : 'rgba(16, 185, 129, 0.06)',
+                    color: staffSubTab === 'doctors' ? '#ffffff' : '#059669',
+                    border: `1.5px solid ${staffSubTab === 'doctors' ? '#10B981' : 'rgba(16, 185, 129, 0.25)'}`,
+                    boxShadow: staffSubTab === 'doctors' ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'none'
+                  }}
+                >
+                  <Stethoscope size={16} /> Doctors
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+                    background: staffSubTab === 'doctors' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(16, 185, 129, 0.12)',
+                    color: staffSubTab === 'doctors' ? '#ffffff' : '#059669'
+                  }}>
+                    {doctorsList.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setStaffSubTab('centers'); setStaffStatusFilter('all'); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 9, padding: '10px 20px', borderRadius: 12,
+                    fontSize: 13.5, fontWeight: staffSubTab === 'centers' ? 800 : 600,
+                    cursor: 'pointer', transition: 'all 0.15s ease',
+                    background: staffSubTab === 'centers' ? '#F59E0B' : 'rgba(245, 158, 11, 0.08)',
+                    color: staffSubTab === 'centers' ? '#ffffff' : '#D97706',
+                    border: `1.5px solid ${staffSubTab === 'centers' ? '#F59E0B' : 'rgba(245, 158, 11, 0.3)'}`,
+                    boxShadow: staffSubTab === 'centers' ? '0 4px 12px rgba(245, 158, 11, 0.25)' : 'none'
+                  }}
+                >
+                  <Building2 size={16} /> Medical Centers
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+                    background: staffSubTab === 'centers' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(245, 158, 11, 0.14)',
+                    color: staffSubTab === 'centers' ? '#ffffff' : '#D97706'
+                  }}>
+                    {centers.length}
+                  </span>
+                </button>
               </div>
 
+              {/* SEARCH BAR & STATUS DROPDOWN (matching the provided layout) */}
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18, alignItems: 'center' }}>
                 <div style={{ position: 'relative', maxWidth: 520, flex: 1, minWidth: 280 }}>
                   <Search size={15} color="var(--text-4)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
@@ -1027,77 +1134,260 @@ export default function AdminPanel() {
                 <div style={{ position: 'relative', minWidth: 180 }}>
                   <select
                     className="input"
-                    value={staffRoleFilter}
-                    onChange={e => setStaffRoleFilter(e.target.value)}
+                    value={staffStatusFilter}
+                    onChange={e => setStaffStatusFilter(e.target.value)}
                     style={{ height: 44, width: '100%', fontSize: 13.5, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff', padding: '0 38px 0 14px', appearance: 'none', cursor: 'pointer' }}
                   >
-                    <option value="all">All Roles</option>
-                    <option value="admin">Admin</option>
-                    <option value="doctor">Doctor</option>
-                    <option value="receptionist">Receptionist</option>
-                    <option value="patient">Patient</option>
+                    {staffSubTab === 'centers' ? (
+                      <>
+                        <option value="all">All Status</option>
+                        <option value="operational">Operational</option>
+                        <option value="maintenance">Maintenance</option>
+                        <option value="closed">Closed</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="all">All Status</option>
+                        <option value="active">Active</option>
+                        <option value="suspended">Suspended</option>
+                      </>
+                    )}
                   </select>
                   <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-4)' }}>▾</div>
                 </div>
               </div>
 
+              {/* TABLES FOR EACH SUB-TAB */}
               <div className="table-responsive-wrapper">
                 {loadingUsers ? (
-                  <div style={{ padding: 18, color: 'var(--text-4)', fontSize: 13 }}>Loading users from the database…</div>
-                ) : filteredStaff.length === 0 ? (
-                  <div style={{ padding: 18, color: 'var(--text-4)', fontSize: 13 }}>No users found for this search.</div>
-                ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
-                    <thead>
-                      <tr style={{ background: 'rgba(18, 198, 186, 0.08)', textAlign: 'left', color: 'var(--text-4)', textTransform: 'uppercase', fontSize: 11 }}>
-                        <th style={{ padding: '10px 14px' }}>Name</th>
-                        <th style={{ padding: '10px 14px' }}>Assigned Role</th>
-                        <th style={{ padding: '10px 14px' }}>Department</th>
-                        <th style={{ padding: '10px 14px' }}>Email</th>
-                        <th style={{ padding: '10px 14px' }}>Status</th>
-                        <th style={{ padding: '10px 14px' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredStaff.map(s => (
-                        <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-1)' }}>{s.name}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--blue-dark)', fontWeight: 600 }}>{s.role}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.dept}</td>
-                          <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.email}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              padding: '4px 8px',
-                              borderRadius: 999,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              background: s.status === 'active' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.14)',
-                              color: s.status === 'active' ? '#10B981' : '#B45309'
-                            }}>
-                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.status === 'active' ? '#10B981' : '#F59E0B' }} />
-                              {s.status === 'active' ? 'Active' : 'Suspended'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                              <button onClick={() => setEditingStaff({ ...s })} style={{ width: 36, height: 36, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit user">
-                                <Pencil size={16} color="#111827" />
-                              </button>
-                              <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 36, height: 36, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend user' : 'Activate user'}>
-                                {s.status === 'active' ? <Pause size={16} color="#D97706" /> : <Play size={16} color="#16A34A" />}
-                              </button>
-                              <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 36, height: 36, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete user">
-                                <Trash2 size={16} color="#DC2626" />
-                              </button>
-                            </div>
-                          </td>
+                  <div style={{ padding: 18, color: 'var(--text-4)', fontSize: 13 }}>Loading from database…</div>
+                ) : staffSubTab === 'patients' ? (
+                  /* PATIENTS TAB TABLE */
+                  filteredPatients.length === 0 ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(37, 99, 235, 0.02)', borderRadius: 12, border: '1px dashed rgba(37, 99, 235, 0.2)' }}>
+                      No patients found matching your search.
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(37, 99, 235, 0.08)', textAlign: 'left', color: '#1D4ED8', textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
+                          <th style={{ padding: '12px 14px' }}>Name</th>
+                          <th style={{ padding: '12px 14px' }}>Medical Center</th>
+                          <th style={{ padding: '12px 14px' }}>Phone Number</th>
+                          <th style={{ padding: '12px 14px' }}>Email</th>
+                          <th style={{ padding: '12px 14px' }}>Age</th>
+                          <th style={{ padding: '12px 14px' }}>Status</th>
+                          <th style={{ padding: '12px 14px' }}>Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {filteredPatients.map(s => (
+                          <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--text-1)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Avatar name={s.name} size={28} />
+                                <span>{s.name}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 260 }}>
+                                {s.medicalCenters && s.medicalCenters.length > 0 ? (
+                                  s.medicalCenters.map((mc, idx) => (
+                                    <span key={idx} style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                                      padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                      background: 'rgba(37, 99, 235, 0.08)', color: '#1D4ED8', border: '1px solid rgba(37, 99, 235, 0.22)'
+                                    }}>
+                                      <Building2 size={11} /> {mc}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span style={{ color: 'var(--text-4)', fontSize: 12 }}>—</span>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-2)', fontWeight: 500 }}>{s.phone || '—'}</td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.email}</td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-1)', fontWeight: 700 }}>
+                              {s.age !== null && s.age !== undefined ? `${s.age} yrs` : '—'}
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '4px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+                                background: s.status === 'active' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.14)',
+                                color: s.status === 'active' ? '#10B981' : '#B45309'
+                              }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.status === 'active' ? '#10B981' : '#F59E0B' }} />
+                                {s.status === 'active' ? 'Active' : 'Suspended'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                <button onClick={() => setEditingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit user">
+                                  <Pencil size={15} color="#111827" />
+                                </button>
+                                <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend user' : 'Activate user'}>
+                                  {s.status === 'active' ? <Pause size={15} color="#D97706" /> : <Play size={15} color="#16A34A" />}
+                                </button>
+                                <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete user">
+                                  <Trash2 size={15} color="#DC2626" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                ) : staffSubTab === 'doctors' ? (
+                  /* DOCTORS TAB TABLE */
+                  filteredDoctors.length === 0 ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(16, 185, 129, 0.02)', borderRadius: 12, border: '1px dashed rgba(16, 185, 129, 0.2)' }}>
+                      No doctors found matching your search.
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 760 }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(16, 185, 129, 0.08)', textAlign: 'left', color: '#047857', textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
+                          <th style={{ padding: '12px 14px' }}>Name</th>
+                          <th style={{ padding: '12px 14px' }}>Specialization</th>
+                          <th style={{ padding: '12px 14px' }}>Medical Centers</th>
+                          <th style={{ padding: '12px 14px' }}>Email</th>
+                          <th style={{ padding: '12px 14px' }}>Phone Number</th>
+                          <th style={{ padding: '12px 14px' }}>Status</th>
+                          <th style={{ padding: '12px 14px' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredDoctors.map(s => {
+                          const matchedDoc = doctors.find(d => d.email === s.email || d.id === s.id)
+                          const allDocCenters = Array.from(new Set([
+                            ...(s.medicalCenters || []),
+                            ...(matchedDoc?.centers?.map(c => c.centerName).filter((c): c is string => Boolean(c)) || []),
+                            ...(matchedDoc?.centerName ? [matchedDoc.centerName] : [])
+                          ])).filter((c): c is string => Boolean(c))
+
+                          return (
+                            <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--text-1)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <Avatar name={s.name} size={28} />
+                                  <span>{s.name}</span>
+                                </div>
+                              </td>
+                              <td style={{ padding: '12px 14px', color: '#047857', fontWeight: 700 }}>
+                                {s.specialization || s.dept || 'General Medicine'}
+                              </td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 280 }}>
+                                  {allDocCenters.length > 0 ? (
+                                    allDocCenters.map((mc, idx) => (
+                                      <span key={idx} style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                                        padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                        background: 'rgba(16, 185, 129, 0.08)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.25)'
+                                      }}>
+                                        <Building2 size={11} /> {mc}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span style={{ color: 'var(--text-4)', fontSize: 12 }}>—</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.email}</td>
+                              <td style={{ padding: '12px 14px', color: 'var(--text-2)', fontWeight: 500 }}>{s.phone || '—'}</td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <span style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                                  padding: '4px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+                                  background: s.status === 'active' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.14)',
+                                  color: s.status === 'active' ? '#10B981' : '#B45309'
+                                }}>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.status === 'active' ? '#10B981' : '#F59E0B' }} />
+                                  {s.status === 'active' ? 'Active' : 'Suspended'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                  <button onClick={() => setEditingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit doctor">
+                                    <Pencil size={15} color="#111827" />
+                                  </button>
+                                  <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend doctor' : 'Activate doctor'}>
+                                    {s.status === 'active' ? <Pause size={15} color="#D97706" /> : <Play size={15} color="#16A34A" />}
+                                  </button>
+                                  <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete doctor">
+                                    <Trash2 size={15} color="#DC2626" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )
+                ) : (
+                  /* MEDICAL CENTERS TAB TABLE */
+                  filteredCenters.length === 0 ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(245, 158, 11, 0.02)', borderRadius: 12, border: '1px dashed rgba(245, 158, 11, 0.25)' }}>
+                      No medical centers found matching your search.
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(245, 158, 11, 0.10)', textAlign: 'left', color: '#B45309', textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
+                          <th style={{ padding: '12px 14px' }}>Center Name</th>
+                          <th style={{ padding: '12px 14px' }}>Province</th>
+                          <th style={{ padding: '12px 14px' }}>District</th>
+                          <th style={{ padding: '12px 14px' }}>Email</th>
+                          <th style={{ padding: '12px 14px' }}>Phone</th>
+                          <th style={{ padding: '12px 14px' }}>Status</th>
+                          <th style={{ padding: '12px 14px' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCenters.map(c => (
+                          <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--text-1)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(245, 158, 11, 0.12)', color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Building2 size={15} />
+                                </div>
+                                <span>{c.name}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-2)' }}>{c.province || '—'}</td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-2)', fontWeight: 600 }}>{c.city || '—'}</td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{c.email || '—'}</td>
+                            <td style={{ padding: '12px 14px', color: 'var(--text-2)', fontWeight: 500 }}>{c.phone || '—'}</td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '4px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+                                background: c.status === 'operational' ? 'rgba(16, 185, 129, 0.12)' : c.status === 'maintenance' ? 'rgba(245, 158, 11, 0.14)' : 'rgba(239, 68, 68, 0.12)',
+                                color: c.status === 'operational' ? '#10B981' : c.status === 'maintenance' ? '#B45309' : '#EF4444'
+                              }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: c.status === 'operational' ? '#10B981' : c.status === 'maintenance' ? '#F59E0B' : '#EF4444' }} />
+                                {c.status ? c.status.charAt(0).toUpperCase() + c.status.slice(1) : 'Operational'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                <button onClick={() => setEditingCenter(c)} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit center">
+                                  <Pencil size={15} color="#111827" />
+                                </button>
+                                <button onClick={() => setDeletingCenter(c)} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete center">
+                                  <Trash2 size={15} color="#DC2626" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
                 )}
               </div>
             </div>

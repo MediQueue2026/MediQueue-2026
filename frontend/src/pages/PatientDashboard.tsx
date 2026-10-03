@@ -100,6 +100,7 @@ export default function PatientDashboard() {
   const [selectedCenterForBooking, setSelectedCenterForBooking] = useState('')
   const [selectedDoctorForBooking, setSelectedDoctorForBooking] = useState('')
   const [viewingDoctorProfile, setViewingDoctorProfile] = useState<any | null>(null)
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false)
 
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -498,20 +499,9 @@ export default function PatientDashboard() {
           ))}
         </div>
         <hr className="divider" style={{ margin: '12px 0' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 10px' }}>
-          <Avatar name={displayName} src={profile.avatarUrl || user?.avatarUrl} size={32} />
-          <div style={{ overflow: 'hidden', minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {displayName}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {profile.email}
-            </div>
-          </div>
-        </div>
         <button
           className="nav-link"
-          onClick={handleSignOut}
+          onClick={() => setShowSignOutConfirm(true)}
           disabled={signingOut}
           style={{ marginTop: 4, color: 'var(--crimson)' }}
         >
@@ -564,7 +554,8 @@ export default function PatientDashboard() {
             <AccountMenu
               compact
               phone={profile.phone}
-              nic={profile.nic}
+              age={calculateAge(profile.dateOfBirth)}
+              hideSignOut={true}
               onEditProfile={() => openPatientPage('settings')}
             />
           </div>
@@ -1447,6 +1438,47 @@ export default function PatientDashboard() {
                 style={{ height: 38, padding: '0 18px', background: '#ef4444', color: '#ffffff' }}
               >
                 {cancelling ? 'Cancelling...' : 'Confirm Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sign Out Confirmation Modal */}
+      {showSignOutConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 99999,
+          background: 'rgba(7, 21, 20, 0.65)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+        }}>
+          <div className="card glass-form-card" style={{ width: '100%', maxWidth: 400, background: '#ffffff', borderRadius: 16, padding: 26, boxShadow: '0 20px 50px rgba(0,0,0,0.25)', textAlign: 'center' }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(239, 68, 68, 0.1)', color: 'var(--crimson)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+              <LogOut size={22} />
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', marginBottom: 8 }}>Sign Out Confirmation</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 22 }}>
+              Are you sure you want to sign out of your account?
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => setShowSignOutConfirm(false)}
+                className="btn btn-ghost"
+                style={{ height: 40, flex: 1, fontWeight: 600 }}
+              >
+                No, Stay
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSignOutConfirm(false)
+                  handleSignOut()
+                }}
+                disabled={signingOut}
+                className="btn btn-danger"
+                style={{ height: 40, flex: 1, background: '#ef4444', color: '#ffffff', fontWeight: 700 }}
+              >
+                {signingOut ? 'Signing out…' : 'Yes, Sign Out'}
               </button>
             </div>
           </div>
