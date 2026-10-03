@@ -161,6 +161,11 @@ export interface ApiUser {
   rejectionReason?: string | null
   centerApprovalStatus?: 'none' | 'pending' | 'approved' | 'rejected'
   authProvider?: 'local' | 'google'
+  age?: number | null
+  dateOfBirth?: string | null
+  specialization?: string | null
+  medicalCenters?: string[]
+  currentStatus?: string | null
 }
 
 export interface AuthSessionResponse {

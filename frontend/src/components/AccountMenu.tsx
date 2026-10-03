@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, CloudOff, CreditCard, LogOut, Mail, Phone, Settings, Stethoscope, Tag, User } from 'lucide-react'
+import { Calendar, ChevronDown, CloudOff, CreditCard, LogOut, Mail, Phone, Settings, Stethoscope, Tag, User } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AnchoredMenu from './AnchoredMenu'
 import { Avatar } from './UIPrimitives'
@@ -16,12 +16,14 @@ interface AccountMenuProps {
   compact?: boolean
   phone?: string
   nic?: string
+  age?: number | string | null
+  hideSignOut?: boolean
   specialization?: string
   series?: string
   onEditProfile?: () => void
 }
 
-export default function AccountMenu({ compact = false, phone, nic, specialization, series, onEditProfile }: AccountMenuProps) {
+export default function AccountMenu({ compact = false, phone, nic, age, hideSignOut = false, specialization, series, onEditProfile }: AccountMenuProps) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -31,7 +33,7 @@ export default function AccountMenu({ compact = false, phone, nic, specializatio
   if (!user) return null
 
   const isDoctor = user.role === 'doctor' || Boolean(specialization || series)
-  const isPatient = user.role === 'patient' || Boolean(phone || nic || onEditProfile)
+  const isPatient = user.role === 'patient' || Boolean(phone || nic || age !== undefined || onEditProfile)
   const displayName = (user as any)?.full_name || user.name || 'User Profile'
   const displayPhone = phone || (user as any)?.phone || ''
   const displayNic = nic || ''
@@ -136,11 +138,21 @@ export default function AccountMenu({ compact = false, phone, nic, specializatio
                   <span style={{ fontWeight: 600 }}>Mobile:</span>
                   <span style={{ marginLeft: 'auto', fontWeight: 600, color: displayPhone ? 'var(--text-1)' : 'var(--text-4)' }}>{displayPhone || 'Not set'}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-2)' }}>
-                  <CreditCard size={13} color="var(--blue)" style={{ flexShrink: 0 }} />
-                  <span style={{ fontWeight: 600 }}>NIC:</span>
-                  <span style={{ marginLeft: 'auto', fontWeight: 600, color: displayNic ? 'var(--text-1)' : 'var(--text-4)' }}>{displayNic || 'Not set'}</span>
-                </div>
+                {age !== undefined ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-2)' }}>
+                    <Calendar size={13} color="var(--blue)" style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>Age:</span>
+                    <span style={{ marginLeft: 'auto', fontWeight: 600, color: (age !== null && age !== '') ? 'var(--text-1)' : 'var(--text-4)' }}>
+                      {age !== null && age !== '' ? `${age} yrs` : 'Not set'}
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-2)' }}>
+                    <CreditCard size={13} color="var(--blue)" style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>NIC:</span>
+                    <span style={{ marginLeft: 'auto', fontWeight: 600, color: displayNic ? 'var(--text-1)' : 'var(--text-4)' }}>{displayNic || 'Not set'}</span>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -173,15 +185,17 @@ export default function AccountMenu({ compact = false, phone, nic, specializatio
           )}
 
           {/* Sign Out Action */}
-          <button
-            role="menuitem"
-            onClick={handleSignOut}
-            disabled={signingOut}
-            className="btn btn-ghost btn-sm"
-            style={{ width: '100%', justifyContent: 'center', gap: 6, color: 'var(--crimson)' }}
-          >
-            <LogOut size={13} /> {signingOut ? 'Signing out…' : 'Sign Out'}
-          </button>
+          {!hideSignOut && (
+            <button
+              role="menuitem"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="btn btn-ghost btn-sm"
+              style={{ width: '100%', justifyContent: 'center', gap: 6, color: 'var(--crimson)' }}
+            >
+              <LogOut size={13} /> {signingOut ? 'Signing out…' : 'Sign Out'}
+            </button>
+          )}
         </div>
       </AnchoredMenu>
     </>
