@@ -57,7 +57,18 @@ interface AuthContextType {
   loginWithGoogle: (credentialOrToken: string, isAccessToken?: boolean) => Promise<User>
   /** Self-registration. `role` is gated server-side by ALLOW_STAFF_SELF_REGISTER. */
   register: (input: {
-    email: string; password: string; fullName: string; phone?: string; role?: Exclude<UserRole, null>
+    email: string;
+    password: string;
+    fullName: string;
+    phone?: string;
+    role?: Exclude<UserRole, null>;
+    nic?: string;
+    emergencyContactName?: string;
+    emergencyContactPhone?: string;
+    bloodGroup?: string;
+    allergies?: string;
+    dateOfBirth?: string;
+    gender?: string;
   }) => Promise<User>
   loginAsDemo: (role: Exclude<UserRole, null>) => User
   logout: () => Promise<void>
@@ -173,6 +184,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       emergencyContactPhone?: string;
       bloodGroup?: string;
       allergies?: string;
+      dateOfBirth?: string;
+      gender?: string;
     }): Promise<User> => {
       try {
         const res = await api.register(input)

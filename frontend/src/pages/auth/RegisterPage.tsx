@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, ArrowRight, CloudOff, Eye, EyeOff, HeartPulse, Lock, Mail, Phone, ShieldCheck, User as UserIcon } from 'lucide-react'
+import { AlertCircle, ArrowLeft, ArrowRight, CloudOff, Eye, EyeOff, HeartPulse, Mail, Phone, ShieldCheck, User as UserIcon } from 'lucide-react'
 import { ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'
 import GoogleAuthButton from '../../components/GoogleAuthButton'
+import DateOfBirthInput from '../../components/DateOfBirthInput'
 
 const MIN_PASSWORD_LENGTH = 8
 const PHONE_PATTERN = /^\+?[\d\s-]{9,15}$/
@@ -16,6 +17,8 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  const [dateOfBirth, setDateOfBirth] = useState('')
+  const [gender, setGender] = useState('Male')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -55,6 +58,8 @@ export default function RegisterPage() {
         email: email.trim(),
         password,
         phone: phone.trim() || undefined,
+        dateOfBirth: dateOfBirth.trim() || undefined,
+        gender: gender || undefined,
       })
       const from = (location.state as { from?: string } | null)?.from
       navigate(from ?? HOME_PATH[(user.role ?? 'patient') as 'patient'], { replace: true })
@@ -224,6 +229,71 @@ export default function RegisterPage() {
                   onChange={e => { setPhone(e.target.value); clearError() }}
                   style={{ ...inputStyle, paddingLeft: 36 }}
                 />
+              </div>
+            </div>
+
+            {/* ── Date of Birth & Gender Section ── */}
+            <div style={{
+              background: 'rgba(248, 250, 252, 0.75)',
+              border: '1px solid var(--border-md, #e2e8f0)',
+              borderRadius: 10,
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12
+            }}>
+              <DateOfBirthInput
+                value={dateOfBirth}
+                onChange={val => { setDateOfBirth(val); clearError() }}
+                idPrefix="reg-dob"
+              />
+
+              <div>
+                <label className="auth-field-label" htmlFor="reg-gender">Gender</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setGender('Male'); clearError() }}
+                    style={{
+                      height: 38,
+                      borderRadius: 8,
+                      border: gender === 'Male' ? '2px solid var(--blue, #2563eb)' : '1px solid var(--border-md, #e2e8f0)',
+                      background: gender === 'Male' ? 'rgba(37, 99, 235, 0.08)' : '#ffffff',
+                      color: gender === 'Male' ? 'var(--blue, #2563eb)' : 'var(--text-2, #334155)',
+                      fontWeight: gender === 'Male' ? 700 : 500,
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span>👨 Male</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setGender('Female'); clearError() }}
+                    style={{
+                      height: 38,
+                      borderRadius: 8,
+                      border: gender === 'Female' ? '2px solid #ec4899' : '1px solid var(--border-md, #e2e8f0)',
+                      background: gender === 'Female' ? 'rgba(236, 72, 153, 0.08)' : '#ffffff',
+                      color: gender === 'Female' ? '#db2777' : 'var(--text-2, #334155)',
+                      fontWeight: gender === 'Female' ? 700 : 500,
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span>👩 Female</span>
+                  </button>
+                </div>
               </div>
             </div>
 

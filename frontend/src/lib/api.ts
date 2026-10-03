@@ -596,6 +596,8 @@ export const api = {
     emergencyContactPhone?: string;
     bloodGroup?: string;
     allergies?: string;
+    dateOfBirth?: string;
+    gender?: string;
   }) =>
     rawRequest<AuthSessionResponse>('/auth/register', {
       method: 'POST',

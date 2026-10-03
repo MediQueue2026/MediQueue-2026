@@ -174,3 +174,13 @@ CREATE TABLE IF NOT EXISTS public.center_notices (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_center_notices_center ON public.center_notices(center_id);
+
+-- ── Patient Demographics: date_of_birth & gender (migration 020) ──────────────
+ALTER TABLE public.patient_profiles
+  ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+  ADD COLUMN IF NOT EXISTS gender TEXT;
+
+-- ── Patient Demographics: blood_group drop default (migration 021) ───────────
+ALTER TABLE public.patient_profiles
+  ALTER COLUMN blood_group DROP DEFAULT;
+
