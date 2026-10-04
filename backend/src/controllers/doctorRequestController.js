@@ -107,8 +107,161 @@ export async function createDoctorRequest(req, res, next) {
         request: mapDbRequestToPublic(data),
       });
     } else if (requestType === 'CREATE_NEW') {
+      const isAdmin = req.user?.role === 'admin' || req.body.autoApprove === true;
       const generatedEmail = email?.trim() || await generateUniqueDoctorEmail(doctorName);
+      const cleanPhone = phone ? String(phone).trim() : null;
 
+      if (isAdmin) {
+        // DIRECT CREATION BY SYSTEM ADMIN (No pending approval needed)
+        const { data: existingUser } = await supabase.from('users').select('id').eq('email', generatedEmail).maybeSingle();
+        let userId;
+        let tempPassword = '';
+
+        if (existingUser) {
+          userId = existingUser.id;
+        } else {
+          const randStr = Math.random().toString(36).substring(2, 8);
+          tempPassword = `Doc#${randStr}`;
+          const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+          const { data: newUser, error: userError } = await supabase.from('users').insert([{
+            email: generatedEmail,
+            password_hash: passwordHash,
+            full_name: formatDoctorFullName(doctorName),
+            phone: cleanPhone,
+            role: 'doctor',
+            is_active: true,
+          }]).select('id').single();
+
+          if (userError) {
+            return res.status(500).json({ error: 'Failed to create user account: ' + userError.message });
+          }
+          userId = newUser.id;
+        }
+
+        let { data: doctorRow } = await supabase.from('doctors').select('id').eq('user_id', userId).maybeSingle();
+        if (!doctorRow) {
+          const { data: newDoc, error: docErr } = await supabase.from('doctors').insert([{
+            user_id: userId,
+            specialization,
+            slmc_reg_no: slmcRegNo ? String(slmcRegNo).trim() : null,
+            qualifications: qualifications?.trim() || null,
+            experience_start_year: experienceStartYear ? Number(experienceStartYear) : null,
+            years_of_experience: yearsOfExperience ? Number(yearsOfExperience) : null,
+            gender: gender || null,
+            date_of_birth: dateOfBirth || null,
+            nic: nic?.trim() || null,
+          }]).select('id').single();
+
+          if (docErr) {
+            return res.status(500).json({ error: 'Failed to create doctor profile: ' + docErr.message });
+          }
+          doctorRow = newDoc;
+        } else {
+          const docUpdates = {};
+          if (slmcRegNo) docUpdates.slmc_reg_no = String(slmcRegNo).trim();
+          if (specialization) docUpdates.specialization = specialization;
+          if (qualifications) docUpdates.qualifications = qualifications.trim();
+          if (experienceStartYear) docUpdates.experience_start_year = Number(experienceStartYear);
+          if (yearsOfExperience) docUpdates.years_of_experience = Number(yearsOfExperience);
+          if (gender) docUpdates.gender = gender;
+          if (dateOfBirth) docUpdates.date_of_birth = dateOfBirth;
+          if (nic) docUpdates.nic = nic.trim();
+          if (Object.keys(docUpdates).length > 0) {
+            await supabase.from('doctors').update(docUpdates).eq('id', doctorRow.id);
+          }
+        }
+
+        const postingFields = {
+          doctor_id: doctorRow.id,
+          center_id: centerId,
+          room_number: roomNumber ? String(roomNumber).trim() : null,
+          series: autoSeries,
+          max_appointments_per_hour: maxAppointmentsPerHour || 4,
+          joined_date: finalJoinedDate,
+          current_status: 'active',
+          approval_status: 'approved',
+          requested_by_name: receptionistName || 'System Admin',
+          updated_at: new Date().toISOString(),
+        };
+
+        const { data: existingAssignment } = await supabase
+          .from('doctor_center_assignments')
+          .select('id')
+          .eq('doctor_id', doctorRow.id)
+          .eq('center_id', centerId)
+          .maybeSingle();
+
+        if (existingAssignment) {
+          await supabase.from('doctor_center_assignments').update(postingFields).eq('id', existingAssignment.id);
+        } else {
+          await supabase.from('doctor_center_assignments').insert([postingFields]);
+        }
+
+        const newRequestData = {
+          request_type: 'CREATE_NEW',
+          receptionist_id: receptionistId,
+          receptionist_name: receptionistName,
+          center_id: centerId,
+          center_name: finalCenterName || 'Medical Center',
+          doctor_id: doctorRow.id,
+          doctor_name: formatDoctorFullName(doctorName),
+          email: generatedEmail,
+          phone: cleanPhone,
+          specialization,
+          slmc_reg_no: slmcRegNo ? String(slmcRegNo).trim() : null,
+          room_number: roomNumber ? String(roomNumber).trim() : null,
+          series: autoSeries,
+          max_appointments_per_hour: maxAppointmentsPerHour || 4,
+          gender: gender || null,
+          date_of_birth: dateOfBirth || null,
+          qualifications: qualifications?.trim() || null,
+          experience_start_year: experienceStartYear ? Number(experienceStartYear) : null,
+          years_of_experience: yearsOfExperience ? Number(yearsOfExperience) : null,
+          nic: nic?.trim() || null,
+          joined_date: finalJoinedDate,
+          status: 'approved'
+        };
+
+        const { data: reqRecord } = await supabase.from('doctor_requests').insert([newRequestData]).select().single();
+
+        if (cleanPhone) {
+          const smsMsg = `Your MediQueue Doctor Account has been created! Login Email: ${generatedEmail}${tempPassword ? `, Password: ${tempPassword}` : ''}. Sign in at mediqueue.lk/login`;
+          await notificationProvider.sendSMS(cleanPhone, smsMsg);
+        }
+
+        try {
+          await supabase.from('audit_logs').insert([{
+            actor_name: req.user?.fullName || req.user?.email || 'System Admin',
+            actor_role: 'admin',
+            event_type: 'doctor_approved',
+            action: `Created and approved new doctor ${formatDoctorFullName(doctorName)} for ${finalCenterName || 'Medical Center'}`,
+            center_name: finalCenterName || 'Medical Center',
+            status: 'approved',
+          }]);
+        } catch (_) {}
+
+        return res.status(201).json({
+          message: `Doctor account for ${formatDoctorFullName(doctorName)} created successfully. Credentials sent via SMS.`,
+          request: reqRecord ? mapDbRequestToPublic(reqRecord) : null,
+          doctor: {
+            id: doctorRow.id,
+            userId,
+            name: formatDoctorFullName(doctorName),
+            email: generatedEmail,
+            phone: cleanPhone,
+            specialization,
+            room: roomNumber ? String(roomNumber).trim() : null,
+            series: autoSeries,
+            centerId,
+            centerName: finalCenterName
+          },
+          generatedEmail,
+          generatedPassword: tempPassword,
+        });
+      }
+
+      // STANDARD RECEPTIONIST FLOW (Pending Admin Approval)
       const newRequestData = {
         request_type: 'CREATE_NEW',
         receptionist_id: receptionistId,

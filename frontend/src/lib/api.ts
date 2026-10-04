@@ -739,6 +739,7 @@ export const api = {
       roomNumber?: string
       series?: string
       maxAppointmentsPerHour?: number
+      autoApprove?: boolean
     }
   )) =>
     request<{ message: string; request: ApiDoctorRequest }>('/doctor-requests', {

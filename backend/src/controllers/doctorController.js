@@ -190,14 +190,19 @@ export async function updateDoctor(req, res, next) {
     if (typeof req.body.currentStatus === 'string') posting.current_status = req.body.currentStatus;
     if (typeof req.body.maxAppointmentsPerHour === 'number') posting.max_appointments_per_hour = req.body.maxAppointmentsPerHour;
 
-    if (Object.keys(posting).length > 0) {
-      if (!centerId) {
-        return res.status(400).json({ error: 'centerId is required to update a doctor’s room, series, capacity or status.' });
+    let effectiveCenterId = centerId;
+    if (Object.keys(posting).length > 0 && !effectiveCenterId) {
+      const { data: assignments } = await supabase.from('doctor_center_assignments').select('center_id').eq('doctor_id', doctorId);
+      if (assignments && assignments.length === 1) {
+        effectiveCenterId = assignments[0].center_id;
       }
+    }
+
+    if (Object.keys(posting).length > 0 && effectiveCenterId) {
       const { data: existing } = await supabase
         .from('doctor_center_assignments')
         .select('id')
-        .eq('doctor_id', doctorId).eq('center_id', centerId)
+        .eq('doctor_id', doctorId).eq('center_id', effectiveCenterId)
         .maybeSingle();
 
       if (existing) {
@@ -206,14 +211,16 @@ export async function updateDoctor(req, res, next) {
           .update({ ...posting, updated_at: new Date().toISOString() })
           .eq('id', existing.id);
       } else {
-        // A brand-new posting at this center gets a unique series letter
-        // unless one was typed explicitly — it used to default to nothing,
-        // which every reader then displayed as "?".
-        const series = posting.series || await nextSeriesLetterForCenter(centerId);
+        const series = posting.series || await nextSeriesLetterForCenter(effectiveCenterId);
         await supabase
           .from('doctor_center_assignments')
-          .insert([{ doctor_id: doctorId, center_id: centerId, approval_status: 'approved', ...posting, series }]);
+          .insert([{ doctor_id: doctorId, center_id: effectiveCenterId, approval_status: 'approved', ...posting, series }]);
       }
+    } else if (Object.keys(posting).length > 0 && !effectiveCenterId) {
+      if (Object.keys(docUpdates).length === 0 && Object.keys(userUpdates).length === 0) {
+        return res.status(400).json({ error: 'centerId is required to update a doctor’s room, series, capacity or status.' });
+      }
+      // If doctor/user updates exist, proceed with those and skip posting update
     } else if (Object.keys(posting).length === 0 && Object.keys(docUpdates).length === 0 && Object.keys(userUpdates).length === 0) {
       return res.status(400).json({ error: 'No valid fields provided for update' });
     }
