@@ -5,12 +5,12 @@ import { useNavigate } from 'react-router-dom'
 import {
   Activity, Building2, FileText, LogOut, Menu, Plus,
   Search, Settings, Ticket, Users, X, RefreshCw, CheckCircle2,
-  AlertCircle, UserCheck, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
-  Pencil, Pause, Play, Trash2
+  AlertCircle, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
+  Pencil, Pause, Play, Trash2, Filter, RotateCcw
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
-import AssignDoctorModal from '../components/AssignDoctorModal'
+import AddDoctorModal from '../components/AddDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
 import { ViewReportModal } from '../components/ViewReportModal'
@@ -84,6 +84,196 @@ const mapApiUserToStaffMember = (user: ApiUser): StaffMember => ({
   currentStatus: user.currentStatus ?? null,
   createdAt: user.createdAt,
 })
+
+const DOCTOR_SPECIALISATIONS = [
+  'General Medicine', 'Cardiology', 'Pediatrics', 'Orthopedics',
+  'Dermatology', 'Neurology', 'Ophthalmology', 'ENT',
+  'Gynecology', 'Psychiatry', 'Oncology', 'Radiology',
+  'Gastroenterology', 'Urology', 'Endocrinology', 'Other',
+]
+
+const SRI_LANKA_PROVINCES = [
+  'Western Province',
+  'Central Province',
+  'Southern Province',
+  'Northern Province',
+  'Eastern Province',
+  'North Western Province',
+  'North Central Province',
+  'Uva Province',
+  'Sabaragamuwa Province',
+]
+
+const SRI_LANKA_DISTRICTS = [
+  // Western Province
+  'Colombo', 'Gampaha', 'Kalutara',
+  // Central Province
+  'Kandy', 'Matale', 'Nuwara Eliya',
+  // Southern Province
+  'Galle', 'Matara', 'Hambantota',
+  // Northern Province
+  'Jaffna', 'Kilinochchi', 'Mannar', 'Mullaitivu', 'Vavuniya',
+  // Eastern Province
+  'Batticaloa', 'Ampara', 'Trincomalee',
+  // North Western Province
+  'Kurunegala', 'Puttalam',
+  // North Central Province
+  'Anuradhapura', 'Polonnaruwa',
+  // Uva Province
+  'Badulla', 'Monaragala',
+  // Sabaragamuwa Province
+  'Ratnapura', 'Kegalle',
+]
+
+function HeaderFilterDropdown({
+  title,
+  activeValue,
+  options,
+  isOpen,
+  onToggle,
+  onSelect,
+  theme = 'blue',
+}: {
+  title: string
+  activeValue: string
+  options: { label: string; value: string }[]
+  isOpen: boolean
+  onToggle: () => void
+  onSelect: (val: string) => void
+  theme?: 'blue' | 'green' | 'yellow'
+}) {
+  const isFiltered = activeValue !== 'all' && activeValue !== ''
+
+  const themeStyles = {
+    blue: {
+      activeBg: 'rgba(37, 99, 235, 0.16)',
+      activeColor: '#1D4ED8',
+      activeBorder: 'rgba(37, 99, 235, 0.35)',
+      menuBorder: '1px solid rgba(37, 99, 235, 0.25)',
+      itemHover: 'rgba(37, 99, 235, 0.08)',
+      itemActiveBg: 'rgba(37, 99, 235, 0.12)',
+      itemActiveColor: '#1D4ED8',
+      shadow: '0 12px 32px rgba(37, 99, 235, 0.18)',
+    },
+    green: {
+      activeBg: 'rgba(16, 185, 129, 0.16)',
+      activeColor: '#047857',
+      activeBorder: 'rgba(16, 185, 129, 0.35)',
+      menuBorder: '1px solid rgba(16, 185, 129, 0.25)',
+      itemHover: 'rgba(16, 185, 129, 0.08)',
+      itemActiveBg: 'rgba(16, 185, 129, 0.12)',
+      itemActiveColor: '#047857',
+      shadow: '0 12px 32px rgba(16, 185, 129, 0.18)',
+    },
+    yellow: {
+      activeBg: 'rgba(245, 158, 11, 0.20)',
+      activeColor: '#B45309',
+      activeBorder: 'rgba(245, 158, 11, 0.45)',
+      menuBorder: '1px solid rgba(245, 158, 11, 0.35)',
+      itemHover: 'rgba(245, 158, 11, 0.08)',
+      itemActiveBg: 'rgba(245, 158, 11, 0.14)',
+      itemActiveColor: '#B45309',
+      shadow: '0 12px 32px rgba(245, 158, 11, 0.18)',
+    },
+  }[theme]
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span>{title}</span>
+      <button
+        type="button"
+        onClick={e => {
+          e.stopPropagation()
+          onToggle()
+        }}
+        style={{
+          background: isFiltered ? themeStyles.activeBg : 'transparent',
+          border: isFiltered ? `1px solid ${themeStyles.activeBorder}` : '1px solid transparent',
+          color: isFiltered ? themeStyles.activeColor : 'inherit',
+          borderRadius: 6,
+          padding: '2px 5px',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          fontSize: 11,
+          fontWeight: 700,
+          transition: 'all 0.15s ease',
+        }}
+        title={`Filter by ${title}`}
+      >
+        <Filter size={11} style={{ opacity: isFiltered ? 1 : 0.65 }} />
+        {isFiltered && (
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: themeStyles.activeColor }} />
+        )}
+      </button>
+
+      {isOpen && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            zIndex: 100,
+            minWidth: 210,
+            maxWidth: 280,
+            maxHeight: 280,
+            overflowY: 'auto',
+            background: '#ffffff',
+            borderRadius: 12,
+            border: themeStyles.menuBorder,
+            boxShadow: `${themeStyles.shadow}, 0 4px 12px rgba(0, 0, 0, 0.08)`,
+            padding: 6,
+            textTransform: 'none',
+            fontWeight: 500,
+            fontSize: 12.5,
+          }}
+        >
+          {options.map((opt, i) => {
+            const isSelected = activeValue === opt.value
+            return (
+              <div
+                key={i}
+                onClick={() => {
+                  onSelect(opt.value)
+                  onToggle()
+                }}
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  background: isSelected ? themeStyles.itemActiveBg : 'transparent',
+                  color: isSelected ? themeStyles.itemActiveColor : 'var(--text-1)',
+                  fontWeight: isSelected ? 700 : 500,
+                  transition: 'background 0.12s',
+                  marginBottom: 2,
+                }}
+                onMouseEnter={e => {
+                  if (!isSelected) (e.currentTarget as HTMLElement).style.background = themeStyles.itemHover
+                }}
+                onMouseLeave={e => {
+                  if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {opt.label}
+                </span>
+                {isSelected && (
+                  <span style={{ fontSize: 13, lineHeight: 1 }}>✓</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function AssignedDoctorsDropdown({
   doctors,
@@ -180,8 +370,38 @@ export default function AdminPanel() {
   const [staffSearch, setStaffSearch] = useState('')
   const [staffSubTab, setStaffSubTab] = useState<'patients' | 'doctors' | 'centers'>('patients')
   const [staffStatusFilter, setStaffStatusFilter] = useState('all')
+
+  // Header column filters
+  const [patientCenterFilter, setPatientCenterFilter] = useState('all')
+  const [doctorSpecFilter, setDoctorSpecFilter] = useState('all')
+  const [doctorCenterFilter, setDoctorCenterFilter] = useState('all')
+  const [centerProvinceFilter, setCenterProvinceFilter] = useState('all')
+  const [centerDistrictFilter, setCenterDistrictFilter] = useState('all')
+  const [activeHeaderFilter, setActiveHeaderFilter] = useState<string | null>(null)
+
+  const handleClearAllFilters = () => {
+    setStaffSearch('')
+    setStaffStatusFilter('all')
+    setPatientCenterFilter('all')
+    setDoctorSpecFilter('all')
+    setDoctorCenterFilter('all')
+    setCenterProvinceFilter('all')
+    setCenterDistrictFilter('all')
+    setActiveHeaderFilter(null)
+  }
+
+  useEffect(() => {
+    const handleGlobalClick = () => setActiveHeaderFilter(null)
+    if (activeHeaderFilter) {
+      window.addEventListener('click', handleGlobalClick)
+      return () => window.removeEventListener('click', handleGlobalClick)
+    }
+  }, [activeHeaderFilter])
+
   const [showAddCenterModal, setShowAddCenterModal] = useState(false)
-  const [showAssignDoctorModal, setShowAssignDoctorModal] = useState(false)
+  const [doctorModalOpen, setDoctorModalOpen] = useState(false)
+  const [modalDoctorCenter, setModalDoctorCenter] = useState<ApiCenter | null>(null)
+  const [editingDoctorProfile, setEditingDoctorProfile] = useState<ApiDoctor | null>(null)
   const [showBroadcastModal, setShowBroadcastModal] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [viewingDocument, setViewingDocument] = useState<any>(null)
@@ -196,7 +416,6 @@ export default function AdminPanel() {
   const [centersLoading, setCentersLoading] = useState(false)
   const [editingCenter, setEditingCenter] = useState<ApiCenter | null>(null)
   const [deletingCenter, setDeletingCenter] = useState<ApiCenter | null>(null)
-  const [activeCenter, setActiveCenter] = useState<ApiCenter | null>(null)
   const [doctors, setDoctors] = useState<ApiDoctor[]>([])
   const [_doctorsLoading, setDoctorsLoading] = useState(false)
 
@@ -296,66 +515,63 @@ export default function AdminPanel() {
       .finally(() => setDoctorRequestsLoading(false))
   }
 
+  const refreshClinicsData = () => {
+    setCentersLoading(true)
+    setDoctorsLoading(true)
+    fetchPendingCenterRequests()
+
+    return Promise.all([api.getCenters(), api.getDoctors()])
+      .then(([centersRes, doctorsRes]) => {
+        setCenters(centersRes.centers)
+        setDoctors(doctorsRes.doctors)
+      })
+      .catch(err => {
+        console.error('Failed to load centers or doctors', err)
+        setCenters([])
+        setDoctors([])
+      })
+      .finally(() => {
+        setCentersLoading(false)
+        setDoctorsLoading(false)
+      })
+  }
+
+  const refreshRolesData = () => {
+    setLoadingUsers(true)
+    fetchPendingNewDoctorRequests()
+    return Promise.all([
+      api.getUsers(),
+      api.getCenters().catch(() => ({ centers: [] })),
+      api.getDoctors().catch(() => ({ doctors: [] })),
+    ])
+      .then(([usersRes, centersRes, docsRes]) => {
+        setStaffMembers(usersRes.users.map(mapApiUserToStaffMember))
+        if (centersRes?.centers) setCenters(centersRes.centers)
+        if (docsRes?.doctors) setDoctors(docsRes.doctors)
+      })
+      .catch(err => {
+        console.error('Failed to load users', err)
+        setStaffMembers([])
+      })
+      .finally(() => {
+        setLoadingUsers(false)
+      })
+  }
+
   useEffect(() => {
     if (nav === 'health') {
       fetchSystemStats()
     }
 
     if (nav === 'clinics') {
-      let active = true
-      setCentersLoading(true)
-      setDoctorsLoading(true)
-      fetchPendingCenterRequests()
-
-      Promise.all([api.getCenters(), api.getDoctors()])
-        .then(([centersRes, doctorsRes]) => {
-          if (!active) return
-          setCenters(centersRes.centers)
-          setDoctors(doctorsRes.doctors)
-        })
-        .catch(err => {
-          if (!active) return
-          console.error('Failed to load centers or doctors', err)
-          setCenters([])
-          setDoctors([])
-        })
-        .finally(() => {
-          if (!active) return
-          setCentersLoading(false)
-          setDoctorsLoading(false)
-        })
-
-      return () => { active = false }
+      refreshClinicsData()
     }
 
     if (nav === 'logs') {
       fetchAuditLogs({ startDate: auditLogStartDate, endDate: auditLogEndDate })
     }
     if (nav === 'roles') {
-      let active = true
-      setLoadingUsers(true)
-      fetchPendingNewDoctorRequests()
-      Promise.all([
-        api.getUsers(),
-        api.getCenters().catch(() => ({ centers: [] })),
-        api.getDoctors().catch(() => ({ doctors: [] })),
-      ])
-        .then(([usersRes, centersRes, docsRes]) => {
-          if (!active) return
-          setStaffMembers(usersRes.users.map(mapApiUserToStaffMember))
-          if (centersRes?.centers) setCenters(centersRes.centers)
-          if (docsRes?.doctors) setDoctors(docsRes.doctors)
-        })
-        .catch(err => {
-          if (!active) return
-          console.error('Failed to load users', err)
-          setStaffMembers([])
-        })
-        .finally(() => {
-          if (!active) return
-          setLoadingUsers(false)
-        })
-      return () => { active = false }
+      refreshRolesData()
     }
 
     return undefined
@@ -373,7 +589,9 @@ export default function AdminPanel() {
       s.phone.toLowerCase().includes(query) ||
       (s.medicalCenters || []).some(c => c.toLowerCase().includes(query))
     const matchesStatus = staffStatusFilter === 'all' || s.status === staffStatusFilter
-    return matchesSearch && matchesStatus
+    const matchesCenter = patientCenterFilter === 'all' ||
+      (s.medicalCenters || []).some(c => c.toLowerCase() === patientCenterFilter.toLowerCase())
+    return matchesSearch && matchesStatus && matchesCenter
   })
 
   const filteredDoctors = doctorsList.filter(s => {
@@ -390,7 +608,11 @@ export default function AdminPanel() {
       s.phone.toLowerCase().includes(query) ||
       allDocCenters.some(c => c.toLowerCase().includes(query))
     const matchesStatus = staffStatusFilter === 'all' || s.status === staffStatusFilter
-    return matchesSearch && matchesStatus
+    const matchesSpec = doctorSpecFilter === 'all' ||
+      (s.specialization || s.dept || '').toLowerCase() === doctorSpecFilter.toLowerCase()
+    const matchesDocCenter = doctorCenterFilter === 'all' ||
+      allDocCenters.some(c => c.toLowerCase() === doctorCenterFilter.toLowerCase())
+    return matchesSearch && matchesStatus && matchesSpec && matchesDocCenter
   })
 
   const filteredCenters = centers.filter(c => {
@@ -401,8 +623,46 @@ export default function AdminPanel() {
       (c.email || '').toLowerCase().includes(query) ||
       (c.phone || '').toLowerCase().includes(query)
     const matchesStatus = staffStatusFilter === 'all' || (c.status || 'operational') === staffStatusFilter
-    return matchesSearch && matchesStatus
+    const matchesProvince = centerProvinceFilter === 'all' || (() => {
+      const cleanFilter = centerProvinceFilter.replace(/\s*province$/i, '').trim().toLowerCase()
+      const cleanProv = (c.province || '').replace(/\s*province$/i, '').trim().toLowerCase()
+      return cleanProv === cleanFilter
+    })()
+    const matchesDistrict = centerDistrictFilter === 'all' ||
+      (c.city || '').toLowerCase() === centerDistrictFilter.toLowerCase()
+    return matchesSearch && matchesStatus && matchesProvince && matchesDistrict
   })
+
+  // Dropdown options
+  const medicalCenterOptions = [
+    { label: 'All Medical Centers', value: 'all' },
+    ...Array.from(new Set([
+      ...centers.map(c => c.name),
+      ...staffMembers.flatMap(s => s.medicalCenters || []),
+      ...doctors.flatMap(d => d.centers?.map(c => c.centerName).filter((cn): cn is string => Boolean(cn)) || (d.centerName ? [d.centerName] : []))
+    ])).filter(Boolean).sort().map(name => ({ label: name, value: name }))
+  ]
+
+  const specializationOptions = [
+    { label: 'All Specializations', value: 'all' },
+    ...DOCTOR_SPECIALISATIONS.map(spec => ({ label: spec, value: spec }))
+  ]
+
+  const provinceOptions = [
+    { label: 'All Provinces', value: 'all' },
+    ...SRI_LANKA_PROVINCES.map(p => ({ label: p, value: p })),
+    ...Array.from(new Set(centers.map(c => c.province).filter((p): p is string => Boolean(p))))
+      .filter(p => !SRI_LANKA_PROVINCES.some(sp => sp.toLowerCase() === p.toLowerCase() || sp.replace(/\s*province$/i, '').trim().toLowerCase() === p.replace(/\s*province$/i, '').trim().toLowerCase()))
+      .map(p => ({ label: p, value: p }))
+  ]
+
+  const districtOptions = [
+    { label: 'All Districts', value: 'all' },
+    ...SRI_LANKA_DISTRICTS.map(d => ({ label: d, value: d })),
+    ...Array.from(new Set(centers.map(c => c.city).filter((c): c is string => Boolean(c))))
+      .filter(c => !SRI_LANKA_DISTRICTS.some(d => d.toLowerCase() === c.toLowerCase()))
+      .map(d => ({ label: d, value: d }))
+  ]
 
   const normalizeAuditEventType = (value?: string) => {
     const normalized = String(value ?? '').trim().toLowerCase()
@@ -554,23 +814,6 @@ export default function AdminPanel() {
     }
   }
 
-  const handleAssignDoctor = async (assignment: { doctorId: string; centerId: string; room: string; specialty: string }) => {
-    try {
-      await api.updateDoctor(assignment.doctorId, {
-        centerId: assignment.centerId,
-        roomNumber: assignment.room,
-        specialization: assignment.specialty,
-      })
-      const r = await api.getDoctors()
-      setDoctors(r.doctors)
-      setShowAssignDoctorModal(false)
-      setActiveCenter(null)
-    } catch (error) {
-      console.error('Failed to assign doctor', error)
-      alert('Could not assign the doctor. Please try again.')
-    }
-  }
-
   const handleRemoveDoctor = async (doctorId: string, centerId: string) => {
     try {
       await api.updateDoctor(doctorId, { removeCenterId: centerId })
@@ -675,18 +918,6 @@ export default function AdminPanel() {
             alert('Failed to add center to database.')
           }
         }}
-      />
-
-      <AssignDoctorModal
-        isOpen={showAssignDoctorModal}
-        onClose={() => {
-          setShowAssignDoctorModal(false)
-          setActiveCenter(null)
-        }}
-        doctors={doctors}
-        centers={centers}
-        selectedCenter={activeCenter ?? undefined}
-        onAssign={handleAssignDoctor}
       />
 
       {/* ── BROADCAST SUCCESS MODAL ── */}
@@ -1155,6 +1386,33 @@ export default function AdminPanel() {
                   </select>
                   <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-4)' }}>▾</div>
                 </div>
+
+                {/* PURPLE CLEAR ALL BUTTON */}
+                <button
+                  type="button"
+                  onClick={handleClearAllFilters}
+                  className="btn btn-sm"
+                  style={{
+                    background: '#8B5CF6',
+                    color: '#ffffff',
+                    border: '1px solid #7C3AED',
+                    fontWeight: 700,
+                    height: 44,
+                    borderRadius: 12,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    padding: '0 18px',
+                    fontSize: 13.5,
+                    boxShadow: '0 2px 8px rgba(139, 92, 246, 0.28)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Clear all search queries and active filters"
+                >
+                  <RotateCcw size={15} />
+                  <span>Clear All</span>
+                </button>
               </div>
 
               {/* TABLES FOR EACH SUB-TAB */}
@@ -1164,19 +1422,49 @@ export default function AdminPanel() {
                 ) : staffSubTab === 'patients' ? (
                   /* PATIENTS TAB TABLE */
                   filteredPatients.length === 0 ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(37, 99, 235, 0.02)', borderRadius: 12, border: '1px dashed rgba(37, 99, 235, 0.2)' }}>
-                      No patients found matching your search.
+                    <div style={{ padding: 36, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(37, 99, 235, 0.02)', borderRadius: 12, border: '1px dashed rgba(37, 99, 235, 0.25)' }}>
+                      <p style={{ margin: '0 0 12px 0', fontSize: 14, color: 'var(--text-2)', fontWeight: 600 }}>No patients found matching your search or filters.</p>
+                      <button
+                        type="button"
+                        onClick={handleClearAllFilters}
+                        className="btn btn-sm"
+                        style={{
+                          background: '#8B5CF6',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 700,
+                          padding: '8px 18px',
+                          borderRadius: 8,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 6px rgba(139, 92, 246, 0.25)'
+                        }}
+                      >
+                        <RotateCcw size={14} /> Clear All Filters
+                      </button>
                     </div>
                   ) : (
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
                       <thead>
                         <tr style={{ background: 'rgba(37, 99, 235, 0.08)', textAlign: 'left', color: '#1D4ED8', textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
                           <th style={{ padding: '12px 14px' }}>Name</th>
-                          <th style={{ padding: '12px 14px' }}>Medical Center</th>
+                          <th style={{ padding: '12px 14px' }}>
+                            <HeaderFilterDropdown
+                              title="Medical Center"
+                              activeValue={patientCenterFilter}
+                              options={medicalCenterOptions}
+                              isOpen={activeHeaderFilter === 'patient-center'}
+                              onToggle={() => setActiveHeaderFilter(prev => prev === 'patient-center' ? null : 'patient-center')}
+                              onSelect={val => setPatientCenterFilter(val)}
+                              theme="blue"
+                            />
+                          </th>
                           <th style={{ padding: '12px 14px' }}>Phone Number</th>
                           <th style={{ padding: '12px 14px' }}>Email</th>
                           <th style={{ padding: '12px 14px' }}>Age</th>
-                          <th style={{ padding: '12px 14px' }}>Status</th>
+                          <th style={{ padding: '12px 14px 12px 64px' }}>Status</th>
                           <th style={{ padding: '12px 14px' }}>Actions</th>
                         </tr>
                       </thead>
@@ -1211,7 +1499,7 @@ export default function AdminPanel() {
                             <td style={{ padding: '12px 14px', color: 'var(--text-1)', fontWeight: 700 }}>
                               {s.age !== null && s.age !== undefined ? `${s.age} yrs` : '—'}
                             </td>
-                            <td style={{ padding: '12px 14px' }}>
+                            <td style={{ padding: '12px 14px 12px 64px' }}>
                               <span style={{
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
                                 padding: '4px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
@@ -1223,14 +1511,14 @@ export default function AdminPanel() {
                               </span>
                             </td>
                             <td style={{ padding: '12px 14px' }}>
-                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                <button onClick={() => setEditingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit user">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
+                                <button onClick={() => setEditingStaff({ ...s })} style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit user">
                                   <Pencil size={15} color="#111827" />
                                 </button>
-                                <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend user' : 'Activate user'}>
+                                <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend user' : 'Activate user'}>
                                   {s.status === 'active' ? <Pause size={15} color="#D97706" /> : <Play size={15} color="#16A34A" />}
                                 </button>
-                                <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete user">
+                                <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete user">
                                   <Trash2 size={15} color="#DC2626" />
                                 </button>
                               </div>
@@ -1243,19 +1531,59 @@ export default function AdminPanel() {
                 ) : staffSubTab === 'doctors' ? (
                   /* DOCTORS TAB TABLE */
                   filteredDoctors.length === 0 ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(16, 185, 129, 0.02)', borderRadius: 12, border: '1px dashed rgba(16, 185, 129, 0.2)' }}>
-                      No doctors found matching your search.
+                    <div style={{ padding: 36, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(16, 185, 129, 0.02)', borderRadius: 12, border: '1px dashed rgba(16, 185, 129, 0.25)' }}>
+                      <p style={{ margin: '0 0 12px 0', fontSize: 14, color: 'var(--text-2)', fontWeight: 600 }}>No doctors found matching your search or filters.</p>
+                      <button
+                        type="button"
+                        onClick={handleClearAllFilters}
+                        className="btn btn-sm"
+                        style={{
+                          background: '#8B5CF6',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 700,
+                          padding: '8px 18px',
+                          borderRadius: 8,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 6px rgba(139, 92, 246, 0.25)'
+                        }}
+                      >
+                        <RotateCcw size={14} /> Clear All Filters
+                      </button>
                     </div>
                   ) : (
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 760 }}>
                       <thead>
                         <tr style={{ background: 'rgba(16, 185, 129, 0.08)', textAlign: 'left', color: '#047857', textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
                           <th style={{ padding: '12px 14px' }}>Name</th>
-                          <th style={{ padding: '12px 14px' }}>Specialization</th>
-                          <th style={{ padding: '12px 14px' }}>Medical Centers</th>
+                          <th style={{ padding: '12px 14px' }}>
+                            <HeaderFilterDropdown
+                              title="Specialization"
+                              activeValue={doctorSpecFilter}
+                              options={specializationOptions}
+                              isOpen={activeHeaderFilter === 'doctor-spec'}
+                              onToggle={() => setActiveHeaderFilter(prev => prev === 'doctor-spec' ? null : 'doctor-spec')}
+                              onSelect={val => setDoctorSpecFilter(val)}
+                              theme="green"
+                            />
+                          </th>
+                          <th style={{ padding: '12px 14px' }}>
+                            <HeaderFilterDropdown
+                              title="Medical Centers"
+                              activeValue={doctorCenterFilter}
+                              options={medicalCenterOptions}
+                              isOpen={activeHeaderFilter === 'doctor-center'}
+                              onToggle={() => setActiveHeaderFilter(prev => prev === 'doctor-center' ? null : 'doctor-center')}
+                              onSelect={val => setDoctorCenterFilter(val)}
+                              theme="green"
+                            />
+                          </th>
                           <th style={{ padding: '12px 14px' }}>Email</th>
                           <th style={{ padding: '12px 14px' }}>Phone Number</th>
-                          <th style={{ padding: '12px 14px' }}>Status</th>
+                          <th style={{ padding: '12px 14px 12px 64px' }}>Status</th>
                           <th style={{ padding: '12px 14px' }}>Actions</th>
                         </tr>
                       </thead>
@@ -1298,7 +1626,7 @@ export default function AdminPanel() {
                               </td>
                               <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{s.email}</td>
                               <td style={{ padding: '12px 14px', color: 'var(--text-2)', fontWeight: 500 }}>{s.phone || '—'}</td>
-                              <td style={{ padding: '12px 14px' }}>
+                              <td style={{ padding: '12px 14px 12px 64px' }}>
                                 <span style={{
                                   display: 'inline-flex', alignItems: 'center', gap: 6,
                                   padding: '4px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
@@ -1310,14 +1638,36 @@ export default function AdminPanel() {
                                 </span>
                               </td>
                               <td style={{ padding: '12px 14px' }}>
-                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                  <button onClick={() => setEditingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit doctor">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
+                                  <button
+                                    onClick={() => {
+                                      const matched = doctors.find(d => d.email === s.email || d.id === s.id || (d as any).userId === s.id)
+                                      const docToEdit: ApiDoctor = matched || {
+                                        id: s.id,
+                                        name: s.name,
+                                        dept: s.specialization || s.dept || 'General Medicine',
+                                        specialization: s.specialization || s.dept || 'General Medicine',
+                                        room: '',
+                                        series: '',
+                                        status: s.status === 'active' ? 'active' : 'offline',
+                                        email: s.email,
+                                        phone: s.phone,
+                                        avgConsultMinutes: 10,
+                                        dateOfBirth: s.dateOfBirth,
+                                      }
+                                      setEditingDoctorProfile(docToEdit)
+                                      setModalDoctorCenter(null)
+                                      setDoctorModalOpen(true)
+                                    }}
+                                    style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                                    title="Edit doctor profile"
+                                  >
                                     <Pencil size={15} color="#111827" />
                                   </button>
-                                  <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend doctor' : 'Activate doctor'}>
+                                  <button onClick={() => setSuspendingStaff({ ...s })} style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title={s.status === 'active' ? 'Suspend doctor' : 'Activate doctor'}>
                                     {s.status === 'active' ? <Pause size={15} color="#D97706" /> : <Play size={15} color="#16A34A" />}
                                   </button>
-                                  <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete doctor">
+                                  <button onClick={() => setDeletingStaff({ ...s })} style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete doctor">
                                     <Trash2 size={15} color="#DC2626" />
                                   </button>
                                 </div>
@@ -1331,19 +1681,59 @@ export default function AdminPanel() {
                 ) : (
                   /* MEDICAL CENTERS TAB TABLE */
                   filteredCenters.length === 0 ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(245, 158, 11, 0.02)', borderRadius: 12, border: '1px dashed rgba(245, 158, 11, 0.25)' }}>
-                      No medical centers found matching your search.
+                    <div style={{ padding: 36, textAlign: 'center', color: 'var(--text-4)', fontSize: 13, background: 'rgba(245, 158, 11, 0.02)', borderRadius: 12, border: '1px dashed rgba(245, 158, 11, 0.25)' }}>
+                      <p style={{ margin: '0 0 12px 0', fontSize: 14, color: 'var(--text-2)', fontWeight: 600 }}>No medical centers found matching your search or filters.</p>
+                      <button
+                        type="button"
+                        onClick={handleClearAllFilters}
+                        className="btn btn-sm"
+                        style={{
+                          background: '#8B5CF6',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 700,
+                          padding: '8px 18px',
+                          borderRadius: 8,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 6px rgba(139, 92, 246, 0.25)'
+                        }}
+                      >
+                        <RotateCcw size={14} /> Clear All Filters
+                      </button>
                     </div>
                   ) : (
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
                       <thead>
                         <tr style={{ background: 'rgba(245, 158, 11, 0.10)', textAlign: 'left', color: '#B45309', textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
                           <th style={{ padding: '12px 14px' }}>Center Name</th>
-                          <th style={{ padding: '12px 14px' }}>Province</th>
-                          <th style={{ padding: '12px 14px' }}>District</th>
+                          <th style={{ padding: '12px 14px' }}>
+                            <HeaderFilterDropdown
+                              title="Province"
+                              activeValue={centerProvinceFilter}
+                              options={provinceOptions}
+                              isOpen={activeHeaderFilter === 'center-province'}
+                              onToggle={() => setActiveHeaderFilter(prev => prev === 'center-province' ? null : 'center-province')}
+                              onSelect={val => setCenterProvinceFilter(val)}
+                              theme="yellow"
+                            />
+                          </th>
+                          <th style={{ padding: '12px 14px' }}>
+                            <HeaderFilterDropdown
+                              title="District"
+                              activeValue={centerDistrictFilter}
+                              options={districtOptions}
+                              isOpen={activeHeaderFilter === 'center-district'}
+                              onToggle={() => setActiveHeaderFilter(prev => prev === 'center-district' ? null : 'center-district')}
+                              onSelect={val => setCenterDistrictFilter(val)}
+                              theme="yellow"
+                            />
+                          </th>
                           <th style={{ padding: '12px 14px' }}>Email</th>
                           <th style={{ padding: '12px 14px' }}>Phone</th>
-                          <th style={{ padding: '12px 14px' }}>Status</th>
+                          <th style={{ padding: '12px 14px 12px 64px' }}>Status</th>
                           <th style={{ padding: '12px 14px' }}>Actions</th>
                         </tr>
                       </thead>
@@ -1362,7 +1752,7 @@ export default function AdminPanel() {
                             <td style={{ padding: '12px 14px', color: 'var(--text-2)', fontWeight: 600 }}>{c.city || '—'}</td>
                             <td style={{ padding: '12px 14px', color: 'var(--text-3)' }}>{c.email || '—'}</td>
                             <td style={{ padding: '12px 14px', color: 'var(--text-2)', fontWeight: 500 }}>{c.phone || '—'}</td>
-                            <td style={{ padding: '12px 14px' }}>
+                            <td style={{ padding: '12px 14px 12px 64px' }}>
                               <span style={{
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
                                 padding: '4px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
@@ -1374,11 +1764,11 @@ export default function AdminPanel() {
                               </span>
                             </td>
                             <td style={{ padding: '12px 14px' }}>
-                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                <button onClick={() => setEditingCenter(c)} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit center">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
+                                <button onClick={() => setEditingCenter(c)} style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Edit center">
                                   <Pencil size={15} color="#111827" />
                                 </button>
-                                <button onClick={() => setDeletingCenter(c)} style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete center">
+                                <button onClick={() => setDeletingCenter(c)} style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete center">
                                   <Trash2 size={15} color="#DC2626" />
                                 </button>
                               </div>
@@ -1650,9 +2040,13 @@ export default function AdminPanel() {
                           <button
                             className="btn btn-ghost btn-sm"
                             style={{ flex: 1, minWidth: 120 }}
-                            onClick={() => { setActiveCenter(c); setShowAssignDoctorModal(true) }}
+                            onClick={() => {
+                              setModalDoctorCenter(c)
+                              setEditingDoctorProfile(null)
+                              setDoctorModalOpen(true)
+                            }}
                           >
-                            <UserCheck size={14} /> Assign Doctor
+                            <Stethoscope size={14} /> Add Doctor
                           </button>
                           <button
                             className="btn btn-ghost btn-sm"
@@ -2185,6 +2579,23 @@ export default function AdminPanel() {
         isOpen={!!viewingDocument}
         onClose={() => setViewingDocument(null)}
         record={viewingDocument}
+      />
+
+      <AddDoctorModal
+        isOpen={doctorModalOpen}
+        onClose={() => {
+          setDoctorModalOpen(false)
+          setEditingDoctorProfile(null)
+          setModalDoctorCenter(null)
+        }}
+        centerId={modalDoctorCenter?.id ?? editingDoctorProfile?.centerId ?? null}
+        centerName={modalDoctorCenter?.name ?? editingDoctorProfile?.centerName ?? null}
+        editDoctor={editingDoctorProfile}
+        isAdmin={true}
+        onCreated={() => {
+          refreshClinicsData()
+          refreshRolesData()
+        }}
       />
     </div>
   )

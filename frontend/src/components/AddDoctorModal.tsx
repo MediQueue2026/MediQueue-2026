@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Stethoscope, CheckCircle2, Inbox, UserPlus, UserCheck, Clock, User, Award, Calendar, Building2 } from 'lucide-react'
+import { X, Stethoscope, CheckCircle2, Inbox, UserPlus, UserCheck, Clock, User, Award, Building2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiDoctor } from '../lib/api'
 import CleanDatePicker from './CleanDatePicker'
@@ -125,6 +125,7 @@ export default function AddDoctorModal({
   centerName: _centerName,
   onCreated,
   editDoctor,
+  isAdmin = false,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -132,6 +133,7 @@ export default function AddDoctorModal({
   centerName?: string | null
   onCreated?: (doctor?: ApiDoctor) => void
   editDoctor?: ApiDoctor | null
+  isAdmin?: boolean
 }) {
   const isEdit = !!editDoctor
   const todayStr = new Date().toISOString().split('T')[0]
@@ -328,8 +330,10 @@ export default function AddDoctorModal({
       const startYearNum = editStartYear ? parseInt(editStartYear, 10) : undefined
       const expYears = startYearNum ? Math.max(0, currentYear - startYearNum) : undefined
 
+      const effectiveCenterId = centerId ?? editDoctor.centerId ?? (editDoctor.centers && editDoctor.centers.length === 1 ? editDoctor.centers[0].centerId : undefined)
+
       const res = await api.updateDoctor(editDoctor.id, {
-        centerId: centerId ?? editDoctor.centerId ?? undefined,
+        centerId: effectiveCenterId,
         fullName: editName.trim() || undefined,
         phone: editPhone.trim() || undefined,
         gender: editGender || undefined,
@@ -340,11 +344,11 @@ export default function AddDoctorModal({
         qualifications: editQuals.trim() || undefined,
         experienceStartYear: startYearNum,
         yearsOfExperience: expYears,
-        roomNumber: roomNumber.trim() || undefined,
-        series: cleanSeries || undefined,
+        roomNumber: effectiveCenterId ? (roomNumber.trim() || undefined) : undefined,
+        series: effectiveCenterId ? (cleanSeries || undefined) : undefined,
         email: editEmail.trim() || undefined,
-        joinedDate: editJoinedDate || undefined,
-        maxAppointmentsPerHour: Number(maxPerHour) || 4,
+        joinedDate: effectiveCenterId ? (editJoinedDate || undefined) : undefined,
+        maxAppointmentsPerHour: effectiveCenterId ? (Number(maxPerHour) || 4) : undefined,
       })
       setSuccessMsg('Doctor profile updated successfully.')
       setDone(true)
@@ -418,10 +422,15 @@ export default function AddDoctorModal({
         yearsOfExperience: expYears,
         roomNumber: newRoomNumber.trim() || undefined,
         joinedDate: newJoinedDate || undefined,
+        autoApprove: isAdmin,
       })
-      setSuccessMsg(`Doctor creation request for ${newDoctorName.trim()} submitted to System Admin for approval. The doctor will receive an SMS with login credentials once approved.`)
+      if (isAdmin) {
+        setSuccessMsg(`Doctor account for ${newDoctorName.trim()} created and activated successfully. Login credentials sent via SMS.`)
+      } else {
+        setSuccessMsg(`Doctor creation request for ${newDoctorName.trim()} submitted to System Admin for approval. The doctor will receive an SMS with login credentials once approved.`)
+      }
       setDone(true)
-      setTimeout(() => { resetState(); onClose() }, 4000)
+      setTimeout(() => { resetState(); onClose() }, isAdmin ? 2500 : 4000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not submit request. Please try again.')
       setSaving(false)
@@ -768,10 +777,12 @@ export default function AddDoctorModal({
         ) : (
           /* ── Tab 2: Create New Doctor Form ── */
           <form onSubmit={handleCreateNewSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(245, 158, 11, 0.07)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 10, padding: '10px 14px', fontSize: 12.5, color: '#92400e' }}>
-              <Clock size={18} style={{ flexShrink: 0 }} />
-              <span>This request will be sent to the <strong>System Admin</strong> for approval. Once approved, the doctor will receive login credentials via SMS.</span>
-            </div>
+            {!isAdmin && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(245, 158, 11, 0.07)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 10, padding: '10px 14px', fontSize: 12.5, color: '#92400e' }}>
+                <Clock size={18} style={{ flexShrink: 0 }} />
+                <span>This request will be sent to the <strong>System Admin</strong> for approval. Once approved, the doctor will receive login credentials via SMS.</span>
+              </div>
+            )}
 
             {/* Section: Personal Information */}
             <div style={sectionHeaderStyle}>
@@ -907,7 +918,7 @@ export default function AddDoctorModal({
               <button type="button" onClick={() => { resetState(); onClose() }} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
               <button type="submit" className="btn btn-primary" disabled={saving || noCenter} style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}>
                 {saving ? <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} /> : <UserPlus size={16} />}
-                {saving ? 'Submitting…' : 'Submit for Admin Approval'}
+                {saving ? (isAdmin ? 'Creating…' : 'Submitting…') : (isAdmin ? 'Save and Create' : 'Submit for Admin Approval')}
               </button>
             </div>
           </form>
