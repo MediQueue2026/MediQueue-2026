@@ -428,6 +428,29 @@ export default function AdminPanel() {
   const [maintenanceMode, setMaintenanceMode] = useState(false)
   const [changingMaintenance, setChangingMaintenance] = useState(false)
 
+  const [centerInquiries, setCenterInquiries] = useState<any[]>([])
+  const [loadingInquiries, setLoadingInquiries] = useState(false)
+
+  const fetchCenterInquiries = async () => {
+    setLoadingInquiries(true)
+    try {
+      const res = await api.getCenterMessagesToAdmin()
+      if (res?.messages) {
+        setCenterInquiries(res.messages)
+      }
+    } catch (err) {
+      console.warn('Could not load center messages', err)
+    } finally {
+      setLoadingInquiries(false)
+    }
+  }
+
+  useEffect(() => {
+    if (nav === 'api') {
+      fetchCenterInquiries()
+    }
+  }, [nav])
+
   // Fetch initial maintenance state on mount
   useEffect(() => {
     api.getSettings().then(r => {
@@ -779,27 +802,6 @@ export default function AdminPanel() {
     }
   }
 
-  const handleSaveCenter = async () => {
-    if (!editingCenter) return
-
-    try {
-      const { center } = await api.updateCenter(editingCenter.id, {
-        name: editingCenter.name,
-        city: editingCenter.city,
-        address: editingCenter.address,
-        openingHours: editingCenter.opening_hours,
-        services: editingCenter.services,
-        phone: editingCenter.phone || undefined,
-        email: editingCenter.email || undefined,
-        status: editingCenter.status,
-      })
-      setCenters(prev => prev.map(item => item.id === center.id ? center : item))
-      setEditingCenter(null)
-    } catch (error) {
-      console.error('Failed to update center', error)
-      alert('Could not update the medical center. Please try again.')
-    }
-  }
 
   const handleDeleteCenter = async () => {
     if (!deletingCenter) return
@@ -900,23 +902,24 @@ export default function AdminPanel() {
       <AddCenterModal
         isOpen={showAddCenterModal}
         onClose={() => setShowAddCenterModal(false)}
-        onAdd={async (centerData) => {
-          try {
-            const res = await api.createCenter(centerData)
-            if (res?.center) {
-              setCenters(prev => {
-                const exists = prev.some(c => c.id === res.center.id)
-                return exists ? prev : [...prev, res.center]
-              })
-            }
-            const r = await api.getCenters()
-            if (r?.centers) {
-              setCenters(r.centers)
-            }
-          } catch (err) {
-            console.error('Failed to create center', err)
-            alert('Failed to add center to database.')
-          }
+        isAdmin={true}
+        mode="create"
+        onAdd={async () => {
+          await refreshClinicsData()
+          await refreshRolesData()
+        }}
+      />
+
+      <AddCenterModal
+        isOpen={Boolean(editingCenter)}
+        onClose={() => setEditingCenter(null)}
+        isAdmin={true}
+        mode="edit"
+        editCenter={editingCenter}
+        onUpdated={async () => {
+          await refreshClinicsData()
+          await refreshRolesData()
+          setEditingCenter(null)
         }}
       />
 
@@ -1791,8 +1794,25 @@ export default function AdminPanel() {
                   <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Medical Centers</h3>
                   <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Live facility list from Supabase · medical_centers table</div>
                 </div>
-                <button onClick={() => setShowAddCenterModal(true)} className="btn btn-ghost btn-sm" style={{ gap: 6, height: 40 }}>
-                  <Plus size={14} /> Add New Medical Center
+                <button
+                  onClick={() => setShowAddCenterModal(true)}
+                  className="btn btn-sm"
+                  style={{
+                    background: '#8B5CF6',
+                    color: '#ffffff',
+                    border: '1px solid #7C3AED',
+                    fontWeight: 700,
+                    height: 42,
+                    borderRadius: 12,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '0 18px',
+                    boxShadow: '0 2px 10px rgba(139, 92, 246, 0.3)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Plus size={15} /> Add New Medical Center
                 </button>
               </div>
 
@@ -2083,7 +2103,8 @@ export default function AdminPanel() {
 
           {/* MESSAGE CENTER TAB */}
           {nav === 'api' && (
-            <div className="card glass-form-card" style={{ padding: 24 }}>
+            <>
+              <div className="card glass-form-card" style={{ padding: 24 }}>
               <div style={{ marginBottom: 20 }}>
                 <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Message Center</h3>
                 <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Send alerts and maintenance notifications to users</div>
@@ -2121,7 +2142,72 @@ export default function AdminPanel() {
                 </div>
               </div>
             </div>
-          )}
+
+            {/* INCOMING MESSAGES & UPLOADS FROM MEDICAL CENTERS */}
+            <div className="card glass-form-card" style={{ padding: 24, marginTop: 22 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Incoming Inquiries &amp; Requests from Medical Centers</h3>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Direct communications, reports, and document uploads submitted by clinic receptionists</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchCenterInquiries}
+                  className="btn btn-ghost btn-sm"
+                  style={{ gap: 6 }}
+                >
+                  <RefreshCw size={13} className={loadingInquiries ? 'spin' : ''} /> Refresh
+                </button>
+              </div>
+
+              {loadingInquiries ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)' }}>Loading inquiries…</div>
+              ) : centerInquiries.length === 0 ? (
+                <div style={{ padding: 32, textAlign: 'center', background: 'rgba(139, 92, 246, 0.04)', borderRadius: 14, border: '1px dashed rgba(139, 92, 246, 0.25)', color: 'var(--text-4)', fontSize: 13 }}>
+                  No messages or uploads received from medical centers yet.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {centerInquiries.map(inq => (
+                    <div key={inq.id} style={{
+                      padding: 16, borderRadius: 14, background: '#fff', border: '1px solid var(--border-md)',
+                      display: 'flex', flexDirection: 'column', gap: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 800, color: '#6D28D9', fontSize: 14 }}>{inq.centerName}</span>
+                          {inq.centerCity && <span style={{ fontSize: 11.5, background: 'rgba(139,92,246,0.1)', color: '#7C3AED', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>{inq.centerCity}</span>}
+                          {inq.senderName && <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>by {inq.senderName}</span>}
+                        </div>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>
+                          {new Date(inq.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)' }}>{inq.title}</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{inq.message}</div>
+                      {inq.attachmentUrl && (
+                        <div style={{ marginTop: 4 }}>
+                          <a
+                            href={inq.attachmentUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700,
+                              color: '#2563EB', background: 'rgba(37, 99, 235, 0.08)', padding: '6px 12px', borderRadius: 8,
+                              textDecoration: 'none'
+                            }}
+                          >
+                            <FileText size={13} /> View Attached File: {inq.attachmentName || 'Attachment Document'}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
           {/* AUDIT LOGS TAB */}
           {nav === 'logs' && (
@@ -2487,73 +2573,6 @@ export default function AdminPanel() {
             </div>
           )}
 
-          {editingCenter && (
-            <div onClick={() => setEditingCenter(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8, 48, 45, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 100 }}>
-              <div onClick={e => e.stopPropagation()} className="card glass-form-card" style={{ width: '100%', maxWidth: 560, padding: 24, borderRadius: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-                  <div>
-                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Edit Medical Center</h3>
-                    <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Update facility details and operational status.</div>
-                  </div>
-                  <button onClick={() => setEditingCenter(null)} className="btn btn-ghost btn-sm">Close</button>
-                </div>
-
-                <div style={{ display: 'grid', gap: 12 }}>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Facility Name</label>
-                    <input className="input" value={editingCenter.name} onChange={e => setEditingCenter({ ...editingCenter, name: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>City</label>
-                    <input className="input" value={editingCenter.city} onChange={e => setEditingCenter({ ...editingCenter, city: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Address</label>
-                    <input className="input" value={editingCenter.address} onChange={e => setEditingCenter({ ...editingCenter, address: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Opening Hours</label>
-                    <input className="input" value={editingCenter.opening_hours} onChange={e => setEditingCenter({ ...editingCenter, opening_hours: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Phone</label>
-                    <input className="input" value={editingCenter.phone || ''} onChange={e => setEditingCenter({ ...editingCenter, phone: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Email</label>
-                    <input className="input" type="email" value={editingCenter.email || ''} onChange={e => setEditingCenter({ ...editingCenter, email: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Services (comma separated)</label>
-                    <input
-                      className="input"
-                      value={editingCenter.services.join(', ')}
-                      onChange={e => setEditingCenter({ ...editingCenter, services: e.target.value.split(',').map(item => item.trim()).filter(Boolean) })}
-                    />
-                  </div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-2)' }}>Status</label>
-                    <select
-                      className="input"
-                      value={editingCenter.status || 'operational'}
-                      onChange={e => setEditingCenter({ ...editingCenter, status: e.target.value as ApiCenter['status'] })}
-                      style={{ height: 44, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
-                    >
-                      <option value="operational">Operational</option>
-                      <option value="maintenance">Maintenance</option>
-                      <option value="closed">Closed</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-                  <button onClick={() => setEditingCenter(null)} className="btn btn-ghost btn-sm">Cancel</button>
-                  <button onClick={handleSaveCenter} className="btn btn-primary btn-sm">Save Changes</button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {deletingCenter && (
             <div onClick={() => setDeletingCenter(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(8, 48, 45, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 105 }}>
               <div onClick={e => e.stopPropagation()} className="card glass-form-card" style={{ width: '100%', maxWidth: 420, padding: 24, borderRadius: 18 }}>
@@ -2595,6 +2614,23 @@ export default function AdminPanel() {
         onCreated={() => {
           refreshClinicsData()
           refreshRolesData()
+        }}
+      />
+
+      <AddCenterModal
+        isOpen={showAddCenterModal || Boolean(editingCenter)}
+        onClose={() => {
+          setShowAddCenterModal(false)
+          setEditingCenter(null)
+        }}
+        mode={editingCenter ? 'edit' : 'create'}
+        isAdmin={true}
+        editCenter={editingCenter}
+        onAdd={() => {
+          refreshClinicsData()
+        }}
+        onUpdated={() => {
+          refreshClinicsData()
         }}
       />
     </div>

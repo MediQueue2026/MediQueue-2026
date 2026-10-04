@@ -871,7 +871,7 @@ export const api = {
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
 
   createCenter: (input: { name: string; registrationNumber?: string; licenseStatus?: ApiCenter['licenseStatus']; city: string; province?: string; address?: string; openingHours?: string; services?: string[]; phone?: string; email?: string; website?: string; status?: 'operational' | 'maintenance' | 'closed'; latitude?: number; longitude?: number; requestComment?: string; registrationDocument?: { fileUrl: string; fileName: string; fileType: string } }) =>
-    request<{ message: string; center: ApiCenter }>('/centers', {
+    request<{ message: string; center: ApiCenter; credentials?: { email: string; password: string; phone?: string | null } }>('/centers', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
@@ -888,11 +888,40 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  updateCenter: (id: string, updates: Partial<{ name: string; registrationNumber: string; licenseStatus: ApiCenter['licenseStatus']; city: string; province: string; address: string; latitude: number; longitude: number; openingHours: string; services: string[]; phone: string; email: string; website: string; imageUrl: string | null; status: 'operational' | 'maintenance' | 'closed' }>) =>
+  updateCenter: (id: string, updates: Partial<{ name: string; registrationNumber: string; licenseStatus: ApiCenter['licenseStatus']; city: string; province: string; address: string; latitude: number; longitude: number; openingHours: string; services: string[]; phone: string; email: string; website: string; imageUrl: string | null; status: 'operational' | 'maintenance' | 'closed'; registrationDocument?: { fileUrl: string; fileName?: string; fileType?: string; title?: string } }>) =>
     request<{ message: string; center: ApiCenter }>(`/centers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     }),
+
+  sendMessageToAdmin: (centerId: string, input: { title: string; message: string; attachmentUrl?: string | null; attachmentName?: string | null; fileUrl?: string | null; fileName?: string | null }) =>
+    request<{ message: string; data: any }>(`/centers/${centerId}/messages-to-admin`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        message: input.message,
+        attachmentUrl: input.attachmentUrl || input.fileUrl || null,
+        attachmentName: input.attachmentName || input.fileName || null,
+      }),
+    }),
+
+  getCenterMessagesToAdmin: () =>
+    request<{
+      messages: Array<{
+        id: string
+        centerId: string
+        centerName: string
+        centerCity?: string
+        centerEmail?: string
+        centerPhone?: string
+        title: string
+        message: string
+        senderName?: string
+        attachmentName?: string | null
+        attachmentUrl?: string | null
+        createdAt: string
+      }>
+    }>('/centers/admin-messages'),
 
   deleteCenter: (id: string) => request<{ message: string }>(`/centers/${id}`, {
     method: 'DELETE',

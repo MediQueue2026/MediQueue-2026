@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { X, Building2, Plus, CheckCircle2, ShieldAlert } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { X, Building2, Plus, CheckCircle2, ShieldAlert, Key, Phone, Mail, FileText, Save } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ApiCenter } from '../lib/api'
 import ServiceMultiSelect from './ServiceMultiSelect'
@@ -10,38 +10,34 @@ const SRI_LANKAN_PROVINCES: Record<string, string[]> = {
   'Central Province': ['Kandy', 'Matale', 'Nuwara Eliya'],
   'Southern Province': ['Galle', 'Matara', 'Hambantota'],
   'Northern Province': ['Jaffna', 'Kilinochchi', 'Mannar', 'Mullaitivu', 'Vavuniya'],
-  'Eastern Province': ['Ampara', 'Batticaloa', 'Trincomalee'],
+  'Eastern Province': ['Batticaloa', 'Ampara', 'Trincomalee'],
   'North Western Province': ['Kurunegala', 'Puttalam'],
   'North Central Province': ['Anuradhapura', 'Polonnaruwa'],
   'Uva Province': ['Badulla', 'Monaragala'],
-  'Sabaragamuwa Province': ['Kegalle', 'Ratnapura'],
+  'Sabaragamuwa Province': ['Ratnapura', 'Kegalle'],
 }
 
-export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create' }: {
+export default function AddCenterModal({
+  isOpen,
+  onClose,
+  onAdd,
+  onUpdated,
+  mode = 'create',
+  isAdmin = false,
+  editCenter = null,
+}: {
   isOpen: boolean
   onClose: () => void
-  /** 'request' submits for Super Admin approval instead of creating the center immediately. */
-  mode?: 'create' | 'request'
-  onAdd?: (centerData: {
-    name: string
-    registrationNumber?: string
-    licenseStatus?: 'active' | 'pending' | 'expired' | 'suspended'
-    city: string
-    province?: string
-    address?: string
-    openingHours?: string
-    services?: string[]
-    phone?: string
-    email?: string
-    website?: string
-    status?: ApiCenter['status']
-    latitude?: number
-    longitude?: number
-    requestComment?: string
-    registrationDocument?: { fileUrl: string; fileName: string; fileType: string }
-  }) => void
+  /** 'create' | 'request' | 'edit' */
+  mode?: 'create' | 'request' | 'edit'
+  isAdmin?: boolean
+  editCenter?: ApiCenter | null
+  onAdd?: (centerData: any) => Promise<any> | void
+  onUpdated?: (centerData: any) => Promise<any> | void
 }) {
-  const isRequest = mode === 'request'
+  const isEdit = Boolean(editCenter) || mode === 'edit'
+  const isRequest = !isAdmin && (mode === 'request')
+
   const [name, setName] = useState('')
   const [registrationNumber, setRegistrationNumber] = useState('')
   const [licenseStatus, setLicenseStatus] = useState<'active' | 'pending' | 'expired' | 'suspended'>('active')
@@ -49,7 +45,6 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
   const [province, setProvince] = useState('')
   const [address, setAddress] = useState('')
   const [openingHours, setOpeningHours] = useState('08:00 - 18:00')
-  /** Chosen from a list rather than typed as comma-separated text — see ServiceMultiSelect. */
   const [services, setServices] = useState<string[]>(['General Medicine'])
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -63,6 +58,11 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
   const [submitting, setSubmitting] = useState(false)
   const [trackingLocation, setTrackingLocation] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    email: string
+    password: string
+    phone?: string | null
+  } | null>(null)
 
   const cityCoordsMap: Record<string, { lat: number; lng: number }> = {
     'colombo': { lat: 6.9271, lng: 79.8612 },
@@ -92,6 +92,50 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
     'kegalle': { lat: 7.2513, lng: 80.3464 },
     'ratnapura': { lat: 6.6828, lng: 80.4016 },
   }
+
+  useEffect(() => {
+    if (editCenter && isOpen) {
+      setName(editCenter.name || '')
+      setRegistrationNumber(editCenter.registrationNumber || '')
+      setLicenseStatus(editCenter.licenseStatus || 'active')
+      setProvince(editCenter.province || '')
+      setCity(editCenter.city || '')
+      setAddress(editCenter.address || '')
+      setOpeningHours(editCenter.opening_hours || '08:00 - 18:00')
+      setServices(editCenter.services && editCenter.services.length > 0 ? editCenter.services : ['General Medicine'])
+      setPhone(editCenter.phone || '')
+      setEmail(editCenter.email || '')
+      setWebsite(editCenter.website || '')
+      setStatus(editCenter.status || 'operational')
+      setLatitude(editCenter.latitude ? String(editCenter.latitude) : '6.9271')
+      setLongitude(editCenter.longitude ? String(editCenter.longitude) : '79.8612')
+      setRequestComment(editCenter.requestComment || '')
+      setDocumentFile(null)
+      setCreatedCredentials(null)
+      setError(null)
+      setSubmitted(false)
+    } else if (isOpen) {
+      setName('')
+      setRegistrationNumber('')
+      setLicenseStatus('active')
+      setProvince('')
+      setCity('')
+      setAddress('')
+      setOpeningHours('08:00 - 18:00')
+      setServices(['General Medicine'])
+      setPhone('')
+      setEmail('')
+      setWebsite('')
+      setStatus('operational')
+      setLatitude('6.9271')
+      setLongitude('79.8612')
+      setRequestComment('')
+      setDocumentFile(null)
+      setCreatedCredentials(null)
+      setError(null)
+      setSubmitted(false)
+    }
+  }, [editCenter, isOpen])
 
   const handleCityChange = (val: string) => {
     setCity(val)
@@ -148,47 +192,14 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
           const addressText = Object.values(location ?? {}).join(' ').toLowerCase()
           const provinceName = Object.keys(SRI_LANKAN_PROVINCES).find(name => {
             const provinceKey = name.toLowerCase().replace(' province', '')
-            return addressText.includes(name.toLowerCase()) || addressText.includes(provinceKey)
+            return addressText.includes(provinceKey)
           })
-          const selectedProvince = provinceName ?? (province && SRI_LANKAN_PROVINCES[province] ? province : undefined)
-          const citySources = [
-            location?.city,
-            location?.city_district,
-            location?.state_district,
-            location?.district,
-            location?.town,
-            location?.municipality,
-            location?.village,
-            location?.county,
-            location?.suburb,
-          ].filter(Boolean).map(value => value!.toLowerCase())
-          const matchingCity = selectedProvince
-            ? SRI_LANKAN_PROVINCES[selectedProvince].find(name => {
-              const cityKey = name.toLowerCase()
-              return citySources.some(source => source.includes(cityKey) || cityKey.includes(source.replace(/\s+district$/i, '')))
-            })
-            : undefined
 
-          // GPS often resolves to a municipality or suburb rather than the
-          // district name used by the form, so use the nearest district center.
-          const nearestCity = selectedProvince && !matchingCity
-            ? SRI_LANKAN_PROVINCES[selectedProvince]
-              .map(name => {
-                const coords = cityCoordsMap[name.toLowerCase()]
-                if (!coords) return null
-                return { name, distance: Math.hypot(coords.lat - nextLat, coords.lng - nextLng) }
-              })
-              .filter((candidate): candidate is { name: string; distance: number } => candidate !== null)
-              .sort((a, b) => a.distance - b.distance)[0]
-            : undefined
+          const availableCities = provinceName ? (SRI_LANKAN_PROVINCES[provinceName] ?? []) : []
+          const matchingCity = availableCities.find(cityName => addressText.includes(cityName.toLowerCase()))
 
-          if (selectedProvince) setProvince(selectedProvince)
+          if (provinceName) setProvince(provinceName)
           if (matchingCity) setCity(matchingCity)
-          else if (nearestCity && nearestCity.distance < 0.75) setCity(nearestCity.name)
-          else if (selectedProvince) setCity('')
-          if (!selectedProvince || (!matchingCity && (!nearestCity || nearestCity.distance >= 0.75))) {
-            setError('Location found, but the province or city could not be matched. Please select them manually.')
-          }
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Location found, but address details could not be loaded.')
         } finally {
@@ -210,6 +221,7 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
 
   const handleClose = () => {
     setError(null)
+    setCreatedCredentials(null)
     onClose()
   }
 
@@ -217,18 +229,25 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
     e.preventDefault()
     setSubmitting(true)
     setError(null)
+
     try {
+      // Validation for new creation (Admin and Receptionist)
+      if (!isEdit) {
+        if (!name.trim()) throw new Error('Official Registered Name is required.')
+        if (!registrationNumber.trim()) throw new Error('Registration / License Number is required.')
+        if (!licenseStatus) throw new Error('License Status is required.')
+        if (!province.trim()) throw new Error('Province is required.')
+        if (!city.trim()) throw new Error('City / District is required.')
+        if (!address.trim()) throw new Error('Official Address is required.')
+        if (!openingHours.trim()) throw new Error('Opening Hours are required.')
+        if (!phone.trim()) throw new Error('Official Phone Number is required to receive login credentials.')
+        if (!services || services.length === 0) throw new Error('Please select at least one service provided.')
+        if (!documentFile && !isEdit) {
+          throw new Error('Registration Document (Proof of registration/licensing) is required.')
+        }
+      }
+
       let registrationDocument = undefined
-      if (isRequest && !documentFile) {
-        setError('Please attach a registration document before submitting.')
-        setSubmitting(false)
-        return
-      }
-      if (isRequest && (!name.trim() || !registrationNumber.trim() || !licenseStatus || !address.trim() || !city.trim() || !province.trim() || !phone.trim())) {
-        setError('Complete the official registration, license, address, province, and phone details before submitting.')
-        setSubmitting(false)
-        return
-      }
       if (documentFile) {
         const uploaded = await api.uploadFile(documentFile, 'center-documents')
         registrationDocument = {
@@ -238,47 +257,53 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
         }
       }
 
-      await onAdd?.({
-        name,
+      const payload = {
+        name: name.trim(),
         registrationNumber: registrationNumber.trim() || undefined,
-        licenseStatus: isRequest ? licenseStatus : undefined,
-        city,
+        licenseStatus: licenseStatus || 'active',
+        city: city.trim(),
         province: province.trim() || undefined,
-        address: address || city,
-        openingHours,
+        address: address.trim() || city.trim(),
+        openingHours: openingHours.trim(),
         services,
-        phone: phone || undefined,
-        email: email || undefined,
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
         website: website.trim() || undefined,
         status,
         latitude: latitude ? Number(latitude) : undefined,
         longitude: longitude ? Number(longitude) : undefined,
-        requestComment: requestComment || undefined,
+        requestComment: requestComment.trim() || undefined,
         registrationDocument,
-      })
-      setSubmitted(true)
-      setSubmitting(false)
-      setTimeout(() => {
-        setSubmitted(false)
-        setName('')
-        setRegistrationNumber('')
-        setLicenseStatus('active')
-        setCity('')
-        setProvince('')
-        setAddress('')
-        setOpeningHours('08:00 - 18:00')
-        setServices(['General Medicine'])
-        setPhone('')
-        setEmail('')
-        setWebsite('')
-        setStatus('operational')
-        setRequestComment('')
-        setDocumentFile(null)
-        setTrackingLocation(false)
-        onClose()
-      }, 800)
+      }
+
+      if (isEdit && editCenter) {
+        // Update existing center
+        const res = await api.updateCenter(editCenter.id, payload)
+        if (onUpdated) await onUpdated(res.center)
+        setSubmitted(true)
+        setSubmitting(false)
+        setTimeout(() => {
+          setSubmitted(false)
+          handleClose()
+        }, 900)
+      } else {
+        // Create new center (Admin direct creation or receptionist request)
+        const res = await api.createCenter(payload)
+        if (res?.credentials) {
+          setCreatedCredentials(res.credentials)
+        }
+        if (onAdd) await onAdd(res.center || payload)
+        setSubmitted(true)
+        setSubmitting(false)
+        if (!res?.credentials) {
+          setTimeout(() => {
+            setSubmitted(false)
+            handleClose()
+          }, 900)
+        }
+      }
     } catch (err) {
-      console.error('Failed to add medical center', err)
+      console.error('Failed to save medical center', err)
       setError(err instanceof Error ? err.message : 'Could not save the medical center. Please try again.')
       setSubmitting(false)
     }
@@ -294,18 +319,18 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
       padding: 16
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 600, maxHeight: '90vh',
-        background: 'rgba(255, 255, 255, 0.92)',
+        width: '100%', maxWidth: 660, maxHeight: '92vh',
+        background: 'rgba(255, 255, 255, 0.96)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        border: '1px solid rgba(18, 198, 186, 0.28)',
-        borderRadius: 20, padding: '36px 32px',
-        boxShadow: '0 20px 60px rgba(8, 48, 45, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
+        border: '1px solid rgba(139, 92, 246, 0.25)',
+        borderRadius: 20, padding: '32px 30px',
+        boxShadow: '0 20px 60px rgba(8, 48, 45, 0.16)',
         position: 'relative', overflowY: 'auto'
       }}>
         <button onClick={handleClose} style={{
           position: 'absolute', top: 20, right: 20,
-          background: 'rgba(18, 198, 186, 0.1)', border: '1px solid rgba(18, 198, 186, 0.22)',
+          background: 'rgba(139, 92, 246, 0.08)', border: '1px solid rgba(139, 92, 246, 0.2)',
           borderRadius: '50%', width: 34, height: 34,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: 'var(--text-2)', cursor: 'pointer'
@@ -313,24 +338,43 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
           <X size={18} />
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        {/* Modal Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
           <div style={{
-            width: 40, height: 40, borderRadius: 12,
-            background: 'var(--blue-dim)', border: '1px solid var(--blue-border)',
+            width: 44, height: 44, borderRadius: 14,
+            background: 'rgba(139, 92, 246, 0.12)', border: '1.5px solid rgba(139, 92, 246, 0.3)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'var(--blue)'
+            color: '#7C3AED'
           }}>
-            <Building2 size={22} />
+            <Building2 size={24} />
           </div>
           <div>
-            <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
-              {isRequest ? 'Request New Medical Center' : 'Add New Medical Center'}
+            <h3 style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-1)', letterSpacing: '-0.02em', margin: 0 }}>
+              {isEdit ? 'Edit Medical Center' : isAdmin ? 'Add New Medical Center' : 'Register Medical Center'}
             </h3>
-            <div style={{ fontSize: 12.5, color: 'var(--text-4)' }}>
-              {isRequest ? 'Submit a new clinic or hospital branch for Super Admin approval' : 'Register a new clinic or hospital branch in the system'}
+            <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 2 }}>
+              {isEdit
+                ? 'Update official facility identity, licensing, and services'
+                : isAdmin
+                  ? 'Register an official medical center and dispatch receptionist credentials via SMS'
+                  : 'Submit a new clinic or hospital branch for Super Admin review'}
             </div>
           </div>
         </div>
+
+        {/* Admin Credential Dispatch Notice or Receptionist Review Notice */}
+        {isAdmin && !isEdit && !createdCredentials && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+            background: 'rgba(139, 92, 246, 0.07)', border: '1px solid rgba(139, 92, 246, 0.25)',
+            borderRadius: 12, padding: '10px 14px', marginBottom: 18, fontSize: 12.5, color: '#6D28D9'
+          }}>
+            <Key size={18} style={{ flexShrink: 0, marginTop: 2, color: '#7C3AED' }} />
+            <div>
+              <strong>Instant Receptionist Credentials:</strong> Upon saving, MediQueue will automatically generate receptionist credentials and send them via SMS to the official phone number entered below.
+            </div>
+          </div>
+        )}
 
         {isRequest && !submitted && (
           <div style={{
@@ -343,23 +387,88 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
           </div>
         )}
 
-        {submitted ? (
-          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+        {/* Success View with Credentials (if Admin created) */}
+        {createdCredentials ? (
+          <div style={{ padding: '24px 16px', textAlign: 'center' }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', background: 'rgba(16, 185, 129, 0.14)',
+              color: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 16px'
+            }}>
+              <CheckCircle2 size={36} />
+            </div>
+            <h4 style={{ fontSize: 19, fontWeight: 900, color: 'var(--text-1)', marginBottom: 6 }}>
+              Medical Center Created Successfully!
+            </h4>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 460, margin: '0 auto 20px' }}>
+              <strong>{name}</strong> is now live. Receptionist login credentials have been dispatched via SMS.
+            </p>
+
+            <div style={{
+              background: '#f8fafc', border: '1px solid var(--border-md)',
+              borderRadius: 14, padding: 18, textAlign: 'left', maxWidth: 480, margin: '0 auto 24px'
+            }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', color: '#7C3AED', letterSpacing: '0.05em', marginBottom: 12 }}>
+                Dispatched Receptionist Credentials
+              </div>
+              <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Mail size={15} color="var(--text-4)" />
+                  <span style={{ color: 'var(--text-3)' }}>Login Email:</span>
+                  <strong style={{ color: 'var(--text-1)' }}>{createdCredentials.email}</strong>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Key size={15} color="var(--text-4)" />
+                  <span style={{ color: 'var(--text-3)' }}>Temp Password:</span>
+                  <code style={{ background: '#fff', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border)', fontWeight: 700, color: '#6D28D9' }}>
+                    {createdCredentials.password}
+                  </code>
+                </div>
+                {createdCredentials.phone && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Phone size={15} color="var(--text-4)" />
+                    <span style={{ color: 'var(--text-3)' }}>SMS Sent To:</span>
+                    <strong style={{ color: 'var(--text-1)' }}>{createdCredentials.phone}</strong>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleClose}
+              className="btn btn-primary"
+              style={{
+                background: '#8B5CF6',
+                borderColor: '#7C3AED',
+                padding: '0 28px',
+                height: 44,
+                fontSize: 14,
+                fontWeight: 700,
+                borderRadius: 12
+              }}
+            >
+              Done & Close
+            </button>
+          </div>
+        ) : submitted && !createdCredentials ? (
+          <div style={{ textAlign: 'center', padding: '36px 0' }}>
             <CheckCircle2 size={52} color="#10B981" style={{ margin: '0 auto 14px' }} />
-            <h4 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-1)' }}>
-              {isRequest ? 'Request Sent!' : 'Medical Center Registered!'}
+            <h4 style={{ fontSize: 19, fontWeight: 900, color: 'var(--text-1)' }}>
+              {isEdit ? 'Changes Saved!' : 'Request Submitted!'}
             </h4>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
-              {isRequest
-                ? <>Request to add <strong>{name}</strong> ({city}) has been submitted for Super Admin approval.</>
-                : <><strong>{name}</strong> ({city}) added to MediQueue network.</>}
+              {isEdit
+                ? <>Medical center <strong>{name}</strong> profile has been updated successfully.</>
+                : <>Request to add <strong>{name}</strong> has been submitted for Super Admin review.</>}
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Facility Official Name */}
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                {isRequest ? 'Official Registered Name' : 'Facility Name'}
+                Official Registered Name <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <input
                 required
@@ -371,154 +480,114 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               />
             </div>
 
-            {isRequest && (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                      Registration / License Number
-                    </label>
-                    <input
-                      required
-                      className="input"
-                      placeholder="Government-issued number"
-                      value={registrationNumber}
-                      onChange={e => setRegistrationNumber(e.target.value)}
-                      style={{ height: 44, fontSize: 14 }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                      License Status
-                    </label>
-                    <select
-                      required
-                      className="input"
-                      value={licenseStatus}
-                      onChange={e => setLicenseStatus(e.target.value as typeof licenseStatus)}
-                      style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
-                    >
-                      <option value="active">Active</option>
-                      <option value="pending">Pending</option>
-                      <option value="expired">Expired</option>
-                      <option value="suspended">Suspended</option>
-                    </select>
-                  </div>
-                </div>
-
-                <LocationPickerMap
-                  lat={Number(latitude) || 6.9271}
-                  lng={Number(longitude) || 79.8612}
-                  trackingLocation={trackingLocation}
-                  onTrackLocation={handleTrackLocation}
-                  onChange={(nLat, nLng) => {
-                    setLatitude(nLat.toString())
-                    setLongitude(nLng.toString())
-                  }}
-                />
-
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                    Province
-                  </label>
-                  <select
-                    required
-                    className="input"
-                    value={province}
-                    onChange={e => handleProvinceChange(e.target.value)}
-                    style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
-                  >
-                    <option value="">Select province</option>
-                    {Object.keys(SRI_LANKAN_PROVINCES).map(provinceName => (
-                      <option key={provinceName} value={provinceName}>{provinceName}</option>
-                    ))}
-                  </select>
-                </div>
-              </>
-            )}
-
+            {/* Registration Number & License Status */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  City / District
+                  Registration / License Number {!isEdit && <span style={{ color: '#ef4444' }}>*</span>}
                 </label>
-                {isRequest ? (
-                  <select
-                    required
-                    className="input"
-                    value={city}
-                    disabled={!province}
-                    onChange={e => handleCityChange(e.target.value)}
-                    style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff', opacity: province ? 1 : 0.65 }}
-                  >
-                    <option value="">{province ? 'Select city / district' : 'Select a province first'}</option>
-                    {(SRI_LANKAN_PROVINCES[province] ?? []).map(cityName => (
-                      <option key={cityName} value={cityName}>{cityName}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    required
-                    className="input"
-                    placeholder="e.g. Colombo 07"
-                    value={city}
-                    onChange={e => handleCityChange(e.target.value)}
-                    style={{ height: 44, fontSize: 14 }}
-                  />
-                )}
+                <input
+                  required={!isEdit}
+                  className="input"
+                  placeholder="Government / MOH number"
+                  value={registrationNumber}
+                  onChange={e => setRegistrationNumber(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Address
+                  License Status <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  required
+                  className="input"
+                  value={licenseStatus}
+                  onChange={e => setLicenseStatus(e.target.value as typeof licenseStatus)}
+                  style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
+                >
+                  <option value="active">Active</option>
+                  <option value="pending">Pending</option>
+                  <option value="expired">Expired</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Province & City / District */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Province <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  required
+                  className="input"
+                  value={province}
+                  onChange={e => handleProvinceChange(e.target.value)}
+                  style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff' }}
+                >
+                  <option value="">Select Province</option>
+                  {Object.keys(SRI_LANKAN_PROVINCES).map(provName => (
+                    <option key={provName} value={provName}>{provName}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  City / District <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  required
+                  className="input"
+                  value={city}
+                  disabled={!province}
+                  onChange={e => handleCityChange(e.target.value)}
+                  style={{ height: 44, fontSize: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff', opacity: province ? 1 : 0.65 }}
+                >
+                  <option value="">{province ? 'Select City / District' : 'Select a province first'}</option>
+                  {(SRI_LANKAN_PROVINCES[province] ?? []).map(cityName => (
+                    <option key={cityName} value={cityName}>{cityName}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Physical Address */}
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                Official Address <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input
+                required
+                className="input"
+                placeholder="e.g. 120/A Galle Road, Colombo 03"
+                value={address}
+                onChange={e => setAddress(e.target.value)}
+                style={{ height: 44, fontSize: 14 }}
+              />
+            </div>
+
+            {/* Interactive Map Picker */}
+            <LocationPickerMap
+              lat={Number(latitude) || 6.9271}
+              lng={Number(longitude) || 79.8612}
+              trackingLocation={trackingLocation}
+              onTrackLocation={handleTrackLocation}
+              onChange={(nLat, nLng) => {
+                setLatitude(nLat.toString())
+                setLongitude(nLng.toString())
+              }}
+            />
+
+            {/* Opening Hours & Official Phone Number */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Opening Hours <span style={{ color: '#ef4444' }}>*</span>
                 </label>
                 <input
                   required
-                  className="input"
-                  placeholder="e.g. 123 Medical Plaza"
-                  value={address}
-                  onChange={e => setAddress(e.target.value)}
-                  style={{ height: 44, fontSize: 14 }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Latitude (GPS)
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  className="input"
-                  placeholder="e.g. 6.9271"
-                  value={latitude}
-                  onChange={e => setLatitude(e.target.value)}
-                  style={{ height: 44, fontSize: 14 }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Longitude (GPS)
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  className="input"
-                  placeholder="e.g. 79.8612"
-                  value={longitude}
-                  onChange={e => setLongitude(e.target.value)}
-                  style={{ height: 44, fontSize: 14 }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Opening Hours
-                </label>
-                <input
                   className="input"
                   placeholder="e.g. 08:00 - 18:00"
                   value={openingHours}
@@ -528,11 +597,12 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  {isRequest ? 'Official Phone Number' : 'Phone'}
+                  Official Phone Number <span style={{ color: '#ef4444' }}>*</span>
                 </label>
                 <input
+                  required
                   className="input"
-                  placeholder="e.g. 0112345678"
+                  placeholder="e.g. 0771234567 / 0112345678"
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
                   style={{ height: 44, fontSize: 14 }}
@@ -540,21 +610,21 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               </div>
             </div>
 
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                {isRequest ? 'Official Email (Optional)' : 'Email'}
-              </label>
-              <input
-                className="input"
-                type="email"
-                placeholder="e.g. contact@medicalcenter.io"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                style={{ height: 44, fontSize: 14 }}
-              />
-            </div>
-
-            {isRequest && (
+            {/* Official Email & Website */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Official Clinic Email
+                </label>
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="e.g. contact@cityclinic.lk"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  style={{ height: 44, fontSize: 14 }}
+                />
+              </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
                   Website (Optional)
@@ -568,14 +638,15 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
                   style={{ height: 44, fontSize: 14 }}
                 />
               </div>
-            )}
+            </div>
 
+            {/* Services Provided (Categorized Multi-Select) */}
             <div>
               <label
                 htmlFor="center-services"
                 style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}
               >
-                Services Provided
+                Services Provided <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <ServiceMultiSelect
                 id="center-services"
@@ -585,10 +656,11 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               />
             </div>
 
-            {!isRequest && (
+            {/* Operational Status (for Admin or Edit) */}
+            {(isAdmin || isEdit) && (
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                  Initial Status
+                  Operational Status
                 </label>
                 <select
                   className="input"
@@ -603,36 +675,42 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               </div>
             )}
 
+            {/* Registration Document Upload */}
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                Registration Document {!isEdit && <span style={{ color: '#ef4444' }}>* (Required)</span>}
+              </label>
+              <input
+                required={!isEdit}
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg"
+                className="input"
+                onChange={e => setDocumentFile(e.target.files?.[0] || null)}
+                style={{ fontSize: 13, paddingTop: 10, paddingBottom: 10 }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>
+                Attach official government MOH or Private Health Services Regulatory Council (PHSRC) registration certificate.
+              </div>
+              {isEdit && editCenter?.documents && editCenter.documents.length > 0 && (
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#1D4ED8', background: 'rgba(37, 99, 235, 0.08)', padding: '6px 12px', borderRadius: 8 }}>
+                  <FileText size={14} /> Current on file: {editCenter.documents[0].title || 'Registration Document'}
+                </div>
+              )}
+            </div>
+
+            {/* Special Request Comment (Optional) */}
             {isRequest && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                    Registration Document (Required)
-                  </label>
-                  <input
-                    required
-                    type="file"
-                    accept=".pdf,.png,.jpg,.jpeg"
-                    className="input"
-                    onChange={e => setDocumentFile(e.target.files?.[0] || null)}
-                    style={{ fontSize: 14, paddingTop: 10, paddingBottom: 10 }}
-                  />
-                  <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>
-                    Please attach proof of clinic registration or licensing.
-                  </div>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                    Special Request Comment
-                  </label>
-                  <textarea
-                    className="input"
-                    placeholder="Any notes for the Super Admin..."
-                    value={requestComment}
-                    onChange={e => setRequestComment(e.target.value)}
-                    style={{ height: 80, fontSize: 14, padding: 12, resize: 'vertical' }}
-                  />
-                </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                  Special Request Comment
+                </label>
+                <textarea
+                  className="input"
+                  placeholder="Any notes for the Super Admin..."
+                  value={requestComment}
+                  onChange={e => setRequestComment(e.target.value)}
+                  style={{ height: 80, fontSize: 14, padding: 12, resize: 'vertical' }}
+                />
               </div>
             )}
 
@@ -645,10 +723,44 @@ export default function AddCenterModal({ isOpen, onClose, onAdd, mode = 'create'
               </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
-              <button type="button" onClick={handleClose} disabled={submitting} className="btn btn-ghost" style={{ height: 42 }}>Cancel</button>
-              <button type="submit" disabled={submitting} className="btn btn-primary" style={{ gap: 8, height: 42, padding: '0 20px', fontSize: 14 }}>
-                <Plus size={16} /> {submitting ? (isRequest ? 'Submitting…' : 'Adding…') : (isRequest ? 'Submit for Approval' : 'Add Medical Center')}
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleClose}
+                disabled={submitting}
+                className="btn btn-ghost"
+                style={{ height: 44, padding: '0 18px', fontWeight: 600 }}
+              >
+                Discard Changes
+              </button>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="btn btn-primary"
+                style={{
+                  background: isAdmin ? '#8B5CF6' : undefined,
+                  borderColor: isAdmin ? '#7C3AED' : undefined,
+                  gap: 8, height: 44, padding: '0 24px', fontSize: 14, fontWeight: 700,
+                  boxShadow: isAdmin ? '0 4px 14px rgba(139, 92, 246, 0.35)' : undefined
+                }}
+              >
+                {submitting ? (
+                  isEdit ? 'Saving…' : 'Creating…'
+                ) : isEdit ? (
+                  <>
+                    <Save size={16} /> Save Changes
+                  </>
+                ) : isAdmin ? (
+                  <>
+                    <Plus size={16} /> Save & Create Medical Center
+                  </>
+                ) : (
+                  <>
+                    <Plus size={16} /> Submit for Admin Approval
+                  </>
+                )}
               </button>
             </div>
           </form>
