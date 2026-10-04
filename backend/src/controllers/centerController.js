@@ -260,12 +260,63 @@ export async function createCenter(req, res, next) {
       }
     }
 
+    // When Admin creates the medical center directly:
+    // Automatically create a receptionist account and dispatch SMS credentials
+    let generatedCredentials = null;
+    if (isAdmin && createdCenter?.id) {
+      const plainPhone = phone ? String(phone).trim() : null;
+      const cleanCenterName = (name || 'Medical Center').trim();
+      const slug = cleanCenterName.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '');
+      const receptionistEmail = (email && email.includes('@'))
+        ? email.trim()
+        : `reception.${slug}.${Math.floor(100 + Math.random() * 900)}@mediqueue.lk`;
+      const tempPassword = `MQ-Clinic#${Math.floor(1000 + Math.random() * 9000)}`;
+
+      try {
+        const { data: existingUser } = await supabase.from('users').select('id, password_hash').eq('email', receptionistEmail).maybeSingle();
+        if (existingUser) {
+          await supabase.from('users').update({
+            password_hash: tempPassword,
+            center_id: createdCenter.id,
+            role: 'receptionist',
+            phone: plainPhone || undefined,
+          }).eq('id', existingUser.id);
+        } else {
+          await supabase.from('users').insert([{
+            email: receptionistEmail,
+            full_name: `${cleanCenterName} Receptionist`,
+            phone: plainPhone,
+            role: 'receptionist',
+            password_hash: tempPassword,
+            center_id: createdCenter.id,
+          }]);
+        }
+
+        generatedCredentials = {
+          email: receptionistEmail,
+          password: tempPassword,
+          phone: plainPhone,
+        };
+
+        if (plainPhone) {
+          try {
+            const smsText = `Welcome to MediQueue! ${cleanCenterName} has been created by System Admin. Receptionist Login Email: ${receptionistEmail} | Temporary Password: ${tempPassword}. Please log in at your earliest.`;
+            await notificationProvider.sendSMS(plainPhone, smsText);
+          } catch (smsErr) {
+            console.warn('[createCenter] Failed to dispatch receptionist SMS:', smsErr?.message);
+          }
+        }
+      } catch (credErr) {
+        console.warn('[createCenter] Error generating receptionist credentials:', credErr?.message);
+      }
+    }
+
     await writeAuditLog({
       actorName: requesterName,
       actorRole: requesterRole,
       eventType: 'center_edit',
       action: isAdmin
-        ? `Created new medical center "${name}" in ${city}`
+        ? `Created new medical center "${name}" in ${city} (credentials SMS dispatched)`
         : `Submitted request to add medical center "${name}" (${city})`,
       centerName: name,
       status: approvalStatus,
@@ -273,9 +324,10 @@ export async function createCenter(req, res, next) {
 
     res.status(201).json({
       message: isAdmin
-        ? 'Center created successfully'
+        ? 'Medical center created successfully and receptionist credentials generated'
         : 'Medical center request submitted to Super Admin for approval',
       center: finalCenter,
+      credentials: generatedCredentials,
     });
   } catch (err) {
     next(err);
@@ -303,6 +355,10 @@ export async function updateCenter(req, res, next) {
     const updates = {};
 
     if (typeof req.body.name === 'string') updates.name = req.body.name;
+    if (typeof req.body.registrationNumber === 'string') updates.registration_number = req.body.registrationNumber;
+    if (typeof req.body.licenseStatus === 'string') updates.license_status = req.body.licenseStatus;
+    if (typeof req.body.province === 'string') updates.province = req.body.province;
+    if (typeof req.body.city === 'string') updates.city = req.body.city;
     if (typeof req.body.address === 'string') updates.address = req.body.address;
     if (typeof req.body.openingHours === 'string') updates.opening_hours = req.body.openingHours;
     if (Array.isArray(req.body.services)) updates.services = req.body.services;
@@ -316,14 +372,9 @@ export async function updateCenter(req, res, next) {
     if (req.body.longitude !== undefined && req.body.longitude !== null && Number.isFinite(Number(req.body.longitude))) {
       updates.longitude = Number(req.body.longitude);
     }
+    if (typeof req.body.status === 'string') updates.status = req.body.status;
 
-    // Identity/compliance and operational status stay admin-only.
-    if (isAdmin) {
-      if (typeof req.body.city === 'string') updates.city = req.body.city;
-      if (typeof req.body.status === 'string') updates.status = req.body.status;
-    }
-
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && !req.body.registrationDocument) {
       return res.status(400).json({ error: 'No valid fields provided for update' });
     }
 
@@ -380,6 +431,19 @@ export async function updateCenter(req, res, next) {
         centerName: updated.name || 'Center',
         status: 'completed',
       });
+    }
+
+    if (req.body.registrationDocument && req.body.registrationDocument.fileUrl) {
+      try {
+        await supabase.from('center_documents').insert([{
+          center_id: id,
+          document_type: req.body.registrationDocument.fileType || 'Registration Form',
+          document_name: req.body.registrationDocument.fileName || 'Registration Document',
+          file_url: req.body.registrationDocument.fileUrl
+        }]);
+      } catch (docErr) {
+        console.warn('[updateCenter] Failed to save document:', docErr?.message);
+      }
     }
 
     res.json({ message: 'Center updated successfully', center: updated });
@@ -1215,3 +1279,104 @@ export async function rejectCenter(req, res, next) {
     next(err);
   }
 }
+
+/**
+ * POST /centers/:centerId/messages-to-admin
+ * A medical center / receptionist sends a direct inquiry, report, or file to the System Admin.
+ */
+export async function createCenterMessageToAdmin(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const { title, message, attachmentUrl, attachmentName } = req.body;
+
+    if (!title || !message) {
+      return res.status(400).json({ error: 'Subject title and message details are required.' });
+    }
+
+    const { data: center, error: centerErr } = await supabase
+      .from('medical_centers')
+      .select('id, name')
+      .eq('id', centerId)
+      .maybeSingle();
+
+    if (centerErr || !center) {
+      return res.status(404).json({ error: 'Medical center not found.' });
+    }
+
+    const payloadName = JSON.stringify({
+      title: String(title).trim(),
+      message: String(message).trim(),
+      attachmentName: attachmentName || null,
+      senderName: req.user?.fullName || req.user?.email || 'Receptionist',
+    });
+
+    const { data, error } = await supabase
+      .from('center_documents')
+      .insert([{
+        center_id: centerId,
+        document_type: 'admin_message',
+        document_name: payloadName,
+        file_url: attachmentUrl || 'none',
+      }])
+      .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    await writeAuditLog({
+      actorName: req.user?.fullName || req.user?.email || 'Receptionist',
+      actorRole: req.user?.role || 'receptionist',
+      eventType: 'center_edit',
+      action: `Sent message to System Admin: "${title}"`,
+      centerName: center.name,
+      status: 'completed',
+    });
+
+    res.status(201).json({ message: 'Message sent to System Admin successfully.', data: data[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /centers/admin-messages
+ * System Admin fetches all incoming inquiries and uploads sent by medical centers.
+ */
+export async function getCenterMessagesToAdmin(req, res, next) {
+  try {
+    const { data, error } = await supabase
+      .from('center_documents')
+      .select('id, center_id, document_type, document_name, file_url, created_at, medical_centers(name, city, email, phone)')
+      .eq('document_type', 'admin_message')
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const messages = (data || []).map(row => {
+      let parsed = { title: 'Inquiry', message: '', attachmentName: null, senderName: 'Receptionist' };
+      try {
+        parsed = JSON.parse(row.document_name);
+      } catch (_) {
+        parsed.title = row.document_name;
+      }
+      return {
+        id: row.id,
+        centerId: row.center_id,
+        centerName: row.medical_centers?.name || 'Medical Center',
+        centerCity: row.medical_centers?.city,
+        centerEmail: row.medical_centers?.email,
+        centerPhone: row.medical_centers?.phone,
+        title: parsed.title || 'Inquiry',
+        message: parsed.message || row.document_name,
+        senderName: parsed.senderName || 'Receptionist',
+        attachmentName: parsed.attachmentName,
+        attachmentUrl: row.file_url !== 'none' ? row.file_url : null,
+        createdAt: row.created_at,
+      };
+    });
+
+    res.json({ messages });
+  } catch (err) {
+    next(err);
+  }
+}
+

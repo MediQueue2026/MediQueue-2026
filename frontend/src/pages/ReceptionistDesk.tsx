@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import {
   Activity, AlertCircle, Bell, BellRing, Building2, Camera, CheckCircle2, Clock, Hash, ImagePlus,
   Megaphone, Plus, Radio, Save, Search, Stethoscope, Ticket, Trash2, UserX, Users, Wifi, CalendarClock,
-  Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert, CalendarDays
+  Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert, CalendarDays,
+  FileText, Send, MessageSquare
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -12,7 +13,7 @@ import AddDoctorModal from '../components/AddDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
 import DoctorHoursModal from '../components/DoctorHoursModal'
 import DelayAlertModal from '../components/DelayAlertModal'
-import ServiceChecklist from '../components/ServiceChecklist'
+import ServiceMultiSelect from '../components/ServiceMultiSelect'
 import LocationPickerMap from '../components/LocationPickerMap'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
@@ -279,6 +280,18 @@ function QueueSkeleton() {
   )
 }
 
+const SRI_LANKAN_PROVINCES: Record<string, string[]> = {
+  'Western Province': ['Colombo', 'Gampaha', 'Kalutara'],
+  'Central Province': ['Kandy', 'Matale', 'Nuwara Eliya'],
+  'Southern Province': ['Galle', 'Matara', 'Hambantota'],
+  'Northern Province': ['Jaffna', 'Kilinochchi', 'Mannar', 'Mullaitivu', 'Vavuniya'],
+  'Eastern Province': ['Batticaloa', 'Ampara', 'Trincomalee'],
+  'North Western Province': ['Kurunegala', 'Puttalam'],
+  'North Central Province': ['Anuradhapura', 'Polonnaruwa'],
+  'Uva Province': ['Badulla', 'Monaragala'],
+  'Sabaragamuwa Province': ['Ratnapura', 'Kegalle'],
+}
+
 export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
   const { user } = useAuth()
@@ -301,8 +314,21 @@ export default function ReceptionistDesk() {
   // Center Profile tab — the receptionist's own medical center, view + edit.
   const [centerProfile, setCenterProfile] = useState<ApiCenter | null>(null)
   const [profileForm, setProfileForm] = useState({
-    address: '', phone: '', openingHours: '', latitude: 6.9271, longitude: 79.8612, imageUrl: null as string | null,
+    name: '',
+    registrationNumber: '',
+    licenseStatus: 'active' as 'active' | 'pending' | 'expired' | 'suspended',
+    province: '',
+    city: '',
+    address: '',
+    phone: '',
+    email: '',
+    website: '',
+    openingHours: '',
+    latitude: 6.9271,
+    longitude: 79.8612,
+    imageUrl: null as string | null,
   })
+  const [profileDocFile, setProfileDocFile] = useState<File | null>(null)
   const [profileServices, setProfileServices] = useState<string[]>([])
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
@@ -310,6 +336,15 @@ export default function ReceptionistDesk() {
   const [profileError, setProfileError] = useState<string | null>(null)
   const [profileImageUploading, setProfileImageUploading] = useState(false)
   const [profileTrackingLocation, setProfileTrackingLocation] = useState(false)
+
+  // Direct Messages & Inquiries to System Admin
+  const [adminInquiryTitle, setAdminInquiryTitle] = useState('')
+  const [adminInquiryMessage, setAdminInquiryMessage] = useState('')
+  const [adminInquiryFile, setAdminInquiryFile] = useState<File | null>(null)
+  const [adminInquiryUploading, setAdminInquiryUploading] = useState(false)
+  const [adminInquirySending, setAdminInquirySending] = useState(false)
+  const [adminInquirySuccess, setAdminInquirySuccess] = useState(false)
+  const [adminInquiryError, setAdminInquiryError] = useState<string | null>(null)
 
   // Notices & Promotions — posted from the Center Profile tab, visible to patients.
   const [notices, setNotices] = useState<ApiCenterNotice[]>([])
@@ -432,13 +467,21 @@ export default function ReceptionistDesk() {
   const applyCenterToProfileForm = (mine: ApiCenter | null) => {
     setCenterProfile(mine)
     setProfileForm({
+      name: mine?.name ?? '',
+      registrationNumber: mine?.registrationNumber ?? '',
+      licenseStatus: (mine?.licenseStatus as any) ?? 'active',
+      province: mine?.province ?? '',
+      city: mine?.city ?? '',
       address: mine?.address ?? '',
       phone: mine?.phone ?? '',
+      email: mine?.email ?? '',
+      website: mine?.website ?? '',
       openingHours: mine?.opening_hours ?? '',
       latitude: mine?.latitude ?? 6.9271,
       longitude: mine?.longitude ?? 79.8612,
       imageUrl: mine?.imageUrl ?? null,
     })
+    setProfileDocFile(null)
     setProfileServices(mine?.services ?? [])
   }
 
@@ -464,15 +507,23 @@ export default function ReceptionistDesk() {
     if (!centerProfile) return false
     const sameServices = JSON.stringify([...profileServices].sort()) === JSON.stringify([...(centerProfile.services ?? [])].sort())
     return (
+      profileForm.name !== (centerProfile.name ?? '') ||
+      profileForm.registrationNumber !== (centerProfile.registrationNumber ?? '') ||
+      profileForm.licenseStatus !== (centerProfile.licenseStatus ?? 'active') ||
+      profileForm.province !== (centerProfile.province ?? '') ||
+      profileForm.city !== (centerProfile.city ?? '') ||
       profileForm.address !== (centerProfile.address ?? '') ||
       profileForm.phone !== (centerProfile.phone ?? '') ||
+      profileForm.email !== (centerProfile.email ?? '') ||
+      profileForm.website !== (centerProfile.website ?? '') ||
       profileForm.openingHours !== (centerProfile.opening_hours ?? '') ||
       profileForm.imageUrl !== (centerProfile.imageUrl ?? null) ||
       profileForm.latitude !== (centerProfile.latitude ?? 6.9271) ||
       profileForm.longitude !== (centerProfile.longitude ?? 79.8612) ||
+      profileDocFile !== null ||
       !sameServices
     )
-  }, [profileForm, profileServices, centerProfile])
+  }, [profileForm, profileServices, centerProfile, profileDocFile])
 
   /** Which tab the receptionist tried to switch to while the profile had unsaved edits. */
   const [pendingTab, setPendingTab] = useState<typeof activeTab | null>(null)
@@ -537,14 +588,32 @@ export default function ReceptionistDesk() {
     setProfileSaving(true)
     setProfileError(null)
     try {
+      let regDocUrl: string | undefined = undefined
+      if (profileDocFile) {
+        const uploaded = await api.uploadFile(profileDocFile, 'center-documents')
+        regDocUrl = uploaded.fileUrl
+      }
       const res = await api.updateCenter(queue.centerId, {
+        name: profileForm.name.trim() || undefined,
+        registrationNumber: profileForm.registrationNumber.trim() || undefined,
+        licenseStatus: profileForm.licenseStatus,
+        province: profileForm.province || undefined,
+        city: profileForm.city.trim() || undefined,
         address: profileForm.address,
         phone: profileForm.phone,
+        email: profileForm.email.trim() || undefined,
+        website: profileForm.website.trim() || undefined,
         openingHours: profileForm.openingHours,
         services: profileServices,
         imageUrl: profileForm.imageUrl,
         latitude: profileForm.latitude,
         longitude: profileForm.longitude,
+        registrationDocument: regDocUrl ? {
+          fileUrl: regDocUrl,
+          fileName: profileDocFile?.name || 'Registration Document',
+          fileType: profileDocFile?.type || 'application/pdf',
+          title: profileDocFile?.name || 'Registration Document',
+        } : undefined,
       })
       applyCenterToProfileForm(res.center)
       setProfileSaved(true)
@@ -633,6 +702,45 @@ export default function ReceptionistDesk() {
       setNotices(prev => prev.filter(n => n.id !== notice.id))
     } catch (err) {
       setNoticeError(err instanceof Error ? err.message : 'Could not remove the notice. Please try again.')
+    }
+  }
+
+  const handleSendAdminInquiry = async () => {
+    if (!queue.centerId) return
+    if (!adminInquiryTitle.trim() || !adminInquiryMessage.trim()) {
+      setAdminInquiryError('Please provide both a subject and a message.')
+      return
+    }
+    setAdminInquirySending(true)
+    setAdminInquiryError(null)
+    try {
+      let fileUrl = undefined
+      let fileName = undefined
+      if (adminInquiryFile) {
+        setAdminInquiryUploading(true)
+        const uploaded = await api.uploadFile(adminInquiryFile, 'center-documents')
+        fileUrl = uploaded.fileUrl
+        fileName = adminInquiryFile.name
+        setAdminInquiryUploading(false)
+      }
+      await api.sendMessageToAdmin(queue.centerId, {
+        title: adminInquiryTitle.trim(),
+        message: adminInquiryMessage.trim(),
+        attachmentUrl: fileUrl,
+        attachmentName: fileName,
+        fileUrl,
+        fileName,
+      })
+      setAdminInquiryTitle('')
+      setAdminInquiryMessage('')
+      setAdminInquiryFile(null)
+      setAdminInquirySuccess(true)
+      setTimeout(() => setAdminInquirySuccess(false), 4000)
+    } catch (err) {
+      setAdminInquiryError(err instanceof Error ? err.message : 'Could not send message to admin.')
+    } finally {
+      setAdminInquirySending(false)
+      setAdminInquiryUploading(false)
     }
   }
 
@@ -1894,68 +2002,199 @@ export default function ReceptionistDesk() {
                     Your medical center profile could not be loaded.
                   </div>
                 ) : (
-                  <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
+                  <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 24 }}>
 
-                    {/* Photo (optional) */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Facility Photo (Optional)
-                      </label>
-                      <div style={{
-                        width: '100%', aspectRatio: '1', borderRadius: 14, overflow: 'hidden',
-                        border: '1px solid var(--border-md)', background: 'var(--bg)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
-                      }}>
-                        {profileForm.imageUrl ? (
-                          <img src={profileForm.imageUrl} alt={centerProfile.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <Camera size={32} color="var(--text-4)" />
+                    {/* Left Column: Photo & Official Registration Documents */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {/* Facility Photo (optional) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          Facility Photo (Optional)
+                        </label>
+                        <div style={{
+                          width: '100%', aspectRatio: '1', borderRadius: 14, overflow: 'hidden',
+                          border: '1px solid var(--border-md)', background: 'var(--bg)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                        }}>
+                          {profileForm.imageUrl ? (
+                            <img src={profileForm.imageUrl} alt={centerProfile.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <Camera size={32} color="var(--text-4)" />
+                          )}
+                          {profileImageUploading && (
+                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>
+                              Uploading…
+                            </div>
+                          )}
+                        </div>
+                        <label className="btn btn-ghost btn-sm" style={{ gap: 6, justifyContent: 'center', cursor: 'pointer' }}>
+                          <Camera size={13} /> {profileForm.imageUrl ? 'Change Photo' : 'Upload Photo'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => handleProfileImageSelect(e.target.files?.[0] ?? null)}
+                            style={{ display: 'none' }}
+                            disabled={profileImageUploading}
+                          />
+                        </label>
+                        {profileForm.imageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setProfileForm(f => ({ ...f, imageUrl: null }))}
+                            className="btn btn-ghost btn-sm"
+                            style={{ gap: 6, justifyContent: 'center', color: '#ef4444' }}
+                          >
+                            <Trash2 size={13} /> Remove Photo
+                          </button>
                         )}
-                        {profileImageUploading && (
-                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>
-                            Uploading…
+                      </div>
+
+                      {/* Official Registration Document Section */}
+                      <div style={{
+                        padding: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: 'var(--bg)',
+                        display: 'flex', flexDirection: 'column', gap: 10,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
+                          <FileText size={15} color="var(--brand-teal)" /> Registration Document
+                        </div>
+                        {centerProfile.documents && centerProfile.documents.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {centerProfile.documents.map(doc => (
+                              <a
+                                key={doc.id}
+                                href={doc.fileUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  fontSize: 12, color: 'var(--brand-teal)', display: 'flex', alignItems: 'center', gap: 6,
+                                  textDecoration: 'none', wordBreak: 'break-all', fontWeight: 600,
+                                }}
+                              >
+                                <FileText size={13} /> {doc.title || 'Official Document'} ↗
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11.5, color: 'var(--text-4)' }}>No registration document on file.</div>
+                        )}
+                        <label className="btn btn-ghost btn-sm" style={{ gap: 6, justifyContent: 'center', cursor: 'pointer', fontSize: 11.5 }}>
+                          <Plus size={12} /> {profileDocFile ? 'Change File' : 'Upload / Replace'}
+                          <input
+                            type="file"
+                            accept=".pdf,image/*"
+                            onChange={e => setProfileDocFile(e.target.files?.[0] ?? null)}
+                            style={{ display: 'none' }}
+                          />
+                        </label>
+                        {profileDocFile && (
+                          <div style={{ fontSize: 11, color: '#047857', fontWeight: 600, wordBreak: 'break-all' }}>
+                            Selected: {profileDocFile.name}
                           </div>
                         )}
                       </div>
-                      <label className="btn btn-ghost btn-sm" style={{ gap: 6, justifyContent: 'center', cursor: 'pointer' }}>
-                        <Camera size={13} /> {profileForm.imageUrl ? 'Change Photo' : 'Upload Photo'}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={e => handleProfileImageSelect(e.target.files?.[0] ?? null)}
-                          style={{ display: 'none' }}
-                          disabled={profileImageUploading}
-                        />
-                      </label>
-                      {profileForm.imageUrl && (
-                        <button
-                          type="button"
-                          onClick={() => setProfileForm(f => ({ ...f, imageUrl: null }))}
-                          className="btn btn-ghost btn-sm"
-                          style={{ gap: 6, justifyContent: 'center', color: '#ef4444' }}
-                        >
-                          <Trash2 size={13} /> Remove Photo
-                        </button>
-                      )}
                     </div>
 
-                    {/* Details form */}
+                    {/* Right Column: Unified Official Details form */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {/* Name & Reg Number */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            Official Registered Name
+                          </label>
+                          <input
+                            className="input"
+                            value={profileForm.name}
+                            onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))}
+                            style={{ height: 44, fontSize: 14 }}
+                            placeholder="Official Medical Center Name"
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            Registration / License Number
+                          </label>
+                          <input
+                            className="input"
+                            value={profileForm.registrationNumber}
+                            onChange={e => setProfileForm(f => ({ ...f, registrationNumber: e.target.value }))}
+                            style={{ height: 44, fontSize: 14 }}
+                            placeholder="e.g. PHSRC/MED/2026/088"
+                          />
+                        </div>
+                      </div>
+
+                      {/* License Status, Province & District */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            License Status
+                          </label>
+                          <select
+                            className="input"
+                            value={profileForm.licenseStatus}
+                            onChange={e => setProfileForm(f => ({ ...f, licenseStatus: e.target.value as any }))}
+                            style={{ height: 44, fontSize: 14 }}
+                          >
+                            <option value="active">Active</option>
+                            <option value="pending">Pending</option>
+                            <option value="expired">Expired</option>
+                            <option value="suspended">Suspended</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            Province
+                          </label>
+                          <select
+                            className="input"
+                            value={profileForm.province}
+                            onChange={e => setProfileForm(f => ({ ...f, province: e.target.value, city: '' }))}
+                            style={{ height: 44, fontSize: 14 }}
+                          >
+                            <option value="">Select Province</option>
+                            {Object.keys(SRI_LANKAN_PROVINCES).map(p => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            City / District
+                          </label>
+                          <select
+                            className="input"
+                            value={profileForm.city}
+                            onChange={e => setProfileForm(f => ({ ...f, city: e.target.value }))}
+                            style={{ height: 44, fontSize: 14 }}
+                          >
+                            <option value="">Select District</option>
+                            {profileForm.province ? (
+                              SRI_LANKAN_PROVINCES[profileForm.province]?.map(d => (
+                                <option key={d} value={d}>{d}</option>
+                              ))
+                            ) : (
+                              profileForm.city ? <option value={profileForm.city}>{profileForm.city}</option> : null
+                            )}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Official Address */}
                       <div>
                         <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                          Address
+                          Official Address
                         </label>
                         <input
                           className="input"
                           value={profileForm.address}
                           onChange={e => setProfileForm(f => ({ ...f, address: e.target.value }))}
                           style={{ height: 44, fontSize: 14 }}
+                          placeholder="Street address, city"
                         />
-                        <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>
-                          City: {centerProfile.city} — contact your Super Admin to change the city or registration details.
-                        </div>
                       </div>
 
+                      {/* Map Picker */}
                       <div>
                         <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
                           Location on Map
@@ -1969,10 +2208,11 @@ export default function ReceptionistDesk() {
                         />
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      {/* Phone, Email & Website */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                            Mobile Number
+                            Official Phone
                           </label>
                           <input
                             className="input"
@@ -1984,26 +2224,54 @@ export default function ReceptionistDesk() {
                         </div>
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                            Opening Hours
+                            Official Email
                           </label>
                           <input
                             className="input"
-                            placeholder="e.g. 08:00 - 18:00"
-                            value={profileForm.openingHours}
-                            onChange={e => setProfileForm(f => ({ ...f, openingHours: e.target.value }))}
+                            type="email"
+                            placeholder="clinic@example.lk"
+                            value={profileForm.email}
+                            onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))}
+                            style={{ height: 44, fontSize: 14 }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                            Website (Optional)
+                          </label>
+                          <input
+                            className="input"
+                            placeholder="https://example.lk"
+                            value={profileForm.website}
+                            onChange={e => setProfileForm(f => ({ ...f, website: e.target.value }))}
                             style={{ height: 44, fontSize: 14 }}
                           />
                         </div>
                       </div>
 
+                      {/* Opening Hours */}
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                          Opening Hours
+                        </label>
+                        <input
+                          className="input"
+                          placeholder="e.g. 08:00 - 18:00"
+                          value={profileForm.openingHours}
+                          onChange={e => setProfileForm(f => ({ ...f, openingHours: e.target.value }))}
+                          style={{ height: 44, fontSize: 14 }}
+                        />
+                      </div>
+
+                      {/* Services Provided (Categorized 8 Groups) */}
                       <div>
                         <label
                           htmlFor="profile-services"
                           style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}
                         >
-                          Special Services (e.g. Blood Tests, ECG)
+                          Services Provided
                         </label>
-                        <ServiceChecklist
+                        <ServiceMultiSelect
                           id="profile-services"
                           value={profileServices}
                           onChange={setProfileServices}
@@ -2023,7 +2291,7 @@ export default function ReceptionistDesk() {
                       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
                         {profileSaved && (
                           <span style={{ color: '#047857', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <CheckCircle2 size={15} /> Saved
+                            <CheckCircle2 size={15} /> Saved Successfully
                           </span>
                         )}
                         <button
@@ -2183,6 +2451,118 @@ export default function ReceptionistDesk() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* ── DIRECT MESSAGES & INQUIRIES TO SYSTEM ADMIN ── */}
+              <div className="card glass-form-card" style={{ padding: 26 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <MessageSquare size={20} color="var(--brand-teal)" />
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                      Direct Messages &amp; Inquiries to System Admin
+                    </h3>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 650, marginTop: 4 }}>
+                    Need administrative approvals, license renewals, quota updates, or support? Send a direct message and upload documents to the System Admin.
+                  </div>
+                </div>
+
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 14,
+                  padding: 18, borderRadius: 12, border: '1px solid var(--border-md)', background: 'var(--bg)',
+                }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                      Inquiry Subject <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      className="input"
+                      placeholder="e.g. License renewal submission / Quota extension request"
+                      value={adminInquiryTitle}
+                      onChange={e => setAdminInquiryTitle(e.target.value)}
+                      disabled={adminInquirySending}
+                      style={{ height: 42, fontSize: 14 }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                      Message / Request Details <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <textarea
+                      className="input"
+                      placeholder="Explain your inquiry, compliance update, or request for the System Admin…"
+                      value={adminInquiryMessage}
+                      onChange={e => setAdminInquiryMessage(e.target.value)}
+                      disabled={adminInquirySending}
+                      rows={4}
+                      style={{ fontSize: 13.5, padding: 12, resize: 'vertical' }}
+                    />
+                  </div>
+
+                  {/* Attachment upload */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                      Upload Attachment / Document (Optional)
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <label className="btn btn-ghost btn-sm" style={{ gap: 6, cursor: 'pointer', fontSize: 12 }}>
+                        <FileText size={14} /> {adminInquiryFile ? 'Change Attachment' : 'Choose File (PDF, Image, Doc)'}
+                        <input
+                          type="file"
+                          accept=".pdf,image/*,.doc,.docx"
+                          onChange={e => setAdminInquiryFile(e.target.files?.[0] ?? null)}
+                          style={{ display: 'none' }}
+                          disabled={adminInquirySending}
+                        />
+                      </label>
+                      {adminInquiryFile && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>
+                          <span>{adminInquiryFile.name} ({(adminInquiryFile.size / 1024).toFixed(0)} KB)</span>
+                          <button
+                            type="button"
+                            onClick={() => setAdminInquiryFile(null)}
+                            className="btn btn-ghost btn-xs"
+                            style={{ color: '#ef4444', padding: '2px 6px' }}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {adminInquiryError && (
+                    <div style={{
+                      background: '#fff1f1', border: '1px solid #fca5a5',
+                      borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626',
+                    }}>
+                      {adminInquiryError}
+                    </div>
+                  )}
+
+                  {adminInquirySuccess && (
+                    <div style={{
+                      background: '#ecfdf5', border: '1px solid #6ee7b7',
+                      borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#047857',
+                      display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+                    }}>
+                      <CheckCircle2 size={16} /> Inquiry successfully delivered to System Admin.
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={handleSendAdminInquiry}
+                      disabled={adminInquirySending || adminInquiryUploading || !adminInquiryTitle.trim() || !adminInquiryMessage.trim()}
+                      className="btn btn-primary"
+                      style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}
+                    >
+                      <Send size={15} /> {adminInquirySending ? 'Sending to Admin…' : 'Send Message to Admin'}
+                    </button>
+                  </div>
+                </div>
               </div>
 
             </div>
