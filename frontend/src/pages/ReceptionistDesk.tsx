@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Activity, AlertCircle, Bell, BellRing, Building2, Camera, CheckCircle2, Clock, Hash, ImagePlus,
+  Activity, AlertCircle, Bell, BellRing, Building2, Camera, Check, CheckCircle2, Clock, Hash, ImagePlus,
   Megaphone, Plus, Radio, Save, Search, Stethoscope, Ticket, Trash2, UserX, Users, Wifi, CalendarClock,
   Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert, CalendarDays,
-  FileText, Send, MessageSquare
+  FileText, Send, MessageSquare, RotateCcw
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -22,7 +22,7 @@ import {
   minutesSince, validateNic, validatePhone, waitingFor
 } from '../lib/receptionQueue'
 import type { QueueEntry, TokenSource } from '../lib/receptionQueue'
-import { api, type ApiAppointmentRow, type ApiCenter, type ApiCenterNotice, type ApiDoctor } from '../lib/api'
+import { api, type ApiAppointmentRow, type ApiCenter, type ApiCenterNotice, type ApiDoctor, type ApiCenterAdminMessage } from '../lib/api'
 
 /**
  * Identity key for a patient — their name plus phone number. Used to collapse
@@ -296,7 +296,7 @@ export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
   const { user } = useAuth()
 
-  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'profile'>('checkin')
+  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'profile' | 'messages'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
@@ -337,7 +337,8 @@ export default function ReceptionistDesk() {
   const [profileImageUploading, setProfileImageUploading] = useState(false)
   const [profileTrackingLocation, setProfileTrackingLocation] = useState(false)
 
-  // Direct Messages & Inquiries to System Admin
+  // Admin Communications
+  const [adminInquiryCategory, setAdminInquiryCategory] = useState<'' | 'general' | 'payment'>('')
   const [adminInquiryTitle, setAdminInquiryTitle] = useState('')
   const [adminInquiryMessage, setAdminInquiryMessage] = useState('')
   const [adminInquiryFile, setAdminInquiryFile] = useState<File | null>(null)
@@ -345,6 +346,9 @@ export default function ReceptionistDesk() {
   const [adminInquirySending, setAdminInquirySending] = useState(false)
   const [adminInquirySuccess, setAdminInquirySuccess] = useState(false)
   const [adminInquiryError, setAdminInquiryError] = useState<string | null>(null)
+  const [centerMessages, setCenterMessages] = useState<ApiCenterAdminMessage[]>([])
+  const [loadingCenterMessages, setLoadingCenterMessages] = useState(false)
+  const [centerUnreadCount, setCenterUnreadCount] = useState(0)
 
   // Notices & Promotions — posted from the Center Profile tab, visible to patients.
   const [notices, setNotices] = useState<ApiCenterNotice[]>([])
@@ -705,10 +709,60 @@ export default function ReceptionistDesk() {
     }
   }
 
+  const fetchCenterAdminMessages = async () => {
+    if (!queue.centerId) return
+    setLoadingCenterMessages(true)
+    try {
+      const res = await api.getCenterConversation(queue.centerId)
+      if (res?.messages) {
+        setCenterMessages(res.messages)
+      }
+      fetchCenterUnreadCount()
+    } catch (err) {
+      console.warn('Could not load center communications', err)
+    } finally {
+      setLoadingCenterMessages(false)
+    }
+  }
+
+  const fetchCenterUnreadCount = async () => {
+    if (!queue.centerId) return
+    try {
+      const res = await api.getCenterMessagesUnreadCount(queue.centerId)
+      if (typeof res?.unreadCount === 'number') {
+        setCenterUnreadCount(res.unreadCount)
+      }
+    } catch (_) {}
+  }
+
+  const handleMarkCenterMessageRead = async (messageId: string, isRead = true) => {
+    try {
+      await api.markCenterMessageRead(messageId, isRead)
+      setCenterMessages(prev => prev.map(m => {
+        if (m.id === messageId) return { ...m, isRead }
+        if (m.replies) {
+          return {
+            ...m,
+            replies: m.replies.map(r => r.id === messageId ? { ...r, isRead } : r)
+          }
+        }
+        return m
+      }))
+      setCenterUnreadCount(c => isRead ? Math.max(0, c - 1) : c + 1)
+      fetchCenterUnreadCount()
+    } catch (err) {
+      console.warn(`Could not mark message as ${isRead ? 'read' : 'unread'}`, err)
+    }
+  }
+
   const handleSendAdminInquiry = async () => {
     if (!queue.centerId) return
+    if (!adminInquiryCategory) {
+      setAdminInquiryError('Please select a category first (General Inquiries or Monthly Payment Remittance).')
+      return
+    }
     if (!adminInquiryTitle.trim() || !adminInquiryMessage.trim()) {
-      setAdminInquiryError('Please provide both a subject and a message.')
+      setAdminInquiryError('Please provide both a subject/heading and a message.')
       return
     }
     setAdminInquirySending(true)
@@ -730,11 +784,14 @@ export default function ReceptionistDesk() {
         attachmentName: fileName,
         fileUrl,
         fileName,
+        category: adminInquiryCategory,
       })
+      setAdminInquiryCategory('')
       setAdminInquiryTitle('')
       setAdminInquiryMessage('')
       setAdminInquiryFile(null)
       setAdminInquirySuccess(true)
+      fetchCenterAdminMessages()
       setTimeout(() => setAdminInquirySuccess(false), 4000)
     } catch (err) {
       setAdminInquiryError(err instanceof Error ? err.message : 'Could not send message to admin.')
@@ -743,6 +800,20 @@ export default function ReceptionistDesk() {
       setAdminInquiryUploading(false)
     }
   }
+
+  useEffect(() => {
+    if (queue.centerId) {
+      fetchCenterUnreadCount()
+      const timer = setInterval(fetchCenterUnreadCount, 25000)
+      return () => clearInterval(timer)
+    }
+  }, [queue.centerId])
+
+  useEffect(() => {
+    if (activeTab === 'messages' && queue.centerId) {
+      fetchCenterAdminMessages()
+    }
+  }, [activeTab, queue.centerId])
 
   /** Local YYYY-MM-DD, recomputed each minute so the table rolls over at midnight. */
   const todayIso = useMemo(() => {
@@ -1080,6 +1151,24 @@ export default function ReceptionistDesk() {
           <button disabled={!centerAccessApproved} onClick={() => requestTabChange('profile')} className={`btn ${activeTab === 'profile' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
             <Building2 size={16} /> Center Profile
           </button>
+          <button disabled={!centerAccessApproved} onClick={() => requestTabChange('messages')} className={`btn ${activeTab === 'messages' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'space-between', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <MessageSquare size={16} /> Admin Communications
+            </div>
+            {centerUnreadCount > 0 && (
+              <span style={{
+                background: '#8B5CF6',
+                color: '#fff',
+                borderRadius: '999px',
+                padding: '2px 8px',
+                fontSize: 11,
+                fontWeight: 800,
+                boxShadow: '0 2px 5px rgba(139, 92, 246, 0.4)'
+              }}>
+                {centerUnreadCount}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Actions */}
@@ -1122,6 +1211,44 @@ export default function ReceptionistDesk() {
             {showMobileSidebar ? <X size={16} /> : <Menu size={16} />}
           </button>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginLeft: 'auto' }}>
+            {/* Topbar Notifications Button (Receptionist) */}
+            <button
+              type="button"
+              onClick={() => requestTabChange('messages')}
+              style={{
+                background: activeTab === 'messages' ? '#6D28D9' : '#7C3AED',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '5px 12px',
+                fontWeight: 700,
+                fontSize: 12,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="Admin Communications & Inquiries"
+            >
+              <Bell size={13} />
+              <span>Notifications</span>
+              {centerUnreadCount > 0 && (
+                <span style={{
+                  background: '#EF4444',
+                  color: '#fff',
+                  borderRadius: '999px',
+                  padding: '1px 5px',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  lineHeight: '12px',
+                }}>
+                  {centerUnreadCount}
+                </span>
+              )}
+            </button>
+
             <button
               onClick={() => setShowTvDisplay(true)}
               className="btn btn-ghost btn-sm"
@@ -1219,11 +1346,13 @@ export default function ReceptionistDesk() {
         {/* CONTENT SCROLL AREA */}
         <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
 
-          {/* CLINIC-WIDE STAT RIBBON — one line, so it never competes with the live queue below */}
-          <div style={{ padding: '18px 24px 0', display: 'flex', gap: 34, flexWrap: 'wrap' }}>
-            <StatPill icon={<Ticket size={15} />} label="Issued Today" value={String(issuedToday)} />
-            <StatPill icon={<Activity size={15} />} label="Doctors On Duty" value={`${activeDoctors}/${queue.doctors.length}`} accent="#10B981" />
-          </div>
+          {/* CLINIC-WIDE STAT RIBBON — only on Issue Tokens & Queue tab */}
+          {activeTab === 'checkin' && (
+            <div style={{ padding: '18px 24px 0', display: 'flex', gap: 34, flexWrap: 'wrap' }}>
+              <StatPill icon={<Ticket size={15} />} label="Issued Today" value={String(issuedToday)} />
+              <StatPill icon={<Activity size={15} />} label="Doctors On Duty" value={`${activeDoctors}/${queue.doctors.length}`} accent="#10B981" />
+            </div>
+          )}
 
           {(queue.offline || queue.migrationPending) && (
             <div style={{ padding: '14px 24px 0' }}>
@@ -2057,9 +2186,11 @@ export default function ReceptionistDesk() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
                           <FileText size={15} color="var(--brand-teal)" /> Registration Document
                         </div>
-                        {centerProfile.documents && centerProfile.documents.length > 0 ? (
+                        {centerProfile.documents && centerProfile.documents.filter(d => (d as any).document_type !== 'admin_message' && (d as any).document_type !== 'request_comment' && !d.title?.trim().startsWith('{')).length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {centerProfile.documents.map(doc => (
+                            {centerProfile.documents
+                              .filter(d => (d as any).document_type !== 'admin_message' && (d as any).document_type !== 'request_comment' && !d.title?.trim().startsWith('{'))
+                              .map(doc => (
                               <a
                                 key={doc.id}
                                 href={doc.fileUrl}
@@ -2453,120 +2584,445 @@ export default function ReceptionistDesk() {
                 )}
               </div>
 
-              {/* ── DIRECT MESSAGES & INQUIRIES TO SYSTEM ADMIN ── */}
-              <div className="card glass-form-card" style={{ padding: 26 }}>
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <MessageSquare size={20} color="var(--brand-teal)" />
-                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
-                      Direct Messages &amp; Inquiries to System Admin
-                    </h3>
+            </div>
+          )}
+
+          {/* ADMIN COMMUNICATIONS TAB */}
+          {activeTab === 'messages' && (() => {
+            const generalMessages = centerMessages.filter(m => (m.category || 'general') === 'general')
+            const paymentMessages = centerMessages.filter(m => m.category === 'payment')
+
+            const renderHistoryGroup = (msgsList: ApiCenterAdminMessage[], emptyLabel: string) => {
+              if (loadingCenterMessages) {
+                return <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13 }}>Loading communications…</div>
+              }
+              if (msgsList.length === 0) {
+                return (
+                  <div style={{ padding: 24, textAlign: 'center', background: 'rgba(139, 92, 246, 0.03)', borderRadius: 12, border: '1px dashed rgba(139, 92, 246, 0.2)', color: 'var(--text-4)', fontSize: 12.5 }}>
+                    {emptyLabel}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 650, marginTop: 4 }}>
-                    Need administrative approvals, license renewals, quota updates, or support? Send a direct message and upload documents to the System Admin.
-                  </div>
+                )
+              }
+
+              const grouped = msgsList.reduce<Record<string, ApiCenterAdminMessage[]>>((acc, msg) => {
+                const d = msg.createdAt
+                  ? new Date(msg.createdAt).toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric'
+                    })
+                  : 'Recent'
+                if (!acc[d]) acc[d] = []
+                acc[d].push(msg)
+                return acc
+              }, {})
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {Object.entries(grouped).map(([dateLabel, msgs]) => (
+                    <div key={dateLabel}>
+                      {/* Audit log style date header with divider line */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <div style={{
+                          fontSize: 11, fontWeight: 800, color: '#6D28D9', textTransform: 'uppercase',
+                          letterSpacing: '0.04em', background: 'rgba(109, 40, 217, 0.08)', padding: '3px 8px',
+                          borderRadius: 6, border: '1px solid rgba(109, 40, 217, 0.15)'
+                        }}>
+                          📅 {dateLabel}
+                        </div>
+                        <div style={{ flex: 1, height: 1, background: 'var(--border-md)' }} />
+                        <span style={{ fontSize: 10.5, color: 'var(--text-4)', fontWeight: 600 }}>
+                          {msgs.length} {msgs.length === 1 ? 'Entry' : 'Entries'}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {msgs.map(msg => {
+                          const isAdmin = msg.senderRole === 'admin'
+                          return (
+                            <div key={msg.id} style={{
+                              padding: '10px 14px',
+                              borderRadius: 12,
+                              background: isAdmin ? 'rgba(59, 130, 246, 0.03)' : '#fff',
+                              border: isAdmin ? '1px solid rgba(59, 130, 246, 0.25)' : '1px solid var(--border-md)',
+                              borderLeft: isAdmin ? '4px solid #2563EB' : '1px solid var(--border-md)',
+                              width: '100%',
+                              boxSizing: 'border-box',
+                              marginLeft: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 6,
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                              transition: 'all 0.2s ease'
+                            }}>
+                              {/* Header */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span style={{
+                                    fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em',
+                                    padding: '2px 7px', borderRadius: 6,
+                                    background: isAdmin ? 'rgba(37, 99, 235, 0.12)' : 'rgba(13, 148, 136, 0.12)',
+                                    color: isAdmin ? '#2563EB' : '#0D9488'
+                                  }}>
+                                    {isAdmin ? '🛡️ SENT BY ADMIN' : '📤 SENT BY CLINIC'}
+                                  </span>
+                                  {msg.category === 'payment' && (
+                                    <span style={{ fontSize: 10.5, background: 'rgba(245, 158, 11, 0.12)', color: '#D97706', padding: '2px 7px', borderRadius: 6, fontWeight: 700 }}>
+                                      💳 Payment
+                                    </span>
+                                  )}
+                                </div>
+                                <span style={{ fontSize: 11, color: 'var(--text-4)' }}>
+                                  {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </span>
+                              </div>
+
+                              {/* Title & Body */}
+                              {msg.title && (
+                                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.2 }}>{msg.title}</div>
+                              )}
+                              <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.35, whiteSpace: 'pre-wrap' }}>
+                                {msg.message}
+                              </div>
+
+                              {/* Attachment */}
+                              {msg.attachmentUrl && (
+                                <div style={{ marginTop: 2 }}>
+                                  <a
+                                    href={msg.attachmentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700,
+                                      color: '#2563EB', background: 'rgba(37, 99, 235, 0.08)', padding: '4px 8px', borderRadius: 6,
+                                      textDecoration: 'none'
+                                    }}
+                                  >
+                                    <FileText size={12} /> View Attached: {msg.attachmentName || 'Attachment Document'}
+                                  </a>
+                                </div>
+                              )}
+
+                              {/* Admin message read/unread controls for receptionist (Blue Mark as Read, Navy Blue Mark as Unread) */}
+                              {isAdmin && (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, marginTop: 2, paddingTop: 4, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                                  {msg.isRead ? (
+                                    <>
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                        <Check size={11} /> Read
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkCenterMessageRead(msg.id, false)}
+                                        style={{
+                                          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
+                                          borderRadius: 6, background: '#1E3A8A', color: '#fff', fontSize: 11,
+                                          fontWeight: 700, border: 'none', cursor: 'pointer',
+                                          boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)'
+                                        }}
+                                      >
+                                        <RotateCcw size={11} /> Mark as Unread
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMarkCenterMessageRead(msg.id, true)}
+                                      style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
+                                        borderRadius: 6, background: '#2563EB', color: '#fff', fontSize: 11,
+                                        fontWeight: 700, border: 'none', cursor: 'pointer',
+                                        boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
+                                      }}
+                                    >
+                                      <Check size={11} /> Mark as Read
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Nested Admin Replies (Threaded inside clinic inquiry with blue border line, exactly as in Admin Panel) */}
+                              {msg.replies && msg.replies.length > 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #60A5FA' }}>
+                                  {msg.replies.map(reply => (
+                                    <div key={reply.id} style={{
+                                      padding: '8px 12px', borderRadius: 8, background: 'rgba(59, 130, 246, 0.05)',
+                                      border: '1px solid rgba(59, 130, 246, 0.15)', display: 'flex', flexDirection: 'column', gap: 4
+                                    }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                        <span style={{ fontSize: 10.5, fontWeight: 800, color: '#2563EB', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                          🛡️ SENT BY ADMIN
+                                        </span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                          <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                                            {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                          </span>
+                                          {reply.isRead ? (
+                                            <>
+                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 6px', borderRadius: 5, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 10.5, fontWeight: 700 }}>
+                                                <Check size={11} /> Read
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleMarkCenterMessageRead(reply.id, false)}
+                                                style={{
+                                                  display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px',
+                                                  borderRadius: 5, background: '#1E3A8A', color: '#fff', fontSize: 10.5,
+                                                  fontWeight: 700, border: 'none', cursor: 'pointer'
+                                                }}
+                                              >
+                                                <RotateCcw size={10} /> Unread
+                                              </button>
+                                            </>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleMarkCenterMessageRead(reply.id, true)}
+                                              style={{
+                                                display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px',
+                                                borderRadius: 5, background: '#2563EB', color: '#fff', fontSize: 10.5,
+                                                fontWeight: 700, border: 'none', cursor: 'pointer',
+                                                boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
+                                              }}
+                                            >
+                                              <Check size={11} /> Mark as Read
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                                        {reply.message}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
+              )
+            }
 
-                <div style={{
-                  display: 'flex', flexDirection: 'column', gap: 14,
-                  padding: 18, borderRadius: 12, border: '1px solid var(--border-md)', background: 'var(--bg)',
-                }}>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                      Inquiry Subject <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      className="input"
-                      placeholder="e.g. License renewal submission / Quota extension request"
-                      value={adminInquiryTitle}
-                      onChange={e => setAdminInquiryTitle(e.target.value)}
-                      disabled={adminInquirySending}
-                      style={{ height: 42, fontSize: 14 }}
-                    />
+            return (
+              <div style={{ padding: '18px 24px 28px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+                {/* Top Form: Send Inquiry / Message to Admin */}
+                <div className="card glass-form-card" style={{ padding: 26 }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <MessageSquare size={20} color="var(--brand-teal)" />
+                      <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                        Direct Messages &amp; Inquiries to System Admin
+                      </h3>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 650, marginTop: 4 }}>
+                      Need administrative approvals, license renewals, quota updates, or monthly payment remittances? Choose a category, specify details, and upload documents directly to the System Admin.
+                    </div>
                   </div>
 
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                      Message / Request Details <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <textarea
-                      className="input"
-                      placeholder="Explain your inquiry, compliance update, or request for the System Admin…"
-                      value={adminInquiryMessage}
-                      onChange={e => setAdminInquiryMessage(e.target.value)}
-                      disabled={adminInquirySending}
-                      rows={4}
-                      style={{ fontSize: 13.5, padding: 12, resize: 'vertical' }}
-                    />
-                  </div>
-
-                  {/* Attachment upload */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                      Upload Attachment / Document (Optional)
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <label className="btn btn-ghost btn-sm" style={{ gap: 6, cursor: 'pointer', fontSize: 12 }}>
-                        <FileText size={14} /> {adminInquiryFile ? 'Change Attachment' : 'Choose File (PDF, Image, Doc)'}
-                        <input
-                          type="file"
-                          accept=".pdf,image/*,.doc,.docx"
-                          onChange={e => setAdminInquiryFile(e.target.files?.[0] ?? null)}
-                          style={{ display: 'none' }}
-                          disabled={adminInquirySending}
-                        />
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 14,
+                    padding: 18, borderRadius: 12, border: '1px solid var(--border-md)', background: 'var(--bg)',
+                  }}>
+                    {/* Field 1: Category Selection (Mandatory first step) */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                        Inquiry Category <span style={{ color: '#ef4444' }}>*</span>
                       </label>
-                      {adminInquiryFile && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>
-                          <span>{adminInquiryFile.name} ({(adminInquiryFile.size / 1024).toFixed(0)} KB)</span>
-                          <button
-                            type="button"
-                            onClick={() => setAdminInquiryFile(null)}
-                            className="btn btn-ghost btn-xs"
-                            style={{ color: '#ef4444', padding: '2px 6px' }}
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                      <select
+                        className="input"
+                        value={adminInquiryCategory}
+                        onChange={e => setAdminInquiryCategory(e.target.value as '' | 'general' | 'payment')}
+                        disabled={adminInquirySending}
+                        style={{ height: 42, fontSize: 14, background: '#fff', fontWeight: adminInquiryCategory ? 600 : 400 }}
+                      >
+                        <option value="">-- Select Category (Required to proceed) --</option>
+                        <option value="general">General Inquiries &amp; Support Requests</option>
+                        <option value="payment">Monthly Payment Remittance &amp; Billing Inquiries</option>
+                      </select>
+                      {!adminInquiryCategory && (
+                        <div style={{ fontSize: 11.5, color: '#D97706', marginTop: 4, fontWeight: 600 }}>
+                          ⚠️ Please select whether this is a General inquiry or Monthly Payment message to enable the form fields below.
                         </div>
                       )}
                     </div>
+
+                    {/* Field 2: Inquiry Subject / Heading */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                        Message Heading / Subject <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        className="input"
+                        placeholder={
+                          adminInquiryCategory === 'payment'
+                            ? "e.g. October 2026 Monthly Subscription Payment Slip"
+                            : "e.g. License renewal submission / Quota extension request"
+                        }
+                        value={adminInquiryTitle}
+                        onChange={e => setAdminInquiryTitle(e.target.value)}
+                        disabled={adminInquirySending || !adminInquiryCategory}
+                        style={{ height: 42, fontSize: 14, opacity: !adminInquiryCategory ? 0.6 : 1 }}
+                      />
+                    </div>
+
+                    {/* Field 3: Message Details */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                        Message / Request Details <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <textarea
+                        className="input"
+                        placeholder={
+                          adminInquiryCategory === 'payment'
+                            ? "Provide payment bank details, reference transaction numbers, amount transferred, and remarks for invoice reconciliation…"
+                            : "Explain your inquiry, compliance update, or request for the System Admin…"
+                        }
+                        value={adminInquiryMessage}
+                        onChange={e => setAdminInquiryMessage(e.target.value)}
+                        disabled={adminInquirySending || !adminInquiryCategory}
+                        rows={4}
+                        style={{ fontSize: 13.5, padding: 12, resize: 'vertical', opacity: !adminInquiryCategory ? 0.6 : 1 }}
+                      />
+                    </div>
+
+                    {/* Field 4: Attachment upload */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                        Upload Attachment / Document {adminInquiryCategory === 'payment' ? '(e.g. Bank Slip / Receipt)' : '(Optional)'}
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <label
+                          className="btn btn-ghost btn-sm"
+                          style={{
+                            gap: 6, cursor: !adminInquiryCategory || adminInquirySending ? 'not-allowed' : 'pointer',
+                            fontSize: 12, opacity: !adminInquiryCategory ? 0.6 : 1
+                          }}
+                        >
+                          <FileText size={14} /> {adminInquiryFile ? 'Change Attachment' : 'Choose File (PDF, Image, Doc)'}
+                          <input
+                            type="file"
+                            accept=".pdf,image/*,.doc,.docx"
+                            onChange={e => setAdminInquiryFile(e.target.files?.[0] ?? null)}
+                            style={{ display: 'none' }}
+                            disabled={adminInquirySending || !adminInquiryCategory}
+                          />
+                        </label>
+                        {adminInquiryFile && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>
+                            <span>{adminInquiryFile.name} ({(adminInquiryFile.size / 1024).toFixed(0)} KB)</span>
+                            <button
+                              type="button"
+                              onClick={() => setAdminInquiryFile(null)}
+                              className="btn btn-ghost btn-xs"
+                              style={{ color: '#ef4444', padding: '2px 6px' }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {adminInquiryError && (
+                      <div style={{
+                        background: '#fff1f1', border: '1px solid #fca5a5',
+                        borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626',
+                      }}>
+                        {adminInquiryError}
+                      </div>
+                    )}
+
+                    {adminInquirySuccess && (
+                      <div style={{
+                        background: '#ecfdf5', border: '1px solid #6ee7b7',
+                        borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#047857',
+                        display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+                      }}>
+                        <CheckCircle2 size={16} /> Inquiry successfully delivered to System Admin.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                      <button
+                        type="button"
+                        onClick={handleSendAdminInquiry}
+                        disabled={adminInquirySending || adminInquiryUploading || !adminInquiryCategory || !adminInquiryTitle.trim() || !adminInquiryMessage.trim()}
+                        className="btn btn-primary"
+                        style={{
+                          gap: 8, height: 42, padding: '0 22px', fontSize: 14,
+                          opacity: !adminInquiryCategory || !adminInquiryTitle.trim() || !adminInquiryMessage.trim() ? 0.6 : 1
+                        }}
+                      >
+                        <Send size={15} /> {adminInquirySending ? 'Sending to Admin…' : 'Send Message to Admin'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom: 2-Column Split Communications History (Left: General Inquiries, Right: Payment Remittances) */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 20 }}>
+                  {/* Left Column: General Communications */}
+                  <div className="card glass-form-card" style={{ padding: 22 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <MessageSquare size={17} color="#2563EB" />
+                          <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                            General Communications &amp; Inquiries
+                          </h3>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
+                          Administrative support, licenses &amp; technical inquiries
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={fetchCenterAdminMessages}
+                        className="btn btn-ghost btn-sm"
+                        style={{ gap: 5, fontSize: 11.5 }}
+                      >
+                        <RefreshCw size={12} className={loadingCenterMessages ? 'spin' : ''} /> Refresh
+                      </button>
+                    </div>
+
+                    {renderHistoryGroup(generalMessages, 'No general messages logged yet.')}
                   </div>
 
-                  {adminInquiryError && (
-                    <div style={{
-                      background: '#fff1f1', border: '1px solid #fca5a5',
-                      borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626',
-                    }}>
-                      {adminInquiryError}
+                  {/* Right Column: Monthly Payment Remittances */}
+                  <div className="card glass-form-card" style={{ padding: 22 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <span style={{ fontSize: 16 }}>💳</span>
+                          <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                            Monthly Payment Remittances &amp; Inquiries
+                          </h3>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
+                          Deposit slips, monthly billing submissions &amp; payment receipts
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={fetchCenterAdminMessages}
+                        className="btn btn-ghost btn-sm"
+                        style={{ gap: 5, fontSize: 11.5 }}
+                      >
+                        <RefreshCw size={12} className={loadingCenterMessages ? 'spin' : ''} /> Refresh
+                      </button>
                     </div>
-                  )}
 
-                  {adminInquirySuccess && (
-                    <div style={{
-                      background: '#ecfdf5', border: '1px solid #6ee7b7',
-                      borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#047857',
-                      display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
-                    }}>
-                      <CheckCircle2 size={16} /> Inquiry successfully delivered to System Admin.
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                    <button
-                      type="button"
-                      onClick={handleSendAdminInquiry}
-                      disabled={adminInquirySending || adminInquiryUploading || !adminInquiryTitle.trim() || !adminInquiryMessage.trim()}
-                      className="btn btn-primary"
-                      style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}
-                    >
-                      <Send size={15} /> {adminInquirySending ? 'Sending to Admin…' : 'Send Message to Admin'}
-                    </button>
+                    {renderHistoryGroup(paymentMessages, 'No payment remittance messages logged yet.')}
                   </div>
                 </div>
               </div>
-
-            </div>
-          )}
+            )
+          })()}
 
           {/* UNIFIED DOCTORS TAB — Roster + Management merged */}
           {activeTab === 'doctors' && (() => {

@@ -34,7 +34,7 @@ function mapDbCenterToPublic(row) {
     requestedByName: row.requested_by_name ?? null,
     rejectionReason: row.rejection_reason ?? null,
     created_at: row.created_at ?? null,
-    documents: Array.isArray(row.center_documents) ? row.center_documents.filter(d => d.document_type !== 'request_comment').map(d => ({
+    documents: Array.isArray(row.center_documents) ? row.center_documents.filter(d => d.document_type !== 'request_comment' && d.document_type !== 'admin_message').map(d => ({
       id: d.id,
       title: d.document_name,
       type: d.document_type,
@@ -1281,16 +1281,16 @@ export async function rejectCenter(req, res, next) {
 }
 
 /**
- * POST /centers/:centerId/messages-to-admin
- * A medical center / receptionist sends a direct inquiry, report, or file to the System Admin.
+ * POST /centers/:centerId/messages
+ * A medical center / receptionist sends an inquiry/payment message, OR a System Admin replies.
  */
-export async function createCenterMessageToAdmin(req, res, next) {
+export async function createCenterMessage(req, res, next) {
   try {
     const { centerId } = req.params;
-    const { title, message, attachmentUrl, attachmentName } = req.body;
+    const { title, message, attachmentUrl, attachmentName, category = 'general', parentId = null } = req.body;
 
-    if (!title || !message) {
-      return res.status(400).json({ error: 'Subject title and message details are required.' });
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ error: 'Message content is required.' });
     }
 
     const { data: center, error: centerErr } = await supabase
@@ -1303,14 +1303,57 @@ export async function createCenterMessageToAdmin(req, res, next) {
       return res.status(404).json({ error: 'Medical center not found.' });
     }
 
+    const senderRole = req.user?.role === 'admin' ? 'admin' : 'receptionist';
+    const senderName = req.user?.fullName || req.user?.email || (senderRole === 'admin' ? 'System Admin' : 'Receptionist');
+    const msgCategory = category === 'payment' ? 'payment' : 'general';
+
+    // 1. Try inserting into dedicated center_admin_messages table
+    const { data: msgData, error: msgErr } = await supabase
+      .from('center_admin_messages')
+      .insert([{
+        center_id: centerId,
+        center_name: center.name,
+        sender_role: senderRole,
+        category: msgCategory,
+        title: title ? String(title).trim() : (senderRole === 'admin' ? 'Admin Reply' : 'Inquiry'),
+        message: String(message).trim(),
+        attachment_url: attachmentUrl || null,
+        attachment_name: attachmentName || null,
+        parent_id: parentId || null,
+        is_read: false,
+      }])
+      .select();
+
+    if (!msgErr && msgData && msgData.length > 0) {
+      await writeAuditLog({
+        actorName: senderName,
+        actorRole: senderRole,
+        eventType: 'center_edit',
+        action: senderRole === 'admin' ? `Admin replied to center: "${center.name}"` : `Sent message to System Admin: "${title || 'Inquiry'}"`,
+        centerName: center.name,
+        status: 'completed',
+      });
+
+      return res.status(201).json({
+        message: 'Message sent successfully.',
+        data: msgData[0],
+      });
+    }
+
+    // 2. Fallback to center_documents if migration has not been applied yet
+    console.warn('[createCenterMessage] center_admin_messages unavailable, using fallback:', msgErr?.message);
     const payloadName = JSON.stringify({
-      title: String(title).trim(),
+      title: title ? String(title).trim() : (senderRole === 'admin' ? 'Admin Reply' : 'Inquiry'),
       message: String(message).trim(),
       attachmentName: attachmentName || null,
-      senderName: req.user?.fullName || req.user?.email || 'Receptionist',
+      senderName,
+      senderRole,
+      category: msgCategory,
+      parentId: parentId || null,
+      isRead: false,
     });
 
-    const { data, error } = await supabase
+    const { data: docData, error: docErr } = await supabase
       .from('center_documents')
       .insert([{
         center_id: centerId,
@@ -1320,18 +1363,137 @@ export async function createCenterMessageToAdmin(req, res, next) {
       }])
       .select();
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (docErr) return res.status(500).json({ error: docErr.message });
 
-    await writeAuditLog({
-      actorName: req.user?.fullName || req.user?.email || 'Receptionist',
-      actorRole: req.user?.role || 'receptionist',
-      eventType: 'center_edit',
-      action: `Sent message to System Admin: "${title}"`,
-      centerName: center.name,
-      status: 'completed',
+    res.status(201).json({
+      message: 'Message sent successfully.',
+      data: docData[0],
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Backward compatibility alias for POST /centers/:centerId/messages-to-admin
+ */
+export const createCenterMessageToAdmin = createCenterMessage;
+
+/**
+ * GET /centers/:centerId/messages
+ * Receptionist / Admin fetches the conversation history for a specific center.
+ */
+export async function getCenterConversation(req, res, next) {
+  try {
+    const { centerId } = req.params;
+    const { category } = req.query;
+
+    // 1. Try center_admin_messages table first
+    let query = supabase
+      .from('center_admin_messages')
+      .select('*')
+      .eq('center_id', centerId)
+      .order('created_at', { ascending: true });
+
+    if (category) {
+      query = query.eq('category', category);
+    }
+
+    const { data, error } = await query;
+
+    if (!error && data) {
+      const repliesMap = new Map();
+      const topLevel = [];
+
+      data.forEach(row => {
+        const item = {
+          id: row.id,
+          centerId: row.center_id,
+          senderRole: row.sender_role,
+          senderName: row.sender_name || (row.sender_role === 'admin' ? 'System Admin' : 'Receptionist'),
+          category: row.category,
+          title: row.title,
+          message: row.message,
+          attachmentUrl: row.attachment_url,
+          attachmentName: row.attachment_name,
+          parentId: row.parent_id,
+          isRead: Boolean(row.is_read),
+          createdAt: row.created_at,
+          replies: [],
+        };
+
+        if (row.parent_id) {
+          if (!repliesMap.has(row.parent_id)) {
+            repliesMap.set(row.parent_id, []);
+          }
+          repliesMap.get(row.parent_id).push(item);
+        } else {
+          topLevel.push(item);
+        }
+      });
+
+      topLevel.forEach(item => {
+        item.replies = (repliesMap.get(item.id) || []).sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      });
+
+      return res.json({ messages: topLevel });
+    }
+
+    // 2. Fallback to center_documents
+    const { data: docData, error: docErr } = await supabase
+      .from('center_documents')
+      .select('id, center_id, document_type, document_name, file_url, created_at')
+      .eq('center_id', centerId)
+      .eq('document_type', 'admin_message')
+      .order('created_at', { ascending: true });
+
+    if (docErr) return res.status(500).json({ error: docErr.message });
+
+    const repliesMap = new Map();
+    const topLevel = [];
+
+    (docData || []).forEach(row => {
+      let parsed = { title: 'Inquiry', message: '', attachmentName: null, senderName: 'Receptionist', senderRole: 'receptionist', isRead: true };
+      try {
+        parsed = JSON.parse(row.document_name);
+      } catch (_) {
+        parsed.title = row.document_name;
+      }
+      const item = {
+        id: row.id,
+        centerId: row.center_id,
+        senderRole: parsed.senderRole || 'receptionist',
+        senderName: parsed.senderName || 'Receptionist',
+        category: parsed.category || 'general',
+        title: parsed.title || 'Inquiry',
+        message: parsed.message || row.document_name,
+        attachmentName: parsed.attachmentName,
+        attachmentUrl: row.file_url !== 'none' ? row.file_url : null,
+        parentId: parsed.parentId || null,
+        isRead: Boolean(parsed.isRead),
+        createdAt: row.created_at,
+        replies: [],
+      };
+
+      if (item.parentId) {
+        if (!repliesMap.has(item.parentId)) {
+          repliesMap.set(item.parentId, []);
+        }
+        repliesMap.get(item.parentId).push(item);
+      } else {
+        topLevel.push(item);
+      }
     });
 
-    res.status(201).json({ message: 'Message sent to System Admin successfully.', data: data[0] });
+    topLevel.forEach(item => {
+      item.replies = (repliesMap.get(item.id) || []).sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+    });
+
+    res.json({ messages: topLevel });
   } catch (err) {
     next(err);
   }
@@ -1343,16 +1505,81 @@ export async function createCenterMessageToAdmin(req, res, next) {
  */
 export async function getCenterMessagesToAdmin(req, res, next) {
   try {
-    const { data, error } = await supabase
+    // 1. Try center_admin_messages first
+    let { data, error } = await supabase
+      .from('center_admin_messages')
+      .select('*, medical_centers(name, city, email, phone)')
+      .order('created_at', { ascending: false });
+
+    // If relation join failed in PostgREST, fallback to plain select('*')
+    if (error) {
+      const fallbackQuery = await supabase
+        .from('center_admin_messages')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!fallbackQuery.error && fallbackQuery.data) {
+        data = fallbackQuery.data;
+        error = null;
+      }
+    }
+
+    if (!error && data) {
+      // Separate top-level messages from replies
+      const topLevel = [];
+      const repliesMap = new Map();
+
+      data.forEach(row => {
+        const item = {
+          id: row.id,
+          centerId: row.center_id,
+          centerName: row.center_name || row.medical_centers?.name || 'Medical Center',
+          centerCity: row.medical_centers?.city,
+          centerEmail: row.medical_centers?.email,
+          centerPhone: row.medical_centers?.phone,
+          senderRole: row.sender_role,
+          senderName: row.sender_name || (row.sender_role === 'admin' ? 'System Admin' : 'Receptionist'),
+          category: row.category,
+          title: row.title,
+          message: row.message,
+          attachmentName: row.attachment_name,
+          attachmentUrl: row.attachment_url,
+          parentId: row.parent_id,
+          isRead: Boolean(row.is_read),
+          createdAt: row.created_at,
+          replies: [],
+        };
+
+        if (row.parent_id) {
+          if (!repliesMap.has(row.parent_id)) {
+            repliesMap.set(row.parent_id, []);
+          }
+          repliesMap.get(row.parent_id).push(item);
+        } else {
+          topLevel.push(item);
+        }
+      });
+
+      // Attach replies to their parent inquiry
+      topLevel.forEach(item => {
+        item.replies = (repliesMap.get(item.id) || []).sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      });
+
+      return res.json({ messages: topLevel });
+    }
+
+    // 2. Fallback to center_documents
+    const { data: docData, error: docErr } = await supabase
       .from('center_documents')
       .select('id, center_id, document_type, document_name, file_url, created_at, medical_centers(name, city, email, phone)')
       .eq('document_type', 'admin_message')
       .order('created_at', { ascending: false });
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (docErr) return res.status(500).json({ error: docErr.message });
 
-    const messages = (data || []).map(row => {
-      let parsed = { title: 'Inquiry', message: '', attachmentName: null, senderName: 'Receptionist' };
+    const messages = (docData || []).map(row => {
+      let parsed = { title: 'Inquiry', message: '', attachmentName: null, senderName: 'Receptionist', senderRole: 'receptionist', isRead: false };
       try {
         parsed = JSON.parse(row.document_name);
       } catch (_) {
@@ -1365,16 +1592,131 @@ export async function getCenterMessagesToAdmin(req, res, next) {
         centerCity: row.medical_centers?.city,
         centerEmail: row.medical_centers?.email,
         centerPhone: row.medical_centers?.phone,
+        senderRole: parsed.senderRole || 'receptionist',
+        senderName: parsed.senderName || 'Receptionist',
+        category: parsed.category || 'general',
         title: parsed.title || 'Inquiry',
         message: parsed.message || row.document_name,
-        senderName: parsed.senderName || 'Receptionist',
         attachmentName: parsed.attachmentName,
         attachmentUrl: row.file_url !== 'none' ? row.file_url : null,
+        parentId: parsed.parentId || null,
+        isRead: Boolean(parsed.isRead),
         createdAt: row.created_at,
+        replies: [],
       };
     });
 
     res.json({ messages });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /centers/messages/:messageId/read
+ * Mark an inquiry or reply as read.
+ */
+export async function markCenterMessageRead(req, res, next) {
+  try {
+    const { messageId } = req.params;
+    const isRead = req.body?.isRead !== undefined ? Boolean(req.body.isRead) : true;
+
+    // 1. Try center_admin_messages
+    const { data, error } = await supabase
+      .from('center_admin_messages')
+      .update({ is_read: isRead, read_at: isRead ? new Date().toISOString() : null })
+      .eq('id', messageId)
+      .select();
+
+    if (!error && data && data.length > 0) {
+      return res.json({ success: true, message: `Message marked as ${isRead ? 'read' : 'unread'}.`, data: data[0] });
+    }
+
+    // 2. Fallback to center_documents
+    const { data: doc, error: docErr } = await supabase
+      .from('center_documents')
+      .select('id, document_name')
+      .eq('id', messageId)
+      .maybeSingle();
+
+    if (docErr || !doc) {
+      return res.json({ success: true, message: 'Message state updated.' });
+    }
+
+    try {
+      const parsed = JSON.parse(doc.document_name);
+      parsed.isRead = isRead;
+      await supabase
+        .from('center_documents')
+        .update({ document_name: JSON.stringify(parsed) })
+        .eq('id', messageId);
+    } catch (_) {}
+
+    res.json({ success: true, message: `Message marked as ${isRead ? 'read' : 'unread'}.` });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /centers/admin-messages/unread-count
+ * Returns count of unread incoming inquiries for the System Admin sidebar badge.
+ */
+export async function getAdminMessagesUnreadCount(req, res, next) {
+  try {
+    // 1. Try center_admin_messages
+    const { count, error } = await supabase
+      .from('center_admin_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('sender_role', 'receptionist')
+      .eq('is_read', false);
+
+    if (!error && count !== null && count !== undefined) {
+      return res.json({ unreadCount: count });
+    }
+
+    // 2. Fallback: count unread from center_documents
+    const { data } = await supabase
+      .from('center_documents')
+      .select('document_name')
+      .eq('document_type', 'admin_message');
+
+    let unreadCount = 0;
+    (data || []).forEach(row => {
+      try {
+        const parsed = JSON.parse(row.document_name);
+        if (parsed.isRead === false) unreadCount++;
+      } catch (_) {}
+    });
+
+    res.json({ unreadCount });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /centers/:centerId/messages/unread-count
+ * Returns count of unread admin replies for the Receptionist sidebar badge.
+ */
+export async function getCenterMessagesUnreadCount(req, res, next) {
+  try {
+    const { centerId } = req.params;
+
+    // 1. Try center_admin_messages
+    const { count, error } = await supabase
+      .from('center_admin_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('center_id', centerId)
+      .eq('sender_role', 'admin')
+      .eq('is_read', false);
+
+    if (!error && count !== null && count !== undefined) {
+      return res.json({ unreadCount: count });
+    }
+
+    // Fallback: 0
+    res.json({ unreadCount: 0 });
   } catch (err) {
     next(err);
   }
