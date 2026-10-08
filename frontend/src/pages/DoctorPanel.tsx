@@ -23,6 +23,7 @@ function minutesSince(iso: string | null, now: number): number | null {
   if (!iso) return null
   const t = new Date(iso).getTime()
   if (!Number.isFinite(t)) return null
+  if (now < t) return 0
   return Math.max(0, Math.round((now - t) / 60_000))
 }
 
@@ -908,7 +909,7 @@ export default function DoctorPanel() {
                       </div>
                       <div style={{ fontSize: 10.5, color: 'var(--text-4)', display: 'flex', alignItems: 'center', gap: 4 }}>
                         <Clock size={10} style={{ flexShrink: 0, opacity: 0.7 }} />
-                        <span>Checked in <strong style={{ color: 'var(--text-2)', fontWeight: 700 }}>{fmtTime(p.checkedInAt)}</strong></span>
+                        <span>{p.visitType === 'Online' ? 'Scheduled' : 'Checked in'} <strong style={{ color: 'var(--text-2)', fontWeight: 700 }}>{fmtTime(p.checkedInAt)}</strong></span>
                       </div>
                       {p.allergy && (
                         <div style={{ marginTop: 5 }}>

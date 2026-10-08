@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell, Building2, Calendar, ClipboardList, Clock, Download, Eye, FileText, FileUp, Heart, Home, LogOut,
@@ -14,6 +14,7 @@ import { ViewReportModal, downloadRecordFile, isRealFileUrl } from '../component
 import { LiveClinicMap } from '../components/LiveClinicMap'
 import CenterProfilePage from '../components/CenterProfilePage'
 import DoctorProfileModal from '../components/DoctorProfileModal'
+import CompleteProfileModal from '../components/CompleteProfileModal'
 import {
   fetchPatientProfile,
   savePatientProfile,
@@ -174,6 +175,7 @@ export default function PatientDashboard() {
   // Cancellation Modal state
   const [cancellingAppt, setCancellingAppt] = useState<{ id: string; docName: string; token: string | null } | null>(null)
   const [cancelling, setCancelling] = useState(false)
+  const [showCompleteProfileModal, setShowCompleteProfileModal] = useState(false)
 
   const handleConfirmCancel = async () => {
     if (!cancellingAppt || !user) return
@@ -195,11 +197,78 @@ export default function PatientDashboard() {
     }
   }
 
+  const handleSaveCompleteProfile = async (updatedFields: Partial<PatientProfile>): Promise<boolean> => {
+    if (!user?.id) return false
+    try {
+      const merged = { ...profile, ...updatedFields }
+      const saved = await savePatientProfile(user.id, merged)
+      setProfile(prev => ({
+        ...prev,
+        ...saved,
+        ...updatedFields,
+      }))
+      showToast('Profile details updated successfully! Welcome to MediQueue.')
+      return true
+    } catch (e) {
+      console.warn('Failed to save complete profile:', e)
+      return false
+    }
+  }
+
   const displayName = profile.fullName || user?.name || 'Patient'
   const firstName = displayName.split(' ')[0]
 
-  // Find active appointment / token dynamically
-  const activeAppointment = (myAppointments || []).find(a => a && (a.status === 'waiting' || a.status === 'booked' || a.status === 'in_consultation')) || (myAppointments || [])[0]
+  const todayIsoDate = useMemo(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }, [])
+
+  // Find active appointment / token dynamically for TODAY's session
+  const activeAppointment = useMemo(() => {
+    return (myAppointments || []).find(a =>
+      a &&
+      ((a.appointmentDate || '').slice(0, 10) === todayIsoDate) &&
+      (a.status === 'waiting' || a.status === 'in_consultation' || a.status === 'booked')
+    ) || null
+  }, [myAppointments, todayIsoDate])
+
+  // Filter ONLY upcoming appointments (exclude completed, cancelled, no-show, and past due appointments)
+  const { upcomingAppointments, todayAppointmentsCount } = useMemo(() => {
+    const now = new Date()
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const currentHour = now.getHours()
+
+    const todayList = (myAppointments || []).filter(apt => {
+      if (!apt) return false
+      const aptDate = (apt.appointmentDate || '').slice(0, 10)
+      return aptDate === todayStr && apt.status !== 'cancelled'
+    })
+
+    const upcoming = (myAppointments || []).filter(apt => {
+      if (!apt) return false
+      // 1. Remove completed, cancelled, and no-show appointments
+      if (apt.status === 'completed' || apt.status === 'cancelled' || (apt as any).status === 'no_show') {
+        return false
+      }
+      const aptDate = (apt.appointmentDate || '').slice(0, 10)
+      if (!aptDate) return false
+      // 2. Remove past / due appointments
+      if (aptDate < todayStr) return false
+      // 3. If scheduled for today, remove if booked slot hour has already passed
+      if (aptDate === todayStr) {
+        if (apt.status === 'booked' && typeof apt.slotHour === 'number' && apt.slotHour < currentHour) {
+          return false
+        }
+      }
+      return true
+    }).sort((a, b) => {
+      const dateCmp = (a.appointmentDate || '').localeCompare(b.appointmentDate || '')
+      if (dateCmp !== 0) return dateCmp
+      return (a.slotHour || 0) - (b.slotHour || 0)
+    })
+
+    return { upcomingAppointments: upcoming, todayAppointmentsCount: todayList.length }
+  }, [myAppointments])
 
   // Keep profile synced with logged-in user credentials
   useEffect(() => {
@@ -238,6 +307,13 @@ export default function PatientDashboard() {
             smsAlertsEnabled: pData.smsAlertsEnabled ?? prev.smsAlertsEnabled ?? true,
             delayAlertsEnabled: pData.delayAlertsEnabled ?? prev.delayAlertsEnabled ?? true,
           }))
+
+          // Prompt profile completion if logged in via Google or essential fields are missing
+          const isGoogleUser = user?.authProvider === 'google'
+          const missingEssentials = !pData.phone || !pData.phone.trim() || !pData.dateOfBirth || !pData.bloodGroup
+          if (missingEssentials && (isGoogleUser || !pData.phone)) {
+            setShowCompleteProfileModal(true)
+          }
         }
         if (rData) setRecords(rData)
         if (aData) setMyAppointments(aData)
@@ -448,6 +524,12 @@ export default function PatientDashboard() {
         doctor={viewingDoctorProfile}
         onClose={() => setViewingDoctorProfile(null)}
       />
+      <CompleteProfileModal
+        isOpen={showCompleteProfileModal}
+        onClose={() => setShowCompleteProfileModal(false)}
+        profile={profile}
+        onSave={handleSaveCompleteProfile}
+      />
       {/* Toast Notification */}
       {toastMessage && (
         <div style={{
@@ -609,7 +691,7 @@ export default function PatientDashboard() {
               <div className="patient-summary-grid">
                 <div className="patient-summary-card summary-blue">
                   <span className="summary-icon"><Calendar size={17} /></span>
-                  <div><strong>{myAppointments.length}</strong><small>Appointments today</small></div>
+                  <div><strong>{todayAppointmentsCount}</strong><small>Appointments today</small></div>
                 </div>
                 <div className="patient-summary-card summary-violet">
                   <span className="summary-icon"><Ticket size={17} /></span>
@@ -835,8 +917,8 @@ export default function PatientDashboard() {
                       </button>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 380, overflowY: 'auto', paddingRight: 2 }}>
-                      {myAppointments.length > 0 ? (
-                        myAppointments.map(u => (
+                      {upcomingAppointments.length > 0 ? (
+                        upcomingAppointments.map(u => (
                           <div key={u.id} style={{ padding: 12, background: '#ffffff', borderRadius: 10, border: '1px solid var(--border-md)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                               <div>
@@ -849,20 +931,13 @@ export default function PatientDashboard() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <Calendar size={12} /> {u.appointmentDate} at {formatSlotTime(u.slotHour)}
                               </div>
-                              {u.status !== 'cancelled' && u.status !== 'completed' && (
-                                <button
-                                  onClick={() => setCancellingAppt({ id: u.id, docName: u.doctorName, token: u.queueToken })}
-                                  className="btn btn-sm"
-                                  style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 8px', fontSize: 10.5 }}
-                                >
-                                  Cancel Booking
-                                </button>
-                              )}
-                              {u.status === 'cancelled' && (
-                                <span style={{ fontSize: 10.5, color: '#ef4444', fontWeight: 700, background: 'rgba(239,68,68,0.15)', padding: '2px 6px', borderRadius: 6 }}>
-                                  Cancelled
-                                </span>
-                              )}
+                              <button
+                                onClick={() => setCancellingAppt({ id: u.id, docName: u.doctorName, token: u.queueToken })}
+                                className="btn btn-sm"
+                                style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 8px', fontSize: 10.5 }}
+                              >
+                                Cancel Booking
+                              </button>
                             </div>
                           </div>
                         ))

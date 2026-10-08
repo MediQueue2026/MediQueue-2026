@@ -326,6 +326,58 @@ export async function getDoctorSummary(req, res, next) {
       for (const p of profiles || []) profileByUser.set(p.user_id, p);
     }
 
+    // Determine doctor's availability schedule for today
+    const nowClinic = clinicNow();
+    const hoursSource = posting?.available_hours ?? doctorRow.available_hours ?? {};
+    const todayHours = hoursSource[String(nowClinic.dayOfWeek)];
+    let doctorStartTimeToday = '08:00';
+    if (todayHours?.startTime) {
+      doctorStartTimeToday = todayHours.startTime;
+    } else if (todayHours?.sessions && todayHours.sessions[0]?.startTime) {
+      doctorStartTimeToday = todayHours.sessions[0].startTime;
+    }
+
+    try {
+      const { data: ddh } = await supabase
+        .from('doctor_date_hours')
+        .select('start_time, is_working')
+        .eq('doctor_id', docIdToUse)
+        .eq('work_date', today)
+        .maybeSingle();
+      if (ddh?.start_time) {
+        doctorStartTimeToday = ddh.start_time;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Map appointments by queue number to retrieve slot_hour for any token
+    const aptByQueueNumber = new Map((aptRows || []).map(a => [a.queue_number, a]));
+
+    // Helper to calculate the baseline availability/check-in timestamp on today's date
+    const computeTodayCheckIn = (row) => {
+      if (!row) return null;
+      const apt = aptByQueueNumber.get(row.queue_number);
+      // If appointment slot_hour is known, doctor's availability for that patient is their scheduled slot today
+      if (apt?.slot_hour != null && Number.isFinite(Number(apt.slot_hour))) {
+        const h = Math.max(0, Math.min(23, Number(apt.slot_hour)));
+        return `${today}T${String(h).padStart(2, '0')}:00:00`;
+      }
+      // If it's an online booking or check-in was recorded on an earlier date, use doctor's availability start time today
+      const rowDate = row.checked_in_at ? String(row.checked_in_at).slice(0, 10) : null;
+      if (row.source === 'online' || !rowDate || rowDate < today) {
+        return `${today}T${doctorStartTimeToday.length === 5 ? doctorStartTimeToday + ':00' : doctorStartTimeToday}`;
+      }
+      // For physical walk-ins checked in today, if they checked in before the doctor's availability starts,
+      // waiting time begins when the doctor becomes available today
+      const doctorAvailMs = new Date(`${today}T${doctorStartTimeToday.length === 5 ? doctorStartTimeToday + ':00' : doctorStartTimeToday}`).getTime();
+      const walkInMs = new Date(row.checked_in_at).getTime();
+      if (Number.isFinite(walkInMs) && walkInMs < doctorAvailMs) {
+        return `${today}T${doctorStartTimeToday.length === 5 ? doctorStartTimeToday + ':00' : doctorStartTimeToday}`;
+      }
+      return row.checked_in_at;
+    };
+
     // Merge the two sources of a token. A walk-in row wins over an appointment
     // with the same number, because the walk-in row is what reception updates.
     const existingKeys = new Set((queueRows || []).map(r => `${r.doctor_id}_${r.queue_number}`));
@@ -343,7 +395,9 @@ export async function getDoctorSummary(req, res, next) {
         source: 'online',
         status: a.status === 'booked' ? 'waiting' : a.status,
         called_at: null,
-        checked_in_at: a.created_at,
+        checked_in_at: a.slot_hour != null
+          ? `${today}T${String(Math.max(0, Math.min(23, Number(a.slot_hour)))).padStart(2, '0')}:00:00`
+          : `${today}T${doctorStartTimeToday.length === 5 ? doctorStartTimeToday + ':00' : doctorStartTimeToday}`,
         _nic: profile?.nic ?? null,
         _allergies: profile?.allergies || null,
       });
@@ -381,7 +435,7 @@ export async function getDoctorSummary(req, res, next) {
         // reached the queue and nothing more — it is not clinical information.
         visitType: q.source === 'physical' ? 'Walk-in' : 'Online',
         allergy: q._allergies || null,
-        checkedInAt: q.checked_in_at || null,
+        checkedInAt: computeTodayCheckIn(q),
         calledAt: q.called_at || null,
         status: q.status,
       };
@@ -432,7 +486,7 @@ export async function getDoctorSummary(req, res, next) {
         gender: activeIdentity.gender,
         visitType: activeRow.source === 'physical' ? 'Walk-in' : 'Online',
         allergy: activeRow._allergies || null,
-        checkedInAt: activeRow.checked_in_at || null,
+        checkedInAt: computeTodayCheckIn(activeRow),
         calledAt: activeRow.called_at || null,
       } : null,
       queueList: mappedQueueList,
