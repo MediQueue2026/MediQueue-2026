@@ -6,7 +6,8 @@ import {
   Activity, Building2, FileText, LogOut, Menu, Plus,
   Search, Settings, Ticket, Users, X, RefreshCw, CheckCircle2,
   AlertCircle, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
-  Pencil, Pause, Play, Trash2, Filter, RotateCcw
+  Pencil, Pause, Play, Trash2, RotateCcw, Check, CornerDownLeft, Bell,
+  ChevronDown
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -15,13 +16,13 @@ import AddCenterModal from '../components/AddCenterModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
 import { ViewReportModal } from '../components/ViewReportModal'
 import { api } from '../lib/api'
-import type { ApiCenter, ApiDoctor, ApiUser, AuditLog } from '../lib/api'
+import type { ApiCenter, ApiDoctor, ApiUser, AuditLog, ApiCenterAdminMessage } from '../lib/api'
 
 const NAV_ADMIN = [
   { id: 'health', icon: <Activity size={15} />, label: 'System Health' },
   { id: 'roles', icon: <Users size={15} />, label: 'Staff & Roles' },
   { id: 'clinics', icon: <Building2 size={15} />, label: 'Medical Centers' },
-  { id: 'api', icon: <MessageSquare size={15} />, label: 'Message Center' },
+  { id: 'api', icon: <MessageSquare size={15} />, label: 'Message Centers' },
   { id: 'logs', icon: <FileText size={15} />, label: 'Audit Logs' },
 ]
 
@@ -202,9 +203,18 @@ function HeaderFilterDropdown({
         }}
         title={`Filter by ${title}`}
       >
-        <Filter size={11} style={{ opacity: isFiltered ? 1 : 0.65 }} />
+        <ChevronDown
+          size={14}
+          strokeWidth={2.4}
+          style={{
+            color: isFiltered ? themeStyles.activeColor : 'currentColor',
+            opacity: 1,
+            transform: isOpen ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.15s ease, color 0.15s ease'
+          }}
+        />
         {isFiltered && (
-          <span style={{ width: 5, height: 5, borderRadius: '50%', background: themeStyles.activeColor }} />
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: themeStyles.activeColor }} />
         )}
       </button>
 
@@ -428,8 +438,21 @@ export default function AdminPanel() {
   const [maintenanceMode, setMaintenanceMode] = useState(false)
   const [changingMaintenance, setChangingMaintenance] = useState(false)
 
-  const [centerInquiries, setCenterInquiries] = useState<any[]>([])
+  const [centerInquiries, setCenterInquiries] = useState<ApiCenterAdminMessage[]>([])
   const [loadingInquiries, setLoadingInquiries] = useState(false)
+  const [adminUnreadCount, setAdminUnreadCount] = useState(0)
+  const [replyingToId, setReplyingToId] = useState<string | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [replySending, setReplySending] = useState(false)
+
+  const fetchUnreadCount = async () => {
+    try {
+      const res = await api.getAdminMessagesUnreadCount()
+      if (typeof res?.unreadCount === 'number') {
+        setAdminUnreadCount(res.unreadCount)
+      }
+    } catch (_) {}
+  }
 
   const fetchCenterInquiries = async () => {
     setLoadingInquiries(true)
@@ -438,12 +461,60 @@ export default function AdminPanel() {
       if (res?.messages) {
         setCenterInquiries(res.messages)
       }
+      fetchUnreadCount()
     } catch (err) {
       console.warn('Could not load center messages', err)
     } finally {
       setLoadingInquiries(false)
     }
   }
+
+  const handleMarkAsRead = async (messageId: string) => {
+    try {
+      await api.markCenterMessageRead(messageId, true)
+      setCenterInquiries(prev => prev.map(m => m.id === messageId ? { ...m, isRead: true } : m))
+      setAdminUnreadCount(c => Math.max(0, c - 1))
+      fetchUnreadCount()
+    } catch (err) {
+      console.warn('Could not mark message as read', err)
+    }
+  }
+
+  const handleMarkAsUnread = async (messageId: string) => {
+    try {
+      await api.markCenterMessageRead(messageId, false)
+      setCenterInquiries(prev => prev.map(m => m.id === messageId ? { ...m, isRead: false } : m))
+      setAdminUnreadCount(c => c + 1)
+      fetchUnreadCount()
+    } catch (err) {
+      console.warn('Could not mark message as unread', err)
+    }
+  }
+
+  const handleSendReply = async (inquiry: ApiCenterAdminMessage) => {
+    if (!replyText.trim()) return
+    setReplySending(true)
+    try {
+      await api.sendCenterMessage(inquiry.centerId, {
+        message: replyText.trim(),
+        parentId: inquiry.id,
+      })
+      setReplyText('')
+      setReplyingToId(null)
+      fetchCenterInquiries()
+      fetchUnreadCount()
+    } catch (err) {
+      alert('Could not send reply. Please try again.')
+    } finally {
+      setReplySending(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchUnreadCount()
+    const timer = setInterval(fetchUnreadCount, 25000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (nav === 'api') {
@@ -1002,9 +1073,24 @@ export default function AdminPanel() {
               key={item.id}
               className={`nav-link ${nav === item.id ? 'active' : ''}`}
               onClick={() => { setNav(item.id); setSidebarOpen(false) }}
+              style={{ display: 'flex', alignItems: 'center', width: '100%' }}
             >
               <span style={{ color: nav === item.id ? 'var(--blue)' : 'var(--text-4)' }}>{item.icon}</span>
-              {item.label}
+              <span style={{ flex: 1, textAlign: 'left' }}>{item.label}</span>
+              {item.id === 'api' && adminUnreadCount > 0 && (
+                <span style={{
+                  background: '#8B5CF6',
+                  color: '#ffffff',
+                  borderRadius: 999,
+                  padding: '2px 7px',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  boxShadow: '0 2px 6px rgba(139, 92, 246, 0.4)',
+                }}>
+                  {adminUnreadCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -1037,6 +1123,45 @@ export default function AdminPanel() {
             </div>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
+            {/* Topbar Notifications Button (Admin) */}
+            <button
+              type="button"
+              onClick={() => setNav('api')}
+              style={{
+                background: nav === 'api' ? '#6D28D9' : '#7C3AED',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 10,
+                padding: '6px 14px',
+                fontWeight: 700,
+                fontSize: 12.5,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title="View Inquiries & Messages from Medical Centers"
+            >
+              <Bell size={14} />
+              <span>Notifications</span>
+              {adminUnreadCount > 0 && (
+                <span style={{
+                  background: '#EF4444',
+                  color: '#fff',
+                  borderRadius: '999px',
+                  padding: '1px 6px',
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  lineHeight: '14px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }}>
+                  {adminUnreadCount}
+                </span>
+              )}
+            </button>
+
             <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.5)', padding: '6px 12px', borderRadius: 100, border: '1px solid var(--border-md)' }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: maintenanceMode ? 'var(--crimson)' : 'var(--text-2)' }}>
                 {maintenanceMode ? 'Maintenance Mode' : 'Operational'}
@@ -2030,11 +2155,11 @@ export default function AdminPanel() {
                             ))}
                           </div>
                         )}
-                        {c.documents && c.documents.length > 0 && (
+                        {c.documents && c.documents.filter((doc: any) => doc.type !== 'admin_message' && doc.type !== 'request_comment' && !doc.title?.trim().startsWith('{')).length > 0 && (
                           <div style={{ gridColumn: '1/-1', marginTop: 4 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)' }}>ATTACHED DOCUMENTS:</div>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                              {c.documents.map((doc: any) => (
+                              {c.documents.filter((doc: any) => doc.type !== 'admin_message' && doc.type !== 'request_comment' && !doc.title?.trim().startsWith('{')).map((doc: any) => (
                                 <button
                                   key={doc.id}
                                   className="btn btn-sm"
@@ -2143,69 +2268,307 @@ export default function AdminPanel() {
               </div>
             </div>
 
-            {/* INCOMING MESSAGES & UPLOADS FROM MEDICAL CENTERS */}
-            <div className="card glass-form-card" style={{ padding: 24, marginTop: 22 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
-                <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Incoming Inquiries &amp; Requests from Medical Centers</h3>
-                  <div style={{ fontSize: 12, color: 'var(--text-4)' }}>Direct communications, reports, and document uploads submitted by clinic receptionists</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={fetchCenterInquiries}
-                  className="btn btn-ghost btn-sm"
-                  style={{ gap: 6 }}
-                >
-                  <RefreshCw size={13} className={loadingInquiries ? 'spin' : ''} /> Refresh
-                </button>
-              </div>
+            {/* INCOMING MESSAGES & UPLOADS FROM MEDICAL CENTERS (2-Column Split: General vs Payment) */}
+            {(() => {
+              const generalInquiries = centerInquiries.filter(i => (i.category || 'general') === 'general')
+              const paymentInquiries = centerInquiries.filter(i => i.category === 'payment')
 
-              {loadingInquiries ? (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)' }}>Loading inquiries…</div>
-              ) : centerInquiries.length === 0 ? (
-                <div style={{ padding: 32, textAlign: 'center', background: 'rgba(139, 92, 246, 0.04)', borderRadius: 14, border: '1px dashed rgba(139, 92, 246, 0.25)', color: 'var(--text-4)', fontSize: 13 }}>
-                  No messages or uploads received from medical centers yet.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  {centerInquiries.map(inq => (
-                    <div key={inq.id} style={{
-                      padding: 16, borderRadius: 14, background: '#fff', border: '1px solid var(--border-md)',
-                      display: 'flex', flexDirection: 'column', gap: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontWeight: 800, color: '#6D28D9', fontSize: 14 }}>{inq.centerName}</span>
-                          {inq.centerCity && <span style={{ fontSize: 11.5, background: 'rgba(139,92,246,0.1)', color: '#7C3AED', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>{inq.centerCity}</span>}
-                          {inq.senderName && <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>by {inq.senderName}</span>}
-                        </div>
-                        <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>
-                          {new Date(inq.createdAt).toLocaleString()}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)' }}>{inq.title}</div>
-                      <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{inq.message}</div>
-                      {inq.attachmentUrl && (
-                        <div style={{ marginTop: 4 }}>
-                          <a
-                            href={inq.attachmentUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700,
-                              color: '#2563EB', background: 'rgba(37, 99, 235, 0.08)', padding: '6px 12px', borderRadius: 8,
-                              textDecoration: 'none'
-                            }}
-                          >
-                            <FileText size={13} /> View Attached File: {inq.attachmentName || 'Attachment Document'}
-                          </a>
-                        </div>
-                      )}
+              const renderInquiryColumn = (inquiriesList: ApiCenterAdminMessage[], emptyLabel: string) => {
+                if (loadingInquiries) {
+                  return <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-4)', fontSize: 13 }}>Loading inquiries…</div>
+                }
+                if (inquiriesList.length === 0) {
+                  return (
+                    <div style={{ padding: 24, textAlign: 'center', background: 'rgba(139, 92, 246, 0.03)', borderRadius: 12, border: '1px dashed rgba(139, 92, 246, 0.2)', color: 'var(--text-4)', fontSize: 12.5 }}>
+                      {emptyLabel}
                     </div>
-                  ))}
+                  )
+                }
+
+                const grouped = inquiriesList.reduce<Record<string, ApiCenterAdminMessage[]>>((acc, inq) => {
+                  const d = inq.createdAt
+                    ? new Date(inq.createdAt).toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                      })
+                    : 'Recent'
+                  if (!acc[d]) acc[d] = []
+                  acc[d].push(inq)
+                  return acc
+                }, {})
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {Object.entries(grouped).map(([dateLabel, inqs]) => (
+                      <div key={dateLabel}>
+                        {/* Audit log style date header with divider line */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                          <div style={{
+                            fontSize: 11, fontWeight: 800, color: '#6D28D9', textTransform: 'uppercase',
+                            letterSpacing: '0.04em', background: 'rgba(109, 40, 217, 0.08)', padding: '3px 8px',
+                            borderRadius: 6, border: '1px solid rgba(109, 40, 217, 0.15)'
+                          }}>
+                            📅 {dateLabel}
+                          </div>
+                          <div style={{ flex: 1, height: 1, background: 'var(--border-md)' }} />
+                          <span style={{ fontSize: 10.5, color: 'var(--text-4)', fontWeight: 600 }}>
+                            {inqs.length} {inqs.length === 1 ? 'Message' : 'Messages'}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          {inqs.map(inq => (
+                            <div key={inq.id} style={{
+                              padding: 14, borderRadius: 12, background: '#fff',
+                              border: inq.isRead ? '1px solid var(--border-md)' : '1.5px solid rgba(139, 92, 246, 0.4)',
+                              display: 'flex', flexDirection: 'column', gap: 8,
+                              boxShadow: inq.isRead ? '0 1px 4px rgba(0,0,0,0.02)' : '0 3px 10px rgba(139, 92, 246, 0.08)',
+                              transition: 'all 0.2s ease'
+                            }}>
+                              {/* Card Header */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: 800, color: '#6D28D9', fontSize: 13.5 }}>{inq.centerName}</span>
+                                  {inq.centerCity && (
+                                    <span style={{ fontSize: 10.5, background: 'rgba(139,92,246,0.1)', color: '#7C3AED', padding: '2px 7px', borderRadius: 5, fontWeight: 700 }}>
+                                      {inq.centerCity}
+                                    </span>
+                                  )}
+                                  {inq.category === 'payment' && (
+                                    <span style={{ fontSize: 10.5, background: 'rgba(245, 158, 11, 0.12)', color: '#D97706', padding: '2px 7px', borderRadius: 5, fontWeight: 700 }}>
+                                      💳 Payment
+                                    </span>
+                                  )}
+                                </div>
+                                <span style={{ fontSize: 11, color: 'var(--text-4)' }}>
+                                  {inq.createdAt ? new Date(inq.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </span>
+                              </div>
+
+                              {/* Title & Body */}
+                              <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-1)' }}>{inq.title}</div>
+                              <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{inq.message}</div>
+
+                              {/* Attachment Link */}
+                              {inq.attachmentUrl && (
+                                <div style={{ marginTop: 2 }}>
+                                  <a
+                                    href={inq.attachmentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700,
+                                      color: '#2563EB', background: 'rgba(37, 99, 235, 0.08)', padding: '5px 10px', borderRadius: 6,
+                                      textDecoration: 'none'
+                                    }}
+                                  >
+                                    <FileText size={12} /> View Attached: {inq.attachmentName || 'Attachment Document'}
+                                  </a>
+                                </div>
+                              )}
+
+                              {/* Threaded Admin Replies (if any) */}
+                              {inq.replies && inq.replies.length > 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #60A5FA' }}>
+                                  {inq.replies.map(reply => (
+                                    <div key={reply.id} style={{
+                                      padding: '8px 12px', borderRadius: 8, background: 'rgba(59, 130, 246, 0.05)',
+                                      border: '1px solid rgba(59, 130, 246, 0.15)', display: 'flex', flexDirection: 'column', gap: 3
+                                    }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                        <span style={{ fontSize: 10.5, fontWeight: 800, color: '#2563EB', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                          🛡️ System Admin Reply
+                                        </span>
+                                        <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                                          {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                        </span>
+                                      </div>
+                                      <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                                        {reply.message}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Action Buttons: 1. Reply (Purple), 2. Mark as Read (Blue) / Read (Green), 3. Mark as Unread (Navy Blue) */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 4, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                                {/* 1. Reply Button (Purple) */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReplyingToId(replyingToId === inq.id ? null : inq.id)
+                                    setReplyText('')
+                                  }}
+                                  style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                    borderRadius: 6, background: '#7C3AED', color: '#fff', fontSize: 11.5,
+                                    fontWeight: 700, border: 'none', cursor: 'pointer',
+                                    boxShadow: '0 2px 4px rgba(124, 58, 237, 0.2)', transition: 'background 0.2s'
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = '#6D28D9'}
+                                  onMouseLeave={e => e.currentTarget.style.background = '#7C3AED'}
+                                >
+                                  <CornerDownLeft size={12} /> Reply
+                                </button>
+
+                                {/* 2. Mark as Read (Blue) / Read (Green) */}
+                                {inq.isRead ? (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px',
+                                    borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669',
+                                    fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)'
+                                  }}>
+                                    <Check size={13} /> Read
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarkAsRead(inq.id)}
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                      borderRadius: 6, background: '#2563EB', color: '#fff', fontSize: 11.5,
+                                      fontWeight: 700, border: 'none', cursor: 'pointer',
+                                      boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)', transition: 'background 0.2s'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = '#1D4ED8'}
+                                    onMouseLeave={e => e.currentTarget.style.background = '#2563EB'}
+                                  >
+                                    <Check size={12} /> Mark as Read
+                                  </button>
+                                )}
+
+                                {/* 3. Mark as Unread (Navy Blue) */}
+                                {inq.isRead && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarkAsUnread(inq.id)}
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                      borderRadius: 6, background: '#1E3A8A', color: '#fff', fontSize: 11.5,
+                                      fontWeight: 700, border: 'none', cursor: 'pointer',
+                                      boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)', transition: 'background 0.2s'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = '#172554'}
+                                    onMouseLeave={e => e.currentTarget.style.background = '#1E3A8A'}
+                                  >
+                                    <RotateCcw size={12} /> Mark as Unread
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Inline Reply Box */}
+                              {replyingToId === inq.id && (
+                                <div style={{
+                                  marginTop: 8, padding: 12, borderRadius: 10,
+                                  background: '#F8FAFC', border: '1px solid #BFDBFE',
+                                  display: 'flex', flexDirection: 'column', gap: 8,
+                                  marginLeft: 14
+                                }}>
+                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: '#1E40AF' }}>
+                                    Reply to {inq.centerName}:
+                                  </div>
+                                  <textarea
+                                    className="input"
+                                    value={replyText}
+                                    onChange={e => setReplyText(e.target.value)}
+                                    placeholder="Type your response to this medical center..."
+                                    style={{ minHeight: 70, fontSize: 12.5, resize: 'vertical', padding: '8px 10px', background: '#fff' }}
+                                  />
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => { setReplyingToId(null); setReplyText('') }}
+                                      className="btn btn-ghost btn-xs"
+                                      style={{ fontSize: 11.5 }}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={!replyText.trim() || replySending}
+                                      onClick={() => handleSendReply(inq)}
+                                      style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                        borderRadius: 6, background: '#2563EB', color: '#fff', fontSize: 11.5,
+                                        fontWeight: 700, border: 'none', cursor: replySending ? 'not-allowed' : 'pointer',
+                                        opacity: !replyText.trim() || replySending ? 0.6 : 1
+                                      }}
+                                    >
+                                      <Send size={12} /> {replySending ? 'Sending…' : 'Send Reply'}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 20, marginTop: 22 }}>
+                  {/* Left Column: General Communications & Requests */}
+                  <div className="card glass-form-card" style={{ padding: 22 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <MessageSquare size={17} color="#2563EB" />
+                          <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                            Incoming Inquiries &amp; Requests
+                          </h3>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
+                          General administrative support, compliance &amp; technical inquiries
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={fetchCenterInquiries}
+                        className="btn btn-ghost btn-sm"
+                        style={{ gap: 5, fontSize: 11.5 }}
+                      >
+                        <RefreshCw size={12} className={loadingInquiries ? 'spin' : ''} /> Refresh
+                      </button>
+                    </div>
+
+                    {renderInquiryColumn(generalInquiries, 'No general messages or inquiries received yet.')}
+                  </div>
+
+                  {/* Right Column: Monthly Payment Remittances & Billing */}
+                  <div className="card glass-form-card" style={{ padding: 22 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <span style={{ fontSize: 16 }}>💳</span>
+                          <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                            Incoming Monthly Payment Remittances
+                          </h3>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
+                          Bank deposit slips, monthly subscription fees &amp; billing receipts
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={fetchCenterInquiries}
+                        className="btn btn-ghost btn-sm"
+                        style={{ gap: 5, fontSize: 11.5 }}
+                      >
+                        <RefreshCw size={12} className={loadingInquiries ? 'spin' : ''} /> Refresh
+                      </button>
+                    </div>
+
+                    {renderInquiryColumn(paymentInquiries, 'No payment remittance messages received yet.')}
+                  </div>
                 </div>
-              )}
-            </div>
+              )
+            })()}
           </>
         )}
 

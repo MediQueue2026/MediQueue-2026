@@ -15,7 +15,7 @@ import {
 
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
-import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter, getCenterClosures, createCenterClosure, deleteCenterClosure, getCenterDayHours, putCenterDateHours, deleteCenterDateHours, putDoctorDateHours, deleteDoctorDateHours, getCenterNotices, createCenterNotice, deleteCenterNotice, createCenterMessageToAdmin, getCenterMessagesToAdmin } from '../controllers/centerController.js';
+import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter, getCenterClosures, createCenterClosure, deleteCenterClosure, getCenterDayHours, putCenterDateHours, deleteCenterDateHours, putDoctorDateHours, deleteDoctorDateHours, getCenterNotices, createCenterNotice, deleteCenterNotice, createCenterMessage, createCenterMessageToAdmin, getCenterMessagesToAdmin, getCenterConversation, markCenterMessageRead, getAdminMessagesUnreadCount, getCenterMessagesUnreadCount } from '../controllers/centerController.js';
 import { createAppointment, getAppointments, getPatientAppointments, cancelAppointment } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary, getPendingDoctors, approveDoctor, rejectDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
@@ -160,8 +160,13 @@ router.delete('/centers/:centerId/center-hours/:date', authMiddleware, requireRo
 router.put('/centers/:centerId/doctor-hours', authMiddleware, requireRole(['receptionist', 'admin']), putDoctorDateHours);
 router.delete('/centers/:centerId/doctor-hours/:doctorId/:date', authMiddleware, requireRole(['receptionist', 'admin']), deleteDoctorDateHours);
 
-// Messages from Medical Centers to System Admin
+// Messages between Medical Centers and System Admin
+router.get('/centers/admin-messages/unread-count', authMiddleware, requireRole(['admin']), getAdminMessagesUnreadCount);
 router.get('/centers/admin-messages', authMiddleware, requireRole(['admin']), getCenterMessagesToAdmin);
+router.get('/centers/:centerId/messages/unread-count', authMiddleware, requireRole(['receptionist', 'admin']), getCenterMessagesUnreadCount);
+router.get('/centers/:centerId/messages', authMiddleware, requireRole(['receptionist', 'admin']), getCenterConversation);
+router.post('/centers/:centerId/messages', authMiddleware, requireRole(['receptionist', 'admin']), createCenterMessage);
+router.patch('/centers/messages/:messageId/read', authMiddleware, requireRole(['receptionist', 'admin']), markCenterMessageRead);
 router.post('/centers/:centerId/messages-to-admin', authMiddleware, requireRole(['receptionist', 'admin']), createCenterMessageToAdmin);
 
 router.put('/centers/:id', authMiddleware, requireRole(['receptionist', 'admin']), updateCenter);

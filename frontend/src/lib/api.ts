@@ -324,6 +324,26 @@ export interface ApiCenter {
   documents?: ApiCenterDocument[]
 }
 
+export interface ApiCenterAdminMessage {
+  id: string
+  centerId: string
+  centerName?: string
+  centerCity?: string
+  centerEmail?: string
+  centerPhone?: string
+  senderRole: 'receptionist' | 'admin'
+  senderName?: string
+  category: 'general' | 'payment'
+  title: string
+  message: string
+  attachmentName?: string | null
+  attachmentUrl?: string | null
+  parentId?: string | null
+  isRead: boolean
+  createdAt: string
+  replies?: ApiCenterAdminMessage[]
+}
+
 /** One calendar day a medical center is closed (migration 012 / center_closures). */
 export interface ApiCenterClosure {
   id: string
@@ -894,34 +914,49 @@ export const api = {
       body: JSON.stringify(updates),
     }),
 
-  sendMessageToAdmin: (centerId: string, input: { title: string; message: string; attachmentUrl?: string | null; attachmentName?: string | null; fileUrl?: string | null; fileName?: string | null }) =>
-    request<{ message: string; data: any }>(`/centers/${centerId}/messages-to-admin`, {
+  sendMessageToAdmin: (centerId: string, input: { title?: string; message: string; attachmentUrl?: string | null; attachmentName?: string | null; fileUrl?: string | null; fileName?: string | null; category?: 'general' | 'payment'; parentId?: string | null }) =>
+    request<{ message: string; data: ApiCenterAdminMessage }>(`/centers/${centerId}/messages`, {
       method: 'POST',
       body: JSON.stringify({
         title: input.title,
         message: input.message,
         attachmentUrl: input.attachmentUrl || input.fileUrl || null,
         attachmentName: input.attachmentName || input.fileName || null,
+        category: input.category || 'general',
+        parentId: input.parentId || null,
+      }),
+    }),
+
+  sendCenterMessage: (centerId: string, input: { title?: string; message: string; attachmentUrl?: string | null; attachmentName?: string | null; category?: 'general' | 'payment'; parentId?: string | null }) =>
+    request<{ message: string; data: ApiCenterAdminMessage }>(`/centers/${centerId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        message: input.message,
+        attachmentUrl: input.attachmentUrl || null,
+        attachmentName: input.attachmentName || null,
+        category: input.category || 'general',
+        parentId: input.parentId || null,
       }),
     }),
 
   getCenterMessagesToAdmin: () =>
-    request<{
-      messages: Array<{
-        id: string
-        centerId: string
-        centerName: string
-        centerCity?: string
-        centerEmail?: string
-        centerPhone?: string
-        title: string
-        message: string
-        senderName?: string
-        attachmentName?: string | null
-        attachmentUrl?: string | null
-        createdAt: string
-      }>
-    }>('/centers/admin-messages'),
+    request<{ messages: ApiCenterAdminMessage[] }>('/centers/admin-messages'),
+
+  getCenterConversation: (centerId: string, category?: 'general' | 'payment') =>
+    request<{ messages: ApiCenterAdminMessage[] }>(`/centers/${centerId}/messages${category ? `?category=${category}` : ''}`),
+
+  markCenterMessageRead: (messageId: string, isRead: boolean = true) =>
+    request<{ success: boolean; message: string }>(`/centers/messages/${messageId}/read`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isRead }),
+    }),
+
+  getAdminMessagesUnreadCount: () =>
+    request<{ unreadCount: number }>('/centers/admin-messages/unread-count'),
+
+  getCenterMessagesUnreadCount: (centerId: string) =>
+    request<{ unreadCount: number }>(`/centers/${centerId}/messages/unread-count`),
 
   deleteCenter: (id: string) => request<{ message: string }>(`/centers/${id}`, {
     method: 'DELETE',
