@@ -460,6 +460,7 @@ export async function cancelAppointment(req, res, next) {
         .from('walk_in_queue')
         .update({ status: 'left' })
         .eq('doctor_id', apptData.doctor_id)
+        .eq('queue_date', apptData.appointment_date)
         .eq('queue_number', apptData.queue_number);
     }
 
@@ -469,6 +470,7 @@ export async function cancelAppointment(req, res, next) {
         .from('appointments')
         .update({ status: 'cancelled' })
         .eq('doctor_id', queueData.doctor_id)
+        .eq('appointment_date', queueData.queue_date)
         .eq('queue_number', queueData.queue_number);
     }
 

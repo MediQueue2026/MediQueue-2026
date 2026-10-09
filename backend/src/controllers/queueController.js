@@ -434,16 +434,24 @@ export async function callNextPatient(req, res, next) {
     const scoped = (q) => (centerScope ? q.eq('center_id', centerScope) : q);
 
     const { data: live } = await scoped(supabase
-      .from('walk_in_queue').select('id')
+      .from('walk_in_queue').select('id, doctor_id, queue_date, queue_number, center_id')
       .eq('doctor_id', doctorId).eq('queue_date', today)
       .in('status', ['called', 'in_progress']));
 
     if (live && live.length > 0) {
       await supabase.from('walk_in_queue').update({ status: 'completed' }).in('id', live.map(r => r.id));
+      for (const item of live) {
+        let aptSync = supabase.from('appointments').update({ status: 'completed' })
+          .eq('doctor_id', item.doctor_id)
+          .eq('appointment_date', item.queue_date)
+          .eq('queue_number', item.queue_number);
+        if (item.center_id) aptSync = aptSync.eq('center_id', item.center_id);
+        await aptSync;
+      }
     }
 
     const { data: nextWaiting } = await scoped(supabase
-      .from('walk_in_queue').select('id')
+      .from('walk_in_queue').select('id, doctor_id, queue_date, queue_number, center_id')
       .eq('doctor_id', doctorId).eq('queue_date', today).eq('status', 'waiting'))
       .order('queue_number', { ascending: true })
       .limit(1).maybeSingle();
@@ -454,6 +462,13 @@ export async function callNextPatient(req, res, next) {
         .eq('id', nextWaiting.id)
         .select('*, doctors(series, room_number, users(full_name))')
         .maybeSingle();
+
+      let aptCallSync = supabase.from('appointments').update({ status: 'in_consultation' })
+        .eq('doctor_id', nextWaiting.doctor_id)
+        .eq('appointment_date', nextWaiting.queue_date)
+        .eq('queue_number', nextWaiting.queue_number);
+      if (nextWaiting.center_id) aptCallSync = aptCallSync.eq('center_id', nextWaiting.center_id);
+      await aptCallSync;
 
       if (calledRow && calledRow.sms_phone) {
         const docName = calledRow.doctors?.users?.full_name || 'your doctor';
@@ -502,15 +517,77 @@ export async function updateQueueEntryStatus(req, res, next) {
       res.status(400); throw new Error('Invalid status.');
     }
 
-    const { data, error } = await supabase
+    // Map queue status to appointment status
+    const toApptStatus = (s) => {
+      if (s === 'completed') return 'completed';
+      if (s === 'left') return 'cancelled';
+      if (s === 'called' || s === 'in_progress') return 'in_consultation';
+      if (s === 'waiting') return 'booked';
+      return s;
+    };
+
+    // 1. Try updating walk_in_queue
+    let { data, error } = await supabase
       .from('walk_in_queue')
       .update({ status })
       .eq('id', id)
       .select('*, doctors(series)')
-      .single();
-    if (error) throw error;
+      .maybeSingle();
 
-    res.json({ entry: mapEntry(data) });
+    if (data) {
+      // Synchronize to matching appointments table row
+      const apptStatus = toApptStatus(status);
+      let syncQ = supabase
+        .from('appointments')
+        .update({ status: apptStatus })
+        .eq('doctor_id', data.doctor_id)
+        .eq('appointment_date', data.queue_date)
+        .eq('queue_number', data.queue_number);
+      if (data.center_id) syncQ = syncQ.eq('center_id', data.center_id);
+      await syncQ;
+    } else {
+      // 2. Fallback: Check if ID was an appointment row
+      const { data: apptRow } = await supabase
+        .from('appointments')
+        .select('*, doctors(series)')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (apptRow) {
+        const apptStatus = toApptStatus(status);
+        await supabase
+          .from('appointments')
+          .update({ status: apptStatus })
+          .eq('id', id);
+
+        // Mirror to walk_in_queue
+        const { data: wRow } = await supabase
+          .from('walk_in_queue')
+          .update({ status })
+          .eq('doctor_id', apptRow.doctor_id)
+          .eq('queue_date', apptRow.appointment_date)
+          .eq('queue_number', apptRow.queue_number)
+          .select('*, doctors(series)')
+          .maybeSingle();
+
+        data = wRow || {
+          id: apptRow.id,
+          doctor_id: apptRow.doctor_id,
+          center_id: apptRow.center_id,
+          patient_name: apptRow.patient_name || 'Patient',
+          queue_number: apptRow.queue_number,
+          queue_date: apptRow.appointment_date,
+          status,
+          doctors: apptRow.doctors,
+        };
+      } else {
+        if (error) throw error;
+        res.status(404); throw new Error('Queue entry not found.');
+      }
+    }
+
+    const seriesLetter = (await seriesForDoctorCenter(data.doctor_id, data.center_id)) || data?.doctors?.series || 'A';
+    res.json({ entry: mapEntry(data, seriesLetter) });
   } catch (err) {
     next(err);
   }

@@ -85,25 +85,34 @@ export async function resolveDoctor(doctorId, centerId = null) {
 
   if (!doctor) return null;
 
-  // Postings live in doctor_center_assignments since migration 010. A doctor
-  // created before it has none, and their room/series/status is still on the
-  // doctors row — `posting` stays null and callers use the legacy columns.
+  // Postings live in doctor_center_assignments since migration 010.
+  // We fetch ALL assignments so doctor.assignedCenters always retains the complete list of centers.
   let assignments = [];
   {
-    let q = supabase
+    const { data } = await supabase
       .from('doctor_center_assignments')
-      .select('id, center_id, room_number, series, current_status, delay_minutes, medical_centers(id, name)')
+      .select('id, center_id, room_number, series, current_status, delay_minutes, available_hours, max_appointments_per_hour, medical_centers(id, name)')
       .eq('doctor_id', doctor.id);
-    if (centerId) q = q.eq('center_id', String(centerId));
-    const { data } = await q;
     assignments = data || [];
   }
 
-  // With no centerId we can only pin a posting down when there's exactly one;
-  // guessing between several would put the delay on the wrong branch.
+  // Fallback if doctor predates multi-center assignments table
+  if (assignments.length === 0 && doctor.center_id) {
+    assignments = [{
+      id: `legacy-${doctor.id}`,
+      center_id: doctor.center_id,
+      room_number: doctor.room_number,
+      series: doctor.series,
+      current_status: doctor.current_status,
+      delay_minutes: doctor.delay_minutes,
+      medical_centers: doctor.medical_centers,
+    }];
+  }
+
+  // Resolve target posting: match centerId if provided, or default
   const posting = centerId
-    ? assignments[0] ?? null
-    : assignments.length === 1 ? assignments[0] : null;
+    ? (assignments.find(a => String(a.center_id) === String(centerId)) ?? assignments[0] ?? null)
+    : (assignments.length === 1 ? assignments[0] : (assignments[0] ?? null));
 
   return {
     doctor,

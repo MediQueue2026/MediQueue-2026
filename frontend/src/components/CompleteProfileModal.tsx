@@ -124,28 +124,6 @@ export default function CompleteProfileModal({
           overflowY: 'auto'
         }}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close modal"
-          style={{
-            position: 'absolute',
-            top: 18,
-            right: 18,
-            background: 'rgba(0,0,0,0.05)',
-            border: 'none',
-            borderRadius: '50%',
-            width: 30,
-            height: 30,
-            display: 'grid',
-            placeItems: 'center',
-            cursor: 'pointer',
-            color: 'var(--text-3)'
-          }}
-        >
-          <X size={16} />
-        </button>
-
         {/* Header Tag */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
           <span
@@ -417,30 +395,24 @@ export default function CompleteProfileModal({
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
+              flexDirection: 'column',
+              gap: 8,
               marginTop: 10,
               paddingTop: 14,
               borderTop: '1px solid var(--border)'
             }}
           >
             <button
-              type="button"
-              onClick={onClose}
-              className="btn btn-ghost"
-              style={{ fontSize: 13, color: 'var(--text-4)' }}
-            >
-              Skip for now
-            </button>
-            <button
               type="submit"
               disabled={saving}
               className="btn btn-primary"
-              style={{ minWidth: 150, justifyContent: 'center', fontWeight: 700 }}
+              style={{ width: '100%', height: 44, justifyContent: 'center', fontWeight: 800, fontSize: 14 }}
             >
-              {saving ? 'Saving Details…' : 'Save & Continue'}
+              {saving ? 'Saving Details…' : 'Save & Continue to Dashboard'}
             </button>
+            <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-4)' }}>
+              🔒 Information is securely encrypted and used exclusively for your clinic appointments.
+            </div>
           </div>
         </form>
       </div>
