@@ -57,6 +57,8 @@ export default function AddCenterModal({
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [trackingLocation, setTrackingLocation] = useState(false)
+  const [isGeocoding, setIsGeocoding] = useState(false)
+  const [geocodedMatch, setGeocodedMatch] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [createdCredentials, setCreatedCredentials] = useState<{
     email: string
@@ -114,6 +116,8 @@ export default function AddCenterModal({
       setCreatedCredentials(null)
       setError(null)
       setSubmitted(false)
+      setIsGeocoding(false)
+      setGeocodedMatch(null)
     } else if (isOpen) {
       setName('')
       setRegistrationNumber('')
@@ -134,8 +138,55 @@ export default function AddCenterModal({
       setCreatedCredentials(null)
       setError(null)
       setSubmitted(false)
+      setIsGeocoding(false)
+      setGeocodedMatch(null)
     }
   }, [editCenter, isOpen])
+
+  // Debounced address forward-geocoding to auto-locate pin on map while typing
+  useEffect(() => {
+    if (!isOpen) return
+    const trimmed = address.trim()
+    if (trimmed.length < 4) {
+      setGeocodedMatch(null)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsGeocoding(true)
+        const parts = [trimmed]
+        if (city) parts.push(city)
+        if (province) parts.push(province)
+        parts.push('Sri Lanka')
+        const query = parts.join(', ')
+
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
+          { headers: { 'Accept-Language': 'en' } }
+        )
+        if (!res.ok) return
+        const data = await res.json()
+        if (Array.isArray(data) && data.length > 0) {
+          const found = data[0]
+          const nextLat = Number(parseFloat(found.lat).toFixed(4))
+          const nextLng = Number(parseFloat(found.lon).toFixed(4))
+          if (!isNaN(nextLat) && !isNaN(nextLng)) {
+            setLatitude(nextLat.toString())
+            setLongitude(nextLng.toString())
+            const label = found.display_name ? found.display_name.split(',').slice(0, 2).join(',') : 'Location pinned'
+            setGeocodedMatch(label)
+          }
+        }
+      } catch {
+        // silent fallback - user can still pick pin manually or track GPS
+      } finally {
+        setIsGeocoding(false)
+      }
+    }, 850)
+
+    return () => clearTimeout(timer)
+  }, [address, city, province, isOpen])
 
   const handleCityChange = (val: string) => {
     setCity(val)
@@ -555,9 +606,21 @@ export default function AddCenterModal({
 
             {/* Physical Address */}
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                Official Address <span style={{ color: '#ef4444' }}>*</span>
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Official Address <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                {isGeocoding && (
+                  <span style={{ fontSize: 11, color: '#0D9488', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} /> Auto-finding on map…
+                  </span>
+                )}
+                {!isGeocoding && geocodedMatch && (
+                  <span style={{ fontSize: 11, color: '#0F766E', fontWeight: 600 }}>
+                    📍 Map aligned: {geocodedMatch}
+                  </span>
+                )}
+              </div>
               <input
                 required
                 className="input"

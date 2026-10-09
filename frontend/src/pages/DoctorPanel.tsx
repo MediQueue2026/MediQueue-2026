@@ -62,6 +62,8 @@ export default function DoctorPanel() {
   const [showNotifications, setShowNotifications] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [toast, setToast] = useState<string | null>(null)
+  const [selectedCenterId, setSelectedCenterId] = useState<string | null>(null)
+  const [allAssignedCenters, setAllAssignedCenters] = useState<NonNullable<ApiDoctorSummary['doctor']['assignedCenters']>>([])
   const [appointmentView, setAppointmentView] = useState<'queue' | 'appointments'>('queue')
   const [appointments, setAppointments] = useState<ApiAppointmentRow[]>([])
   const [selectedAppointment, setSelectedAppointment] = useState<ApiAppointmentRow | null>(null)
@@ -167,7 +169,7 @@ export default function DoctorPanel() {
 
   const doctorKey = user?.id ?? null
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; centerId?: string | null }) => {
     if (!doctorKey) {
       // No hardcoded demo UUID fallback here. The old code fell back to
       // 'c1000000-0000-0000-0000-000000000001', so a signed-out or
@@ -178,9 +180,15 @@ export default function DoctorPanel() {
     }
     if (!opts?.silent) setLoading(true)
     try {
-      const data = await api.getDoctorSummary(doctorKey)
+      const centerScope = opts?.centerId !== undefined ? opts.centerId : selectedCenterId
+      const data = await api.getDoctorSummary(doctorKey, centerScope)
       setSummary(data)
       setLoadError(null)
+
+      if (!selectedCenterId && data.doctor.centerId) {
+        setSelectedCenterId(data.doctor.centerId)
+      }
+
       // Track the doctor's own status so the shift toggle reflects reality.
       const status = data.doctor.currentStatus
       setShift(status === 'active' || status === 'delayed' ? 'online' : (status as Shift))
@@ -200,9 +208,33 @@ export default function DoctorPanel() {
     } finally {
       if (!opts?.silent) setLoading(false)
     }
-  }, [doctorKey])
+  }, [doctorKey, selectedCenterId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (summary?.doctor?.assignedCenters && summary.doctor.assignedCenters.length > 0) {
+      setAllAssignedCenters(prev => {
+        const map = new Map<string, typeof summary.doctor.assignedCenters[0]>()
+        prev.forEach(c => map.set(c.centerId, c))
+        summary.doctor.assignedCenters.forEach(c => map.set(c.centerId, c))
+        return Array.from(map.values())
+      })
+    }
+  }, [summary?.doctor?.assignedCenters])
+
+  const doctor = summary?.doctor ?? null
+  const stats = summary?.stats ?? null
+  const activePatient = summary?.activePatient ?? null
+  const queueList = summary?.queueList ?? []
+  const effectiveCenterId = selectedCenterId || doctor?.centerId || null
+  const centersList = allAssignedCenters.length > 0 ? allAssignedCenters : (doctor?.assignedCenters || [])
+
+  const handleSelectCenter = (centerId: string) => {
+    if (centerId === effectiveCenterId) return
+    setSelectedCenterId(centerId)
+    load({ silent: false, centerId })
+  }
 
   useEffect(() => {
     const doctorId = summary?.doctor.id
@@ -210,7 +242,7 @@ export default function DoctorPanel() {
     let cancelled = false
     setAppointmentsLoading(true)
     setAppointmentsError(null)
-    api.getAppointments({ doctorId })
+    api.getAppointments({ doctorId, centerId: effectiveCenterId || undefined })
       .then(result => {
         if (!cancelled) setAppointments(result.appointments || [])
       })
@@ -221,18 +253,13 @@ export default function DoctorPanel() {
         if (!cancelled) setAppointmentsLoading(false)
       })
     return () => { cancelled = true }
-  }, [summary?.doctor.id])
+  }, [summary?.doctor.id, effectiveCenterId])
 
   // Live polling so tokens issued at the reception desk appear here.
   useEffect(() => {
     const t = setInterval(() => { load({ silent: true }) }, POLL_MS)
     return () => clearInterval(t)
   }, [load])
-
-  const doctor = summary?.doctor ?? null
-  const stats = summary?.stats ?? null
-  const activePatient = summary?.activePatient ?? null
-  const queueList = summary?.queueList ?? []
 
   const activeDelay = useMemo(() => delayAlerts.find(a => a.isActive) ?? null, [delayAlerts])
 
@@ -242,7 +269,7 @@ export default function DoctorPanel() {
     const previous = shift
     setShift(newShift)
     try {
-      await api.updateDoctorStatus(doctor.id, { currentStatus: newShift, centerId: doctor.centerId })
+      await api.updateDoctorStatus(doctor.id, { currentStatus: newShift, centerId: effectiveCenterId })
       await load({ silent: true })
     } catch (err) {
       setShift(previous) // Don't leave the toggle claiming a state the server rejected.
@@ -263,7 +290,7 @@ export default function DoctorPanel() {
     if (!doctor) throw new Error('Your doctor profile has not loaded yet.')
     // Deliberately not caught: DelayAlertModal awaits this and renders the
     // failure inline, instead of showing "Alert Dispatched" regardless.
-    const res = await api.createDelayAlert(doctor.id, { delayMinutes, reason, centerId: doctor.centerId })
+    const res = await api.createDelayAlert(doctor.id, { delayMinutes, reason, centerId: effectiveCenterId })
     setDelayAlerts(prev => [res.alert, ...prev.filter(a => a.id !== res.alert.id)])
     showToast(
       res.notifiedCount > 0
@@ -287,7 +314,7 @@ export default function DoctorPanel() {
   const handleCallNext = async () => {
     if (!doctor) return
     try {
-      await api.callNext(doctor.id, doctor.centerId)
+      await api.callNext(doctor.id, effectiveCenterId)
       await load({ silent: true })
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : 'Could not call the next patient.')
@@ -637,29 +664,67 @@ export default function DoctorPanel() {
       )}
 
       {/* ── ASSIGNED CENTERS STRIP ── */}
-      {doctor?.assignedCenters && doctor.assignedCenters.length > 0 && (
+      {centersList && centersList.length > 0 && (
         <div style={{
-          margin: '14px 24px 0', padding: '12px 18px',
-          background: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(12px)',
+          margin: '14px 24px 0', padding: '10px 18px',
+          background: 'rgba(255, 255, 255, 0.45)', backdropFilter: 'blur(12px)',
           border: '1px solid var(--border-md)', borderRadius: 14,
-          display: 'flex', alignItems: 'center', gap: 14,
+          display: 'flex', alignItems: 'center', gap: 12,
           overflowX: 'auto'
         }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
             My Centers
           </div>
-          <div style={{ width: 1, height: 20, background: 'var(--border-md)' }} />
-          {doctor.assignedCenters.map(center => (
-            <div key={center.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, padding: '4px 10px', background: 'rgba(255,255,255,0.7)', border: '1px solid var(--border-md)', borderRadius: 8 }}>
-              <Building2 size={14} color="var(--text-3)" />
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>{center.centerName}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-4)' }}>
-                  Room {center.roomNumber || '—'} · Series {center.series || '—'}
+          <div style={{ width: 1, height: 22, background: 'var(--border-md)' }} />
+          {centersList.map(center => {
+            const isSelected = center.centerId === effectiveCenterId
+            return (
+              <button
+                key={center.id}
+                type="button"
+                onClick={() => handleSelectCenter(center.centerId)}
+                title={`Switch console to ${center.centerName}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexShrink: 0,
+                  padding: '6px 14px',
+                  background: isSelected ? 'linear-gradient(135deg, rgba(13,148,136,0.14) 0%, rgba(15,118,110,0.2) 100%)' : 'rgba(255,255,255,0.7)',
+                  border: isSelected ? '2px solid #0D9488' : '1px solid var(--border-md)',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  boxShadow: isSelected ? '0 4px 12px rgba(13,148,136,0.18)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <div style={{
+                  width: 28, height: 28, borderRadius: 8,
+                  background: isSelected ? '#0D9488' : 'rgba(0,0,0,0.05)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: isSelected ? '#ffffff' : 'var(--text-3)'
+                }}>
+                  <Building2 size={15} />
                 </div>
-              </div>
-            </div>
-          ))}
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: isSelected ? 800 : 700, color: isSelected ? '#0F766E' : 'var(--text-1)' }}>
+                      {center.centerName}
+                    </span>
+                    {isSelected && (
+                      <span style={{ fontSize: 9.5, fontWeight: 800, textTransform: 'uppercase', background: '#0D9488', color: '#ffffff', padding: '1px 6px', borderRadius: 6 }}>
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: isSelected ? '#0F766E' : 'var(--text-4)' }}>
+                    Room {center.roomNumber || '—'} · Series {center.series || '—'}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
 

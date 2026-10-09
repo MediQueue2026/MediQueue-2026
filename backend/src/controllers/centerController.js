@@ -248,13 +248,17 @@ export async function createCenter(req, res, next) {
     const finalCenter = createdCenter ? mapDbCenterToPublic({ ...createdCenter }) : { ...payload, approvalStatus };
 
     // Link the requesting receptionist to the center they're setting up, as
-    // its manager (already confirmed above that they don't manage one yet).
+    // its manager and sync the phone number to their user record.
     if (!isAdmin && req.user?.id && createdCenter?.id) {
       try {
-        await supabase.from('users').update({
+        const updatePayload = {
           center_id: createdCenter.id,
           rejection_reason: null,
-        }).eq('id', req.user.id);
+        };
+        if (phone) {
+          updatePayload.phone = String(phone).trim();
+        }
+        await supabase.from('users').update(updatePayload).eq('id', req.user.id);
       } catch (_) {
         // Non-critical — worst case the receptionist links manually via re-request.
       }
@@ -443,6 +447,18 @@ export async function updateCenter(req, res, next) {
         }]);
       } catch (docErr) {
         console.warn('[updateCenter] Failed to save document:', docErr?.message);
+      }
+    }
+
+    if (req.body.phone) {
+      try {
+        const cleanPhone = String(req.body.phone).trim();
+        await supabase
+          .from('users')
+          .update({ phone: cleanPhone })
+          .eq('center_id', id);
+      } catch (phoneErr) {
+        console.warn('[updateCenter] Failed to sync phone to user:', phoneErr?.message);
       }
     }
 

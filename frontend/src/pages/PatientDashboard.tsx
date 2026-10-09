@@ -225,11 +225,22 @@ export default function PatientDashboard() {
 
   // Find active appointment / token dynamically for TODAY's session
   const activeAppointment = useMemo(() => {
-    return (myAppointments || []).find(a =>
-      a &&
-      ((a.appointmentDate || '').slice(0, 10) === todayIsoDate) &&
-      (a.status === 'waiting' || a.status === 'in_consultation' || a.status === 'booked')
-    ) || null
+    const currentHour = new Date().getHours()
+    return (myAppointments || []).find(a => {
+      if (!a) return false
+      const isToday = (a.appointmentDate || '').slice(0, 10) === todayIsoDate
+      if (!isToday) return false
+      // Exclude completed, cancelled, and no-show
+      if (a.status === 'completed' || a.status === 'cancelled' || (a as any).status === 'no_show') return false
+      if (a.status === 'in_consultation') return true
+      if (a.status === 'waiting' || a.status === 'booked') {
+        if (a.status === 'booked' && typeof a.slotHour === 'number' && a.slotHour < currentHour - 2) {
+          return false
+        }
+        return true
+      }
+      return false
+    }) || null
   }, [myAppointments, todayIsoDate])
 
   // Filter ONLY upcoming appointments (exclude completed, cancelled, no-show, and past due appointments)
@@ -1113,7 +1124,7 @@ export default function PatientDashboard() {
           {nav === 'subscriptions' && (
             <div className="card glass-form-card" style={{ padding: 24 }}>
               <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', marginBottom: 6 }}>Subscribed Doctors & Delay Feed</h3>
-              <p style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 20 }}>Receive real-time delay notifications, room changes & clinic updates (BR-05 / FR-07)</p>
+              <p style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 20 }}>Receive real-time delay notifications, room changes & clinic updates</p>
 
               <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 20 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
