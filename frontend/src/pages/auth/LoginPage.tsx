@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import {
-  Activity, AlertCircle, ArrowLeft, ArrowRight, Building2, CloudOff, FlaskConical,
+  AlertCircle, ArrowLeft, ArrowRight, Building2, CloudOff, FlaskConical,
 } from 'lucide-react'
 import AddCenterModal from '../../components/AddCenterModal'
 import { api, ApiError, ApiOfflineError } from '../../lib/api'

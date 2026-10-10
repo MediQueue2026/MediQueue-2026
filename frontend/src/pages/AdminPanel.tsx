@@ -4,10 +4,10 @@ import { useNavigate } from 'react-router-dom'
 
 import {
   Activity, Building2, FileText, LogOut, Menu, Plus,
-  Search, Settings, Ticket, Users, X, RefreshCw, CheckCircle2,
+  Search, Ticket, Users, X, RefreshCw, CheckCircle2,
   AlertCircle, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
   Pencil, Pause, Play, Trash2, RotateCcw, Check, CornerDownLeft, Bell,
-  ChevronDown
+  ChevronDown, CreditCard, Clock
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -22,6 +22,7 @@ const NAV_ADMIN = [
   { id: 'health', icon: <Activity size={15} />, label: 'System Health' },
   { id: 'roles', icon: <Users size={15} />, label: 'Staff & Roles' },
   { id: 'clinics', icon: <Building2 size={15} />, label: 'Medical Centers' },
+  { id: 'billing', icon: <CreditCard size={15} />, label: 'Billing & Payments' },
   { id: 'api', icon: <MessageSquare size={15} />, label: 'Message Centers' },
   { id: 'logs', icon: <FileText size={15} />, label: 'Audit Logs' },
 ]
@@ -85,6 +86,101 @@ const mapApiUserToStaffMember = (user: ApiUser): StaffMember => ({
   currentStatus: user.currentStatus ?? null,
   createdAt: user.createdAt,
 })
+
+function AdminHoursDisplay({ rawHours }: { rawHours?: string | null }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!rawHours || !rawHours.trim()) {
+    return <span>—</span>
+  }
+
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  let schedule: { day: string; isOpen: boolean; openTime: string; closeTime: string }[] | null = null
+
+  if (rawHours.includes('|') || rawHours.includes(':')) {
+    const parts = rawHours.split('|').map(s => s.trim())
+    const map = new Map<string, { isOpen: boolean; openTime: string; closeTime: string }>()
+    parts.forEach(p => {
+      const match = p.match(/^([A-Za-z]+)\s*:\s*(.+)$/)
+      if (match) {
+        const prefix = match[1].toLowerCase()
+        const timePart = match[2].trim()
+        if (timePart.toLowerCase().includes('close')) {
+          map.set(prefix, { isOpen: false, openTime: '', closeTime: '' })
+        } else {
+          const times = timePart.split(/[-–]/).map(t => t.trim())
+          map.set(prefix, { isOpen: true, openTime: times[0] || '', closeTime: times[1] || '' })
+        }
+      }
+    })
+    if (map.size > 0) {
+      schedule = days.map(d => {
+        const key = d.toLowerCase().slice(0, 3)
+        const found = map.get(key) || map.get(d.toLowerCase())
+        if (found) return { day: d, ...found }
+        return { day: d, isOpen: d !== 'Sunday', openTime: '08:00 AM', closeTime: '05:00 PM' }
+      })
+    }
+  }
+
+  if (!schedule) {
+    return <strong>{rawHours}</strong>
+  }
+
+  const todayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date().getDay()]
+  const todaySchedule = schedule.find(s => s.day === todayName) || schedule[0]
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <strong>
+          Today ({todayName}): {todaySchedule.isOpen ? `${todaySchedule.openTime} – ${todaySchedule.closeTime}` : 'Closed'}
+        </strong>
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 2, color: 'var(--blue)',
+            fontSize: 11, fontWeight: 700, padding: '0 4px',
+          }}
+        >
+          {expanded ? 'Hide' : 'Schedule'}
+          <ChevronDown size={12} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 100, minWidth: 240,
+          background: '#ffffff', border: '1px solid var(--border-md)',
+          borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
+        }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', marginBottom: 2 }}>
+            Weekly Schedule
+          </div>
+          {schedule.map(item => {
+            const isToday = item.day === todayName
+            return (
+              <div
+                key={item.day}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  fontSize: 11.5, padding: '2px 0',
+                  fontWeight: isToday ? 700 : 500,
+                  color: isToday ? 'var(--blue-dark)' : 'var(--text-2)',
+                }}
+              >
+                <span>{item.day}</span>
+                <span>{item.isOpen ? `${item.openTime} – ${item.closeTime}` : 'Closed'}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const DOCTOR_SPECIALISATIONS = [
   'General Medicine', 'Cardiology', 'Pediatrics', 'Orthopedics',
@@ -445,6 +541,122 @@ export default function AdminPanel() {
   const [replyText, setReplyText] = useState('')
   const [replySending, setReplySending] = useState(false)
 
+  // Message Center composer state
+  const [adminSelectedCenterId, setAdminSelectedCenterId] = useState('all')
+  const [adminMessageSubject, setAdminMessageSubject] = useState('')
+  const [adminMessageBody, setAdminMessageBody] = useState('')
+  const [adminMessageSending, setAdminMessageSending] = useState(false)
+  const [adminMessageSuccess, setAdminMessageSuccess] = useState<string | null>(null)
+
+  // Billing & Payments state
+  const [billingFilter, setBillingFilter] = useState<'all' | 'verified' | 'pending' | 'flagged'>('all')
+  const [remittanceRecords, setRemittanceRecords] = useState([
+    {
+      id: 'rem-1',
+      centerId: 'c1',
+      centerName: 'MediQueue Central Clinic',
+      city: 'Colombo 07',
+      plan: 'Professional Tier',
+      month: 'October 2026',
+      amount: 'LKR 15,000',
+      refNo: 'BOC-992144',
+      submittedAt: '2026-10-02',
+      status: 'pending' as 'pending' | 'verified' | 'flagged',
+      slipUrl: '#',
+    },
+    {
+      id: 'rem-2',
+      centerId: 'c2',
+      centerName: 'MediQueue North Branch',
+      city: 'Kandy',
+      plan: 'Professional Tier',
+      month: 'October 2026',
+      amount: 'LKR 15,000',
+      refNo: 'COMB-441208',
+      submittedAt: '2026-10-01',
+      status: 'verified' as 'pending' | 'verified' | 'flagged',
+      slipUrl: '#',
+    },
+    {
+      id: 'rem-3',
+      centerId: 'c3',
+      centerName: 'Apex Family Care Center',
+      city: 'Galle',
+      plan: 'Standard Tier',
+      month: 'October 2026',
+      amount: 'LKR 15,000',
+      refNo: 'HNB-771923',
+      submittedAt: '2026-10-04',
+      status: 'pending' as 'pending' | 'verified' | 'flagged',
+      slipUrl: '#',
+    },
+    {
+      id: 'rem-4',
+      centerId: 'c4',
+      centerName: 'Sunrise Medical Clinic',
+      city: 'Negombo',
+      plan: 'Professional Tier',
+      month: 'September 2026',
+      amount: 'LKR 15,000',
+      refNo: 'BOC-331092',
+      submittedAt: '2026-09-02',
+      status: 'verified' as 'pending' | 'verified' | 'flagged',
+      slipUrl: '#',
+    },
+  ])
+
+  const handleVerifyRemittance = (recordId: string) => {
+    setRemittanceRecords(prev => prev.map(r => r.id === recordId ? { ...r, status: 'verified' } : r))
+  }
+
+  const handleFlagRemittance = (recordId: string) => {
+    setRemittanceRecords(prev => prev.map(r => r.id === recordId ? { ...r, status: 'flagged' } : r))
+  }
+
+  const handleSendAdminNotice = async () => {
+    if (!adminMessageBody.trim()) {
+      alert('Please enter a message to send.')
+      return
+    }
+    setAdminMessageSending(true)
+    try {
+      const targetCenters = centers.length > 0 ? centers : (await api.getCenters({ all: true })).centers
+      if (adminSelectedCenterId === 'all') {
+        if (targetCenters.length === 0) {
+          alert('No medical centers found to send messages to.')
+          setAdminMessageSending(false)
+          return
+        }
+        await Promise.all(
+          targetCenters.map(c =>
+            api.sendCenterMessage(c.id, {
+              title: adminMessageSubject.trim() || undefined,
+              message: adminMessageBody.trim(),
+              category: 'general',
+            })
+          )
+        )
+        setAdminMessageSuccess(`Notice successfully broadcast to all ${targetCenters.length} medical centers!`)
+      } else {
+        const center = targetCenters.find(c => c.id === adminSelectedCenterId)
+        await api.sendCenterMessage(adminSelectedCenterId, {
+          title: adminMessageSubject.trim() || undefined,
+          message: adminMessageBody.trim(),
+          category: 'general',
+        })
+        setAdminMessageSuccess(`Notice successfully sent to ${center?.name || 'the medical center'}!`)
+      }
+      setAdminMessageSubject('')
+      setAdminMessageBody('')
+      fetchCenterInquiries()
+      setTimeout(() => setAdminMessageSuccess(null), 4000)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not send notice. Please try again.')
+    } finally {
+      setAdminMessageSending(false)
+    }
+  }
+
   const fetchUnreadCount = async () => {
     try {
       const res = await api.getAdminMessagesUnreadCount()
@@ -472,7 +684,16 @@ export default function AdminPanel() {
   const handleMarkAsRead = async (messageId: string) => {
     try {
       await api.markCenterMessageRead(messageId, true)
-      setCenterInquiries(prev => prev.map(m => m.id === messageId ? { ...m, isRead: true } : m))
+      setCenterInquiries(prev => prev.map(m => {
+        if (m.id === messageId) return { ...m, isRead: true }
+        if (m.replies) {
+          return {
+            ...m,
+            replies: m.replies.map(r => r.id === messageId ? { ...r, isRead: true } : r)
+          }
+        }
+        return m
+      }))
       setAdminUnreadCount(c => Math.max(0, c - 1))
       fetchUnreadCount()
     } catch (err) {
@@ -483,7 +704,16 @@ export default function AdminPanel() {
   const handleMarkAsUnread = async (messageId: string) => {
     try {
       await api.markCenterMessageRead(messageId, false)
-      setCenterInquiries(prev => prev.map(m => m.id === messageId ? { ...m, isRead: false } : m))
+      setCenterInquiries(prev => prev.map(m => {
+        if (m.id === messageId) return { ...m, isRead: false }
+        if (m.replies) {
+          return {
+            ...m,
+            replies: m.replies.map(r => r.id === messageId ? { ...r, isRead: false } : r)
+          }
+        }
+        return m
+      }))
       setAdminUnreadCount(c => c + 1)
       fetchUnreadCount()
     } catch (err) {
@@ -512,13 +742,22 @@ export default function AdminPanel() {
 
   useEffect(() => {
     fetchUnreadCount()
+    api.getCenters({ all: true }).then(r => {
+      if (r?.centers) setCenters(r.centers)
+    }).catch(err => console.warn('Could not load centers on mount', err))
+
     const timer = setInterval(fetchUnreadCount, 25000)
     return () => clearInterval(timer)
   }, [])
 
   useEffect(() => {
-    if (nav === 'api') {
+    if (nav === 'api' || nav === 'billing') {
       fetchCenterInquiries()
+      if (centers.length === 0) {
+        api.getCenters({ all: true }).then(r => {
+          if (r?.centers) setCenters(r.centers)
+        }).catch(err => console.warn('Could not load centers', err))
+      }
     }
   }, [nav])
 
@@ -795,7 +1034,12 @@ export default function AdminPanel() {
   const auditLogTypeFilters = ['All Events', ...allowedAuditLogTypes]
   const filteredAuditLogs = (auditLogFilter === 'All Events'
     ? normalizedAuditLogs.filter(log => allowedAuditLogTypes.includes(log.event_type as typeof allowedAuditLogTypes[number]))
-    : normalizedAuditLogs.filter(log => log.event_type === auditLogFilter && allowedAuditLogTypes.includes(log.event_type as typeof allowedAuditLogTypes[number])))
+    : normalizedAuditLogs.filter(log => {
+        if (auditLogFilter === 'profile_updated') {
+          return log.event_type === 'profile_updated' || (log.event_type === 'center_edit' && log.action.toLowerCase().includes('profile updated')) || (log.event_type === 'center_edit' && log.action.toLowerCase().includes('medical center updated'))
+        }
+        return log.event_type === auditLogFilter && allowedAuditLogTypes.includes(log.event_type as typeof allowedAuditLogTypes[number])
+      }))
 
   const auditLogBadgeStyles: Record<string, { bg: string; border: string; color: string }> = {
     signup: { bg: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.22)', color: '#059669' },
@@ -1096,8 +1340,6 @@ export default function AdminPanel() {
         </div>
         <div style={{ marginTop: 'auto' }}>
           <hr className="divider" style={{ margin: '0 0 12px' }} />
-
-          <button className="nav-link"><Settings size={14} />Platform Settings</button>
           <button
             className="nav-link"
             onClick={handleSignOut}
@@ -1281,31 +1523,7 @@ export default function AdminPanel() {
                        </div>
                     </div>
 
-                    {/* Queue Performance */}
-                    <div className="card glass-form-card" style={{ padding: 24, background: 'linear-gradient(145deg, #ffffff, rgba(255,255,255,0.6))' }}>
-                       <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Ticket size={18} color="#F59E0B" /> Queue Performance
-                       </h3>
-                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
-                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Currently Waiting</span>
-                             <span style={{ fontSize: 15, fontWeight: 800, color: '#F59E0B' }}>{systemStats.queue.waitingNow}</span>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
-                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>In Progress / Called</span>
-                             <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--blue)' }}>{systemStats.queue.inProgressNow}</span>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(30,41,59,0.02)', padding: '10px 14px', borderRadius: 10 }}>
-                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Completed Today</span>
-                             <span style={{ fontSize: 15, fontWeight: 800, color: '#10B981' }}>{systemStats.queue.completedToday}</span>
-                          </div>
-                          <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px dashed var(--border-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-4)' }}>All Time Tokens</span>
-                            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-3)', background: 'rgba(148,163,184,0.1)', padding: '2px 8px', borderRadius: 6 }}>{systemStats.queue.totalAllTime.toLocaleString()}</span>
-                          </div>
-                       </div>
-                    </div>
-                  </div>
+                   </div>
                 </>
               ) : (
                  <div style={{ padding: '60px 0', textAlign: 'center' }}>
@@ -2143,8 +2361,8 @@ export default function AdminPanel() {
                         </div>
                         <StatusBadge status={c.status === 'maintenance' ? 'maintenance' : c.status === 'closed' ? 'down' : 'operational'} />
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, background: 'var(--blue-dim)', padding: 12, borderRadius: 10, fontSize: 12, marginBottom: 14 }}>
-                        <div><span style={{ color: 'var(--text-4)' }}>Hours:</span> <strong>{c.opening_hours}</strong></div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 8, background: 'var(--blue-dim)', padding: 12, borderRadius: 10, fontSize: 12, marginBottom: 14 }}>
+                        <div><span style={{ color: 'var(--text-4)' }}>Hours:</span> <AdminHoursDisplay rawHours={c.opening_hours} /></div>
                         <div><span style={{ color: 'var(--text-4)' }}>Phone:</span> <strong>{c.phone || '—'}</strong></div>
                         <div style={{ gridColumn: '1/-1' }}><span style={{ color: 'var(--text-4)' }}>Email:</span> <strong>{c.email || '—'}</strong></div>
                         {c.services && c.services.length > 0 && (
@@ -2238,40 +2456,73 @@ export default function AdminPanel() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                    Target Audience
+                    Select Medical Center <span style={{ color: '#ef4444' }}>*</span>
                   </label>
-                  <select className="input" style={{ height: 44, fontSize: 14 }}>
-                    <option value="all">All Users</option>
-                    <option value="patients">Patients Only</option>
-                    <option value="doctors">Doctors Only</option>
-                    <option value="receptionists">Receptionists Only</option>
-                    <option value="staff">All Staff (Doctors & Receptionists)</option>
+                  <select
+                    className="input"
+                    value={adminSelectedCenterId}
+                    onChange={e => setAdminSelectedCenterId(e.target.value)}
+                    style={{ height: 44, fontSize: 14 }}
+                  >
+                    <option value="all">📢 All Medical Centers (Broadcast Announcement)</option>
+                    {centers.map(c => (
+                      <option key={c.id} value={c.id}>🏥 {c.name} {c.city ? `(${c.city})` : ''}</option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                    Message Content
+                    Notice Heading / Subject
                   </label>
-                  <textarea
+                  <input
                     className="input"
-                    placeholder="Type your message here... (e.g., The system will be down for maintenance at midnight)"
-                    style={{ minHeight: 120, fontSize: 14, resize: 'vertical', padding: '12px 14px' }}
+                    placeholder="e.g. Scheduled platform maintenance / Inspection notice"
+                    value={adminMessageSubject}
+                    onChange={e => setAdminMessageSubject(e.target.value)}
+                    style={{ height: 42, fontSize: 14 }}
                   />
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                  <button className="btn btn-primary" onClick={() => setShowBroadcastModal(true)} style={{ gap: 8, height: 42, padding: '0 20px', fontSize: 14 }}>
-                    <Send size={16} /> Send Message
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
+                    Message Content <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <textarea
+                    className="input"
+                    placeholder="Type the message to deliver directly to the medical center's receptionist desk and doctors…"
+                    value={adminMessageBody}
+                    onChange={e => setAdminMessageBody(e.target.value)}
+                    style={{ minHeight: 110, fontSize: 14, resize: 'vertical', padding: '12px 14px' }}
+                  />
+                </div>
+
+                {adminMessageSuccess && (
+                  <div style={{
+                    background: '#ecfdf5', border: '1px solid #6ee7b7',
+                    borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#047857',
+                    display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+                  }}>
+                    <CheckCircle2 size={16} /> {adminMessageSuccess}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleSendAdminNotice}
+                    disabled={adminMessageSending || !adminMessageBody.trim()}
+                    style={{ gap: 8, height: 42, padding: '0 22px', fontSize: 14 }}
+                  >
+                    <Send size={16} /> {adminMessageSending ? 'Sending Notice…' : 'Send Message to Center'}
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* INCOMING MESSAGES & UPLOADS FROM MEDICAL CENTERS (2-Column Split: General vs Payment) */}
+            {/* INCOMING MESSAGES & UPLOADS FROM MEDICAL CENTERS (General Inquiries) */}
             {(() => {
               const generalInquiries = centerInquiries.filter(i => (i.category || 'general') === 'general')
-              const paymentInquiries = centerInquiries.filter(i => i.category === 'payment')
 
               const renderInquiryColumn = (inquiriesList: ApiCenterAdminMessage[], emptyLabel: string) => {
                 if (loadingInquiries) {
@@ -2285,7 +2536,11 @@ export default function AdminPanel() {
                   )
                 }
 
-                const grouped = inquiriesList.reduce<Record<string, ApiCenterAdminMessage[]>>((acc, inq) => {
+                const sortedInquiries = [...inquiriesList].sort(
+                  (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+                )
+
+                const grouped = sortedInquiries.reduce<Record<string, ApiCenterAdminMessage[]>>((acc, inq) => {
                   const d = inq.createdAt
                     ? new Date(inq.createdAt).toLocaleDateString('en-US', {
                         weekday: 'short',
@@ -2331,6 +2586,15 @@ export default function AdminPanel() {
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                   <span style={{ fontWeight: 800, color: '#6D28D9', fontSize: 13.5 }}>{inq.centerName}</span>
+                                  {inq.senderRole === 'admin' ? (
+                                    <span style={{ fontSize: 10.5, background: 'rgba(37, 99, 235, 0.12)', color: '#2563EB', padding: '2px 7px', borderRadius: 5, fontWeight: 800, textTransform: 'uppercase' }}>
+                                      🛡️ Sent by Admin
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: 10.5, background: 'rgba(13, 148, 136, 0.12)', color: '#0D9488', padding: '2px 7px', borderRadius: 5, fontWeight: 800, textTransform: 'uppercase' }}>
+                                      📥 Incoming Inquiry
+                                    </span>
+                                  )}
                                   {inq.centerCity && (
                                     <span style={{ fontSize: 10.5, background: 'rgba(139,92,246,0.1)', color: '#7C3AED', padding: '2px 7px', borderRadius: 5, fontWeight: 700 }}>
                                       {inq.centerCity}
@@ -2369,95 +2633,165 @@ export default function AdminPanel() {
                                 </div>
                               )}
 
-                              {/* Threaded Admin Replies (if any) */}
-                              {inq.replies && inq.replies.length > 0 && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #60A5FA' }}>
-                                  {inq.replies.map(reply => (
-                                    <div key={reply.id} style={{
-                                      padding: '8px 12px', borderRadius: 8, background: 'rgba(59, 130, 246, 0.05)',
-                                      border: '1px solid rgba(59, 130, 246, 0.15)', display: 'flex', flexDirection: 'column', gap: 3
-                                    }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                                        <span style={{ fontSize: 10.5, fontWeight: 800, color: '#2563EB', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                          🛡️ System Admin Reply
-                                        </span>
-                                        <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
-                                          {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                                        </span>
-                                      </div>
-                                      <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
-                                        {reply.message}
-                                      </div>
+                              {/* Action Buttons & Threaded Replies */}
+                              {inq.senderRole === 'admin' ? (
+                                <>
+                                  {/* Threaded Clinic Replies to this Admin message */}
+                                  {inq.replies && inq.replies.length > 0 && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #10B981' }}>
+                                      {inq.replies.map(reply => (
+                                        <div key={reply.id} style={{
+                                          padding: '8px 12px', borderRadius: 8, background: 'rgba(16, 185, 129, 0.05)',
+                                          border: '1px solid rgba(16, 185, 129, 0.2)', display: 'flex', flexDirection: 'column', gap: 4
+                                        }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                            <span style={{ fontSize: 10.5, fontWeight: 800, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                              🏥 {reply.senderName || inq.centerName} (Receptionist Reply)
+                                            </span>
+                                            <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                                              {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                            </span>
+                                          </div>
+                                          <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                                            {reply.message}
+                                          </div>
+                                          {/* Mark as Read / Unread controls for Receptionist's Reply */}
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                                            {reply.isRead ? (
+                                              <>
+                                                <span style={{
+                                                  display: 'inline-flex', alignItems: 'center', gap: 3, padding: '3px 8px',
+                                                  borderRadius: 5, background: 'rgba(16, 185, 129, 0.1)', color: '#059669',
+                                                  fontSize: 11, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)'
+                                                }}>
+                                                  <Check size={11} /> Read
+                                                </span>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleMarkAsUnread(reply.id)}
+                                                  style={{
+                                                    display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px',
+                                                    borderRadius: 5, background: '#1E3A8A', color: '#fff', fontSize: 11,
+                                                    fontWeight: 700, border: 'none', cursor: 'pointer',
+                                                    boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)'
+                                                  }}
+                                                >
+                                                  <RotateCcw size={10} /> Mark as Unread
+                                                </button>
+                                              </>
+                                            ) : (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleMarkAsRead(reply.id)}
+                                                style={{
+                                                  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px',
+                                                  borderRadius: 5, background: '#2563EB', color: '#fff', fontSize: 11,
+                                                  fontWeight: 700, border: 'none', cursor: 'pointer',
+                                                  boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
+                                                }}
+                                              >
+                                                <Check size={11} /> Mark as Read
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
                                     </div>
-                                  ))}
-                                </div>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  {/* Threaded Admin Replies (if any) */}
+                                  {inq.replies && inq.replies.length > 0 && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #60A5FA' }}>
+                                      {inq.replies.map(reply => (
+                                        <div key={reply.id} style={{
+                                          padding: '8px 12px', borderRadius: 8, background: 'rgba(59, 130, 246, 0.05)',
+                                          border: '1px solid rgba(59, 130, 246, 0.15)', display: 'flex', flexDirection: 'column', gap: 3
+                                        }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                            <span style={{ fontSize: 10.5, fontWeight: 800, color: '#2563EB', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                              🛡️ System Admin Reply
+                                            </span>
+                                            <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                                              {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                            </span>
+                                          </div>
+                                          <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                                            {reply.message}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Action Buttons for incoming clinic inquiry: 1. Reply (Purple), 2. Mark as Read (Blue) / Read (Green), 3. Mark as Unread (Navy Blue) */}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 4, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                                    {/* 1. Reply Button (Purple) */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReplyingToId(replyingToId === inq.id ? null : inq.id)
+                                        setReplyText('')
+                                      }}
+                                      style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                        borderRadius: 6, background: '#7C3AED', color: '#fff', fontSize: 11.5,
+                                        fontWeight: 700, border: 'none', cursor: 'pointer',
+                                        boxShadow: '0 2px 4px rgba(124, 58, 237, 0.2)', transition: 'background 0.2s'
+                                      }}
+                                      onMouseEnter={e => e.currentTarget.style.background = '#6D28D9'}
+                                      onMouseLeave={e => e.currentTarget.style.background = '#7C3AED'}
+                                    >
+                                      <CornerDownLeft size={12} /> Reply
+                                    </button>
+
+                                    {/* 2. Mark as Read (Blue) / Read (Green) */}
+                                    {inq.isRead ? (
+                                      <span style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px',
+                                        borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669',
+                                        fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)'
+                                      }}>
+                                        <Check size={13} /> Read
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkAsRead(inq.id)}
+                                        style={{
+                                          display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                          borderRadius: 6, background: '#2563EB', color: '#fff', fontSize: 11.5,
+                                          fontWeight: 700, border: 'none', cursor: 'pointer',
+                                          boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)', transition: 'background 0.2s'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = '#1D4ED8'}
+                                        onMouseLeave={e => e.currentTarget.style.background = '#2563EB'}
+                                      >
+                                        <Check size={12} /> Mark as Read
+                                      </button>
+                                    )}
+
+                                    {/* 3. Mark as Unread (Navy Blue) */}
+                                    {inq.isRead && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkAsUnread(inq.id)}
+                                        style={{
+                                          display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                          borderRadius: 6, background: '#1E3A8A', color: '#fff', fontSize: 11.5,
+                                          fontWeight: 700, border: 'none', cursor: 'pointer',
+                                          boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)', transition: 'background 0.2s'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = '#172554'}
+                                        onMouseLeave={e => e.currentTarget.style.background = '#1E3A8A'}
+                                      >
+                                        <RotateCcw size={12} /> Mark as Unread
+                                      </button>
+                                    )}
+                                  </div>
+                                </>
                               )}
-
-                              {/* Action Buttons: 1. Reply (Purple), 2. Mark as Read (Blue) / Read (Green), 3. Mark as Unread (Navy Blue) */}
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 4, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
-                                {/* 1. Reply Button (Purple) */}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setReplyingToId(replyingToId === inq.id ? null : inq.id)
-                                    setReplyText('')
-                                  }}
-                                  style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-                                    borderRadius: 6, background: '#7C3AED', color: '#fff', fontSize: 11.5,
-                                    fontWeight: 700, border: 'none', cursor: 'pointer',
-                                    boxShadow: '0 2px 4px rgba(124, 58, 237, 0.2)', transition: 'background 0.2s'
-                                  }}
-                                  onMouseEnter={e => e.currentTarget.style.background = '#6D28D9'}
-                                  onMouseLeave={e => e.currentTarget.style.background = '#7C3AED'}
-                                >
-                                  <CornerDownLeft size={12} /> Reply
-                                </button>
-
-                                {/* 2. Mark as Read (Blue) / Read (Green) */}
-                                {inq.isRead ? (
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px',
-                                    borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669',
-                                    fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)'
-                                  }}>
-                                    <Check size={13} /> Read
-                                  </span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMarkAsRead(inq.id)}
-                                    style={{
-                                      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-                                      borderRadius: 6, background: '#2563EB', color: '#fff', fontSize: 11.5,
-                                      fontWeight: 700, border: 'none', cursor: 'pointer',
-                                      boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)', transition: 'background 0.2s'
-                                    }}
-                                    onMouseEnter={e => e.currentTarget.style.background = '#1D4ED8'}
-                                    onMouseLeave={e => e.currentTarget.style.background = '#2563EB'}
-                                  >
-                                    <Check size={12} /> Mark as Read
-                                  </button>
-                                )}
-
-                                {/* 3. Mark as Unread (Navy Blue) */}
-                                {inq.isRead && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMarkAsUnread(inq.id)}
-                                    style={{
-                                      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-                                      borderRadius: 6, background: '#1E3A8A', color: '#fff', fontSize: 11.5,
-                                      fontWeight: 700, border: 'none', cursor: 'pointer',
-                                      boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)', transition: 'background 0.2s'
-                                    }}
-                                    onMouseEnter={e => e.currentTarget.style.background = '#172554'}
-                                    onMouseLeave={e => e.currentTarget.style.background = '#1E3A8A'}
-                                  >
-                                    <RotateCcw size={12} /> Mark as Unread
-                                  </button>
-                                )}
-                              </div>
 
                               {/* Inline Reply Box */}
                               {replyingToId === inq.id && (
@@ -2511,20 +2845,18 @@ export default function AdminPanel() {
                 )
               }
 
-              return (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 20, marginTop: 22 }}>
-                  {/* Left Column: General Communications & Requests */}
-                  <div className="card glass-form-card" style={{ padding: 22 }}>
+                return (
+                  <div className="card glass-form-card" style={{ padding: 22, marginTop: 22 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                           <MessageSquare size={17} color="#2563EB" />
                           <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
-                            Incoming Inquiries &amp; Requests
+                            Incoming Inquiries &amp; Requests from Medical Centers
                           </h3>
                         </div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
-                          General administrative support, compliance &amp; technical inquiries
+                          Administrative support, facility approvals &amp; technical inquiries
                         </div>
                       </div>
                       <button
@@ -2539,38 +2871,202 @@ export default function AdminPanel() {
 
                     {renderInquiryColumn(generalInquiries, 'No general messages or inquiries received yet.')}
                   </div>
+                )
+              })()}
+            </>
+          )}
 
-                  {/* Right Column: Monthly Payment Remittances & Billing */}
-                  <div className="card glass-form-card" style={{ padding: 22 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                          <span style={{ fontSize: 16 }}>💳</span>
-                          <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
-                            Incoming Monthly Payment Remittances
-                          </h3>
-                        </div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
-                          Bank deposit slips, monthly subscription fees &amp; billing receipts
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={fetchCenterInquiries}
-                        className="btn btn-ghost btn-sm"
-                        style={{ gap: 5, fontSize: 11.5 }}
-                      >
-                        <RefreshCw size={12} className={loadingInquiries ? 'spin' : ''} /> Refresh
-                      </button>
-                    </div>
+          {/* ── BILLING & PAYMENTS TAB (Admin Center Subscriptions & Bank Slips Verification) ── */}
+          {nav === 'billing' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Header Info */}
+              <div>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CreditCard size={20} color="var(--blue)" />
+                  Medical Centers Billing &amp; Subscription Management
+                </h3>
+                <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 3 }}>
+                  Monitor clinic subscription compliance, inspect bank deposit slips, and verify monthly remittance records.
+                </div>
+              </div>
 
-                    {renderInquiryColumn(paymentInquiries, 'No payment remittance messages received yet.')}
+              {/* Top Overview Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                <div className="card glass-form-card" style={{ padding: 18, borderLeft: '4px solid var(--blue)' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase' }}>
+                    Registered Clinics
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-1)', marginTop: 6 }}>
+                    {centers.filter(c => c.approvalStatus === 'approved').length} Active
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                    Standard platform subscription
                   </div>
                 </div>
-              )
-            })()}
-          </>
-        )}
+
+                <div className="card glass-form-card" style={{ padding: 18, borderLeft: '4px solid #10B981' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase' }}>
+                    Monthly Revenue (Est.)
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: '#059669', marginTop: 6 }}>
+                    LKR {(centers.filter(c => c.approvalStatus === 'approved').length * 15000).toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                    Based on LKR 15,000 / clinic tier
+                  </div>
+                </div>
+
+                <div className="card glass-form-card" style={{ padding: 18, borderLeft: '4px solid #F59E0B' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase' }}>
+                    Pending Slips Review
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: '#D97706', marginTop: 6 }}>
+                    {remittanceRecords.filter(r => r.status === 'pending').length} Slips
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                    Awaiting admin verification
+                  </div>
+                </div>
+
+                <div className="card glass-form-card" style={{ padding: 18, borderLeft: '4px solid #8B5CF6' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase' }}>
+                    Payment Compliance
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: '#7C3AED', marginTop: 6 }}>
+                    98%
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                    On-time monthly remittance rate
+                  </div>
+                </div>
+              </div>
+
+              {/* Remittance Verification Table */}
+              <div className="card glass-form-card" style={{ padding: 22 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <h4 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                      Submitted Monthly Remittance Slips
+                    </h4>
+                    <div style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 2 }}>
+                      Review proof of payment submitted by clinic receptionists &amp; managers.
+                    </div>
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {(['all', 'pending', 'verified', 'flagged'] as const).map(f => (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setBillingFilter(f)}
+                        style={{
+                          padding: '4px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+                          border: billingFilter === f ? '1.5px solid var(--blue)' : '1px solid var(--border-md)',
+                          background: billingFilter === f ? 'rgba(37, 99, 235, 0.1)' : '#fff',
+                          color: billingFilter === f ? 'var(--blue)' : 'var(--text-3)',
+                          cursor: 'pointer', textTransform: 'capitalize'
+                        }}
+                      >
+                        {f === 'all' ? 'All Records' : f === 'pending' ? 'Pending Review' : f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1.5px solid var(--border-md)', color: 'var(--text-4)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        <th style={{ padding: '12px 14px' }}>Medical Center</th>
+                        <th style={{ padding: '12px 14px' }}>Subscription Plan</th>
+                        <th style={{ padding: '12px 14px' }}>Billing Cycle</th>
+                        <th style={{ padding: '12px 14px' }}>Deposit Ref #</th>
+                        <th style={{ padding: '12px 14px' }}>Amount</th>
+                        <th style={{ padding: '12px 14px' }}>Date Submitted</th>
+                        <th style={{ padding: '12px 14px' }}>Verification Status</th>
+                        <th style={{ padding: '12px 14px', textAlign: 'right' }}>Admin Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {remittanceRecords
+                        .filter(r => billingFilter === 'all' || r.status === billingFilter)
+                        .map(row => (
+                          <tr key={row.id} style={{ borderBottom: '1px solid var(--border-md)' }}>
+                            <td style={{ padding: '14px', fontWeight: 700, color: 'var(--text-1)' }}>
+                              <div>{row.centerName}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 500 }}>{row.city}</div>
+                            </td>
+                            <td style={{ padding: '14px', color: 'var(--text-2)', fontSize: 12.5 }}>
+                              {row.plan}
+                            </td>
+                            <td style={{ padding: '14px', color: 'var(--text-2)' }}>
+                              {row.month}
+                            </td>
+                            <td style={{ padding: '14px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--text-1)' }}>
+                              {row.refNo}
+                            </td>
+                            <td style={{ padding: '14px', fontWeight: 700, color: 'var(--brand-teal)' }}>
+                              {row.amount}
+                            </td>
+                            <td style={{ padding: '14px', color: 'var(--text-3)', fontSize: 12 }}>
+                              {row.submittedAt}
+                            </td>
+                            <td style={{ padding: '14px' }}>
+                              {row.status === 'verified' ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                  <Check size={12} /> Verified
+                                </span>
+                              ) : row.status === 'pending' ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: 'rgba(245, 158, 11, 0.12)', color: '#D97706', fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(245, 158, 11, 0.25)' }}>
+                                  <Clock size={12} /> Pending Review
+                                </span>
+                              ) : (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: 'rgba(239, 68, 68, 0.1)', color: '#DC2626', fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+                                  Flagged / Issue
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: '14px', textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => alert(`Opening deposit slip for ${row.centerName} (Ref: ${row.refNo})`)}
+                                  className="btn btn-ghost btn-xs"
+                                  style={{ fontSize: 11.5, color: '#2563EB' }}
+                                >
+                                  View Slip
+                                </button>
+                                {row.status !== 'verified' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVerifyRemittance(row.id)}
+                                    className="btn btn-xs"
+                                    style={{ background: '#10B981', color: '#fff', border: 'none', fontSize: 11, fontWeight: 700, borderRadius: 5, padding: '3px 8px' }}
+                                  >
+                                    Approve
+                                  </button>
+                                )}
+                                {row.status !== 'flagged' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFlagRemittance(row.id)}
+                                    className="btn btn-ghost btn-xs"
+                                    style={{ color: '#D97706', fontSize: 11 }}
+                                  >
+                                    Flag
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* AUDIT LOGS TAB */}
           {nav === 'logs' && (
@@ -2657,7 +3153,11 @@ export default function AdminPanel() {
                             }),
                       }}
                     >
-                      {filterName === 'All Events' ? 'All Events' : filterName}
+                      {filterName === 'All Events'
+                        ? 'All Events'
+                        : filterName === 'profile_updated'
+                        ? 'Profile Updates'
+                        : filterName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                     </button>
                   )
                 })}

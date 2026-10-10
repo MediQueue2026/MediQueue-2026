@@ -447,12 +447,12 @@ export default function AddDoctorModal({
       padding: 16,
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 580, maxHeight: '92vh',
+        width: '100%', maxWidth: 660, maxHeight: '92vh',
         background: 'rgba(255,255,255,0.96)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(18, 198, 186, 0.28)',
-        borderRadius: 20, padding: '32px 28px',
+        borderRadius: 20, padding: '32px 30px',
         boxShadow: '0 24px 64px rgba(8,48,45,0.18), inset 0 1px 0 rgba(255,255,255,0.7)',
         position: 'relative', overflowY: 'auto',
       }}>
@@ -568,7 +568,7 @@ export default function AddDoctorModal({
               </div>
               <div>
                 <label style={labelStyle}>Date of Birth</label>
-                <FlexibleDateInput value={editDob} onChange={setEditDob} />
+                <FlexibleDateInput value={editDob} onChange={setEditDob} align="right" />
               </div>
             </div>
 
@@ -803,7 +803,7 @@ export default function AddDoctorModal({
               </div>
               <div>
                 <label style={labelStyle}>Date of Birth</label>
-                <FlexibleDateInput value={newDob} onChange={setNewDob} />
+                <FlexibleDateInput value={newDob} onChange={setNewDob} align="right" />
               </div>
             </div>
 

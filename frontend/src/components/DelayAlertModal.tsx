@@ -60,11 +60,11 @@ export default function DelayAlertModal({
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 520,
+        width: '100%', maxWidth: 620,
         background: 'rgba(255, 255, 255, 0.95)',
         backdropFilter: 'blur(20px)',
         border: '1px solid rgba(245, 158, 11, 0.35)',
-        borderRadius: 20, padding: 28,
+        borderRadius: 20, padding: 32,
         boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
         position: 'relative'
       }}>

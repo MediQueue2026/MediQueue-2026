@@ -4,7 +4,7 @@ import {
   Activity, AlertCircle, Bell, BellRing, Building2, Camera, Check, CheckCircle2, Clock, Hash, ImagePlus,
   Megaphone, Plus, Radio, Save, Search, Stethoscope, Ticket, Trash2, UserX, Users, Wifi, CalendarClock,
   Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert, CalendarDays,
-  FileText, Send, MessageSquare, RotateCcw
+  FileText, Send, MessageSquare, RotateCcw, CreditCard, CalendarX, CornerDownLeft
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
@@ -22,7 +22,7 @@ import {
   minutesSince, validateNic, validatePhone, waitingFor
 } from '../lib/receptionQueue'
 import type { QueueEntry, TokenSource } from '../lib/receptionQueue'
-import { api, type ApiAppointmentRow, type ApiCenter, type ApiCenterNotice, type ApiDoctor, type ApiCenterAdminMessage } from '../lib/api'
+import { api, type ApiAppointmentRow, type ApiCenter, type ApiCenterNotice, type ApiDoctor, type ApiCenterAdminMessage, type ApiCenterClosure } from '../lib/api'
 
 /**
  * Identity key for a patient — their name plus phone number. Used to collapse
@@ -109,6 +109,275 @@ function CountChip({ label, value, tone }: { label: string; value: number; tone:
     }}>
       <strong style={{ fontSize: 13, fontWeight: 800 }}>{value}</strong> {label}
     </span>
+  )
+}
+
+/** Weekly Opening Hours schedule types & parsing helpers */
+const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+interface DaySchedule {
+  day: string
+  isOpen: boolean
+  openTime: string
+  closeTime: string
+}
+
+function parseOpeningHours(rawString: string): DaySchedule[] {
+  const defaultSchedule: DaySchedule[] = DAYS_OF_WEEK.map(day => ({
+    day,
+    isOpen: day !== 'Sunday',
+    openTime: '08:00 AM',
+    closeTime: '05:00 PM',
+  }))
+
+  if (!rawString || !rawString.trim()) return defaultSchedule
+
+  // 1. Try parsing JSON format
+  try {
+    const parsed = JSON.parse(rawString)
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].day) {
+      return DAYS_OF_WEEK.map(d => {
+        const found = parsed.find((item: any) => item.day?.toLowerCase() === d.toLowerCase())
+        return found ? { ...found, day: d } : { day: d, isOpen: false, openTime: '08:00 AM', closeTime: '05:00 PM' }
+      })
+    }
+  } catch (_) {}
+
+  // 2. Try parsing pipe-delimited format: "Mon: 08:00 AM - 05:00 PM | Tue: ..."
+  if (rawString.includes('|') || rawString.includes(':')) {
+    const parts = rawString.split('|').map(s => s.trim())
+    const scheduleMap = new Map<string, { isOpen: boolean; openTime: string; closeTime: string }>()
+    parts.forEach(p => {
+      const match = p.match(/^([A-Za-z]+)\s*:\s*(.+)$/)
+      if (match) {
+        const dayPrefix = match[1].toLowerCase()
+        const timePart = match[2].trim()
+        if (timePart.toLowerCase().includes('close')) {
+          scheduleMap.set(dayPrefix, { isOpen: false, openTime: '08:00 AM', closeTime: '05:00 PM' })
+        } else {
+          const times = timePart.split(/[-–]/).map(t => t.trim())
+          scheduleMap.set(dayPrefix, {
+            isOpen: true,
+            openTime: times[0] || '08:00 AM',
+            closeTime: times[1] || '05:00 PM',
+          })
+        }
+      }
+    })
+
+    if (scheduleMap.size > 0) {
+      return DAYS_OF_WEEK.map(d => {
+        const key = d.toLowerCase().slice(0, 3)
+        const found = scheduleMap.get(key) || scheduleMap.get(d.toLowerCase())
+        if (found) return { day: d, ...found }
+        return { day: d, isOpen: d !== 'Sunday', openTime: '08:00 AM', closeTime: '05:00 PM' }
+      })
+    }
+  }
+
+  // 3. Fallback: single range like "08:00 - 18:00" -> apply to weekdays
+  const rangeMatch = rawString.match(/^([0-9:]+\s*(?:AM|PM)?)\s*[-–]\s*([0-9:]+\s*(?:AM|PM)?)/i)
+  if (rangeMatch) {
+    return DAYS_OF_WEEK.map(d => ({
+      day: d,
+      isOpen: d !== 'Sunday',
+      openTime: rangeMatch[1].trim(),
+      closeTime: rangeMatch[2].trim(),
+    }))
+  }
+
+  return defaultSchedule
+}
+
+function formatOpeningHours(schedule: DaySchedule[]): string {
+  return schedule.map(s => {
+    const dayAbbr = s.day.slice(0, 3)
+    if (!s.isOpen) return `${dayAbbr}: Closed`
+    return `${dayAbbr}: ${s.openTime} – ${s.closeTime}`
+  }).join(' | ')
+}
+
+function WeeklyOpeningHoursEditor({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (val: string) => void
+  disabled?: boolean
+}) {
+  const [schedule, setSchedule] = useState<DaySchedule[]>(() => parseOpeningHours(value))
+  const [editingDay, setEditingDay] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSchedule(parseOpeningHours(value))
+  }, [value])
+
+  const handleToggleDay = (dayName: string) => {
+    if (disabled) return
+    const updated = schedule.map(item => item.day === dayName ? { ...item, isOpen: !item.isOpen } : item)
+    setSchedule(updated)
+    onChange(formatOpeningHours(updated))
+  }
+
+  const handleTimeChange = (dayName: string, field: 'openTime' | 'closeTime', val: string) => {
+    const updated = schedule.map(item => item.day === dayName ? { ...item, [field]: val } : item)
+    setSchedule(updated)
+    onChange(formatOpeningHours(updated))
+  }
+
+  return (
+    <div style={{
+      background: '#ffffff',
+      borderRadius: 10,
+      border: '1px solid var(--border-md)',
+      overflow: 'hidden',
+    }}>
+      {/* Compact Days Rows */}
+      <div>
+        {schedule.map((item, idx) => {
+          const isEditing = editingDay === item.day
+          return (
+            <div
+              key={item.day}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '8px 14px',
+                borderBottom: idx === schedule.length - 1 ? 'none' : '1px solid #f1f5f9',
+                transition: 'background 0.15s ease',
+                background: isEditing ? '#f8fafc' : '#ffffff',
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => handleToggleDay(item.day)}
+                    style={{
+                      border: 'none', background: 'transparent', padding: 0, cursor: disabled ? 'default' : 'pointer',
+                      fontSize: 13, fontWeight: 700,
+                      color: item.isOpen ? 'var(--text-1)' : 'var(--text-4)',
+                      textAlign: 'left', minWidth: 90,
+                    }}
+                    title="Click to toggle Open / Closed"
+                  >
+                    {item.day}
+                  </button>
+                  <span
+                    style={{
+                      fontSize: 10.5, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                      background: item.isOpen ? 'var(--emerald-dim, #ecfdf5)' : '#f1f5f9',
+                      color: item.isOpen ? '#059669' : '#64748b',
+                      cursor: disabled ? 'default' : 'pointer',
+                    }}
+                    onClick={() => !disabled && handleToggleDay(item.day)}
+                  >
+                    {item.isOpen ? 'Open' : 'Closed'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: item.isOpen ? 'var(--text-1)' : 'var(--text-4)',
+                    letterSpacing: '0.01em',
+                  }}>
+                    {item.isOpen ? `${item.openTime} – ${item.closeTime}` : 'Closed'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setEditingDay(isEditing ? null : item.day)}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: 26, height: 26, borderRadius: 6,
+                      border: '1px solid var(--border-md)',
+                      background: isEditing ? 'var(--brand-primary, #4f46e5)' : '#fff',
+                      color: isEditing ? '#fff' : 'var(--text-3)',
+                      cursor: disabled ? 'default' : 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title="Edit opening hours for this day"
+                  >
+                    <Clock size={13} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Compact Inline Editor Drawer when clock icon is clicked */}
+              {isEditing && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  marginTop: 6,
+                  padding: '6px 10px',
+                  background: '#f8fafc',
+                  border: '1px solid var(--border-md)',
+                  borderRadius: 6,
+                  flexWrap: 'wrap',
+                }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>
+                    <input
+                      type="checkbox"
+                      checked={item.isOpen}
+                      onChange={() => handleToggleDay(item.day)}
+                      style={{ width: 14, height: 14, cursor: 'pointer' }}
+                    />
+                    Open on {item.day}
+                  </label>
+
+                  {item.isOpen && (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-4)' }}>From:</span>
+                        <input
+                          className="input"
+                          style={{ height: 28, fontSize: 12, width: 95, padding: '2px 6px' }}
+                          value={item.openTime}
+                          onChange={e => handleTimeChange(item.day, 'openTime', e.target.value)}
+                          placeholder="08:00 AM"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-4)' }}>To:</span>
+                        <input
+                          className="input"
+                          style={{ height: 28, fontSize: 12, width: 95, padding: '2px 6px' }}
+                          value={item.closeTime}
+                          onChange={e => handleTimeChange(item.day, 'closeTime', e.target.value)}
+                          placeholder="05:00 PM"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setEditingDay(null)}
+                    className="btn btn-sm"
+                    style={{
+                      marginLeft: 'auto', background: 'var(--brand-primary, #4f46e5)', color: '#fff',
+                      fontSize: 11, padding: '2px 8px', minHeight: 26, borderRadius: 5,
+                    }}
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -296,7 +565,7 @@ export default function ReceptionistDesk() {
   const queue = useReceptionQueue()
   const { user } = useAuth()
 
-  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'profile' | 'messages'>('checkin')
+  const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'profile' | 'messages' | 'payments'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
@@ -338,7 +607,6 @@ export default function ReceptionistDesk() {
   const [profileTrackingLocation, setProfileTrackingLocation] = useState(false)
 
   // Admin Communications
-  const [adminInquiryCategory, setAdminInquiryCategory] = useState<'' | 'general' | 'payment'>('')
   const [adminInquiryTitle, setAdminInquiryTitle] = useState('')
   const [adminInquiryMessage, setAdminInquiryMessage] = useState('')
   const [adminInquiryFile, setAdminInquiryFile] = useState<File | null>(null)
@@ -349,6 +617,10 @@ export default function ReceptionistDesk() {
   const [centerMessages, setCenterMessages] = useState<ApiCenterAdminMessage[]>([])
   const [loadingCenterMessages, setLoadingCenterMessages] = useState(false)
   const [centerUnreadCount, setCenterUnreadCount] = useState(0)
+  const [replyingToId, setReplyingToId] = useState<string | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [replySending, setReplySending] = useState(false)
+  const [replyError, setReplyError] = useState<string | null>(null)
 
   // Notices & Promotions — posted from the Center Profile tab, visible to patients.
   const [notices, setNotices] = useState<ApiCenterNotice[]>([])
@@ -360,10 +632,57 @@ export default function ReceptionistDesk() {
   const [noticePosting, setNoticePosting] = useState(false)
   const [noticeError, setNoticeError] = useState<string | null>(null)
 
+  // Closures & Holidays (scheduled full-day closures)
+  const [closures, setClosures] = useState<ApiCenterClosure[]>([])
+  const [closuresLoading, setClosuresLoading] = useState(false)
+  const [closureDate, setClosureDate] = useState('')
+  const [closureReason, setClosureReason] = useState('')
+  const [closurePostToNotices, setClosurePostToNotices] = useState(true)
+  const [closureSaving, setClosureSaving] = useState(false)
+  const [closureError, setClosureError] = useState<string | null>(null)
+  const [closureSuccess, setClosureSuccess] = useState<string | null>(null)
+
+  // Payments & Billing tab state
+  const [paymentSlipFile, setPaymentSlipFile] = useState<File | null>(null)
+  const [paymentMonth, setPaymentMonth] = useState('October 2026')
+  const [paymentAmount, setPaymentAmount] = useState('15,000')
+  const [paymentRefNumber, setPaymentRefNumber] = useState('')
+  const [paymentNotes, setPaymentNotes] = useState('')
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false)
+  const [paymentSuccessMsg, setPaymentSuccessMsg] = useState<string | null>(null)
+  const [paymentHistory, setPaymentHistory] = useState([
+    {
+      id: 'pay-1',
+      month: 'October 2026',
+      dateSubmitted: '2026-10-02',
+      amount: 'LKR 15,000',
+      refNo: 'BOC-992144',
+      status: 'pending' as 'pending' | 'verified' | 'overdue',
+      receiptUrl: '#',
+    },
+    {
+      id: 'pay-2',
+      month: 'September 2026',
+      dateSubmitted: '2026-09-01',
+      amount: 'LKR 15,000',
+      refNo: 'COMB-441208',
+      status: 'verified' as 'pending' | 'verified' | 'overdue',
+      receiptUrl: '#',
+    },
+    {
+      id: 'pay-3',
+      month: 'August 2026',
+      dateSubmitted: '2026-08-01',
+      amount: 'LKR 15,000',
+      refNo: 'COMB-220915',
+      status: 'verified' as 'pending' | 'verified' | 'overdue',
+      receiptUrl: '#',
+    },
+  ])
+
   // Delay alerts (BR-05 / FR-07) — reception is usually the first to know a
   // doctor is running late, so the desk can publish the notice too.
   const [showDelayModal, setShowDelayModal] = useState(false)
-  const [showNotifications, setShowNotifications] = useState(false)
   const [delayToast, setDelayToast] = useState<string | null>(null)
   /** Closed tokens are collapsed by default — they're reference, not work. */
   const [showClosed, setShowClosed] = useState(false)
@@ -558,7 +877,7 @@ export default function ReceptionistDesk() {
     setProfileImageUploading(true)
     setProfileError(null)
     try {
-      const uploaded = await api.uploadFile(file, 'center-images')
+      const uploaded = await api.uploadFile(file, 'notifications-and-promotions')
       setProfileForm(f => ({ ...f, imageUrl: uploaded.fileUrl }))
     } catch (err) {
       setProfileError(err instanceof Error ? err.message : 'Could not upload the image. Please try again.')
@@ -660,15 +979,63 @@ export default function ReceptionistDesk() {
   useEffect(() => {
     if (activeTab !== 'profile') return
     loadNotices()
+    loadClosures()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, queue.centerId])
+
+  const loadClosures = () => {
+    if (!queue.centerId) { setClosures([]); return }
+    setClosuresLoading(true)
+    api.getCenterClosures(queue.centerId)
+      .then(res => setClosures(res.closures || []))
+      .catch(() => setClosures([]))
+      .finally(() => setClosuresLoading(false))
+  }
+
+  const handleScheduleClosure = async () => {
+    if (!queue.centerId || !closureDate) return
+    setClosureSaving(true)
+    setClosureError(null)
+    setClosureSuccess(null)
+    try {
+      const res = await api.createCenterClosure(queue.centerId, {
+        date: closureDate,
+        reason: closureReason.trim() || undefined,
+        postToNotices: closurePostToNotices
+      })
+      setClosureSuccess(
+        res.alreadyClosed
+          ? `Date ${closureDate} is already marked closed.`
+          : `Center closure scheduled for ${closureDate}! ${res.cancelledCount} appointment(s) cancelled, ${res.notifiedCount} patient(s) and assigned doctors notified.`
+      )
+      setClosureDate('')
+      setClosureReason('')
+      loadClosures()
+      if (closurePostToNotices) loadNotices()
+    } catch (err) {
+      setClosureError(err instanceof Error ? err.message : 'Could not schedule closure.')
+    } finally {
+      setClosureSaving(false)
+    }
+  }
+
+  const handleDeleteClosure = async (date: string) => {
+    if (!queue.centerId) return
+    if (!window.confirm(`Re-open center on ${date}? Patients will be able to book appointments again on this date.`)) return
+    try {
+      await api.deleteCenterClosure(queue.centerId, date)
+      loadClosures()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not re-open center.')
+    }
+  }
 
   const handleNoticeImageSelect = async (file: File | null) => {
     if (!file) return
     setNoticeImageUploading(true)
     setNoticeError(null)
     try {
-      const uploaded = await api.uploadFile(file, 'center-notices')
+      const uploaded = await api.uploadFile(file, 'notifications-and-promotions')
       setNoticeImageUrl(uploaded.fileUrl)
     } catch (err) {
       setNoticeError(err instanceof Error ? err.message : 'Could not upload the image. Please try again.')
@@ -755,12 +1122,54 @@ export default function ReceptionistDesk() {
     }
   }
 
-  const handleSendAdminInquiry = async () => {
-    if (!queue.centerId) return
-    if (!adminInquiryCategory) {
-      setAdminInquiryError('Please select a category first (General Inquiries or Monthly Payment Remittance).')
+  const handleSendReceptionistReply = async (parentMsg: ApiCenterAdminMessage) => {
+    if (!queue.centerId || !replyText.trim()) return
+    setReplySending(true)
+    setReplyError(null)
+    try {
+      await api.sendMessageToAdmin(queue.centerId, {
+        message: replyText.trim(),
+        parentId: parentMsg.id,
+        category: 'general',
+      })
+      setReplyText('')
+      setReplyingToId(null)
+      fetchCenterAdminMessages()
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : 'Could not send reply to admin.')
+    } finally {
+      setReplySending(false)
+    }
+  }
+
+  const handleSubmitPaymentSlip = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!paymentRefNumber.trim()) {
+      alert('Please enter your Bank Slip Transfer or Reference Number.')
       return
     }
+    setPaymentSubmitting(true)
+    setTimeout(() => {
+      const newRecord = {
+        id: `pay-${Date.now()}`,
+        month: paymentMonth,
+        dateSubmitted: new Date().toISOString().slice(0, 10),
+        amount: `LKR ${paymentAmount}`,
+        refNo: paymentRefNumber.trim(),
+        status: 'pending' as const,
+        receiptUrl: '#',
+      }
+      setPaymentHistory(prev => [newRecord, ...prev])
+      setPaymentSubmitting(false)
+      setPaymentSuccessMsg(`Deposit slip for ${paymentMonth} successfully submitted to System Admin for verification!`)
+      setPaymentRefNumber('')
+      setPaymentNotes('')
+      setPaymentSlipFile(null)
+    }, 600)
+  }
+
+  const handleSendAdminInquiry = async () => {
+    if (!queue.centerId) return
     if (!adminInquiryTitle.trim() || !adminInquiryMessage.trim()) {
       setAdminInquiryError('Please provide both a subject/heading and a message.')
       return
@@ -784,9 +1193,8 @@ export default function ReceptionistDesk() {
         attachmentName: fileName,
         fileUrl,
         fileName,
-        category: adminInquiryCategory,
+        category: 'general',
       })
-      setAdminInquiryCategory('')
       setAdminInquiryTitle('')
       setAdminInquiryMessage('')
       setAdminInquiryFile(null)
@@ -943,8 +1351,6 @@ export default function ReceptionistDesk() {
       noShow: closed.filter(e => e.status === 'left' || e.status === 'cancelled').length,
     }
   }, [queue.doctorQueue])
-
-  const activeAlerts = useMemo(() => queue.delayAlerts.filter(a => a.isActive), [queue.delayAlerts])
 
   /** Name of the center this desk is scoped to, taken from the roster it loaded. */
   const deskCenterName = useMemo(
@@ -1169,6 +1575,9 @@ export default function ReceptionistDesk() {
               </span>
             )}
           </button>
+          <button disabled={!centerAccessApproved} onClick={() => requestTabChange('payments')} className={`btn ${activeTab === 'payments' ? 'btn-primary' : 'btn-ghost'}`} style={{ justifyContent: 'flex-start', padding: '12px 14px', opacity: centerAccessApproved ? 1 : 0.5 }}>
+            <CreditCard size={16} /> Payments &amp; Billing
+          </button>
         </div>
 
         {/* Actions */}
@@ -1267,78 +1676,6 @@ export default function ReceptionistDesk() {
               </span>
             </div>
 
-            {/* Notifications. This was a bare <div> with a permanent red dot —
-                it looked like an unread badge, had no click handler and could
-                not be reached by keyboard. It now opens the live delay feed,
-                and the dot only appears when something is actually unread. */}
-            <div style={{ position: 'relative' }}>
-              <button
-                onClick={() => setShowNotifications(o => !o)}
-                className="btn btn-ghost btn-sm"
-                aria-label={activeAlerts.length > 0 ? `Notifications: ${activeAlerts.length} active delay alerts` : 'Notifications: none'}
-                aria-expanded={showNotifications}
-                style={{ padding: '6px 8px', position: 'relative' }}
-              >
-                <Bell size={16} color={activeAlerts.length > 0 ? '#B45309' : 'var(--text-3)'} />
-                {activeAlerts.length > 0 && (
-                  <span style={{
-                    position: 'absolute', top: 2, right: 2, minWidth: 14, height: 14, padding: '0 3px',
-                    background: 'var(--crimson)', color: '#fff', borderRadius: 8,
-                    fontSize: 9, fontWeight: 800, lineHeight: '14px', textAlign: 'center',
-                  }}>{activeAlerts.length}</span>
-                )}
-              </button>
-
-              {showNotifications && (
-                <>
-                  <div
-                    onClick={() => setShowNotifications(false)}
-                    style={{ position: 'fixed', inset: 0, zIndex: 40 }}
-                  />
-                  <div className="card" style={{
-                    position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 41,
-                    width: 320, maxHeight: 380, overflowY: 'auto', padding: 14,
-                    background: '#ffffff', border: '1px solid var(--border-md)',
-                    borderRadius: 12, boxShadow: '0 12px 32px rgba(15,23,42,0.16)',
-                  }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-1)', marginBottom: 10 }}>
-                      Delay alerts at this center
-                    </div>
-                    {activeAlerts.length === 0 ? (
-                      <div style={{ fontSize: 12, color: 'var(--text-4)', padding: '10px 0' }}>
-                        No doctors are running late right now.
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {activeAlerts.map(a => (
-                          <div key={a.id} style={{
-                            padding: 10, borderRadius: 9, fontSize: 12,
-                            background: 'var(--amber-dim)', border: '1px solid var(--amber-border)',
-                          }}>
-                            <div style={{ fontWeight: 800, color: '#B45309' }}>
-                              {a.doctorName} · +{a.delayMinutes} min
-                            </div>
-                            <div style={{ color: 'var(--text-3)', marginTop: 2 }}>
-                              {a.reason || 'No reason given'}
-                            </div>
-                            <div style={{ color: 'var(--text-4)', fontSize: 11, marginTop: 4 }}>
-                              {a.notifiedCount} notified by SMS
-                            </div>
-                            <button
-                              onClick={() => { handleClearDelay(a.id); setShowNotifications(false) }}
-                              className="btn btn-ghost btn-sm"
-                              style={{ marginTop: 7, gap: 4, color: '#047857', fontSize: 11 }}
-                            >
-                              <CheckCircle2 size={11} /> Mark back on schedule
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
             <AccountMenu />
           </div>
         </div>
@@ -2380,17 +2717,20 @@ export default function ReceptionistDesk() {
                         </div>
                       </div>
 
-                      {/* Opening Hours */}
+                      {/* Opening Hours Weekly Schedule */}
                       <div>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                          Opening Hours
-                        </label>
-                        <input
-                          className="input"
-                          placeholder="e.g. 08:00 - 18:00"
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                            Opening Hours
+                          </label>
+                          <span style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 500 }}>
+                            Click day or clock icon to modify
+                          </span>
+                        </div>
+                        <WeeklyOpeningHoursEditor
                           value={profileForm.openingHours}
-                          onChange={e => setProfileForm(f => ({ ...f, openingHours: e.target.value }))}
-                          style={{ height: 44, fontSize: 14 }}
+                          onChange={val => setProfileForm(f => ({ ...f, openingHours: val }))}
+                          disabled={profileSaving}
                         />
                       </div>
 
@@ -2549,34 +2889,189 @@ export default function ReceptionistDesk() {
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {notices.map(notice => (
-                      <div key={notice.id} style={{
-                        display: 'flex', alignItems: 'flex-start', gap: 14,
-                        padding: 14, borderRadius: 12, border: '1px solid var(--border-md)', background: '#fff',
-                      }}>
-                        {notice.imageUrl && (
-                          <img
-                            src={notice.imageUrl}
-                            alt=""
-                            style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }}
-                          />
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>{notice.title}</div>
-                          <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.5 }}>{notice.message}</div>
-                          {notice.createdAt && (
-                            <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 6 }}>
-                              Posted {new Date(notice.createdAt).toLocaleDateString()}
-                            </div>
+                    {notices.map(notice => {
+                      const isClosure = /clos(ed|ure)|holiday/i.test(notice.title) || /clos(ed|ure)/i.test(notice.message);
+                      return (
+                        <div key={notice.id} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 14,
+                          padding: 14, borderRadius: 12,
+                          border: isClosure ? '1.5px solid #F87171' : '1px solid var(--border-md)',
+                          background: isClosure ? '#FEF2F2' : '#fff',
+                        }}>
+                          {notice.imageUrl && (
+                            <img
+                              src={notice.imageUrl}
+                              alt=""
+                              style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }}
+                            />
                           )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {isClosure && (
+                              <span style={{
+                                display: 'inline-block', marginBottom: 6,
+                                background: '#EF4444', color: '#fff', fontSize: 10.5, fontWeight: 800,
+                                padding: '2px 7px', borderRadius: 5, textTransform: 'uppercase', letterSpacing: '0.04em',
+                              }}>
+                                🚨 Center Closure
+                              </span>
+                            )}
+                            <div style={{ fontSize: 14, fontWeight: 700, color: isClosure ? '#991B1B' : 'var(--text-1)' }}>{notice.title}</div>
+                            <div style={{ fontSize: 12.5, color: isClosure ? '#7F1D1D' : 'var(--text-3)', marginTop: 3, lineHeight: 1.5 }}>{notice.message}</div>
+                            {notice.createdAt && (
+                              <div style={{ fontSize: 11, color: isClosure ? '#B91C1C' : 'var(--text-4)', marginTop: 6 }}>
+                                Posted {new Date(notice.createdAt).toLocaleDateString()}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteNotice(notice)}
+                            className="btn btn-ghost btn-sm"
+                            style={{ gap: 5, color: '#ef4444', flexShrink: 0 }}
+                          >
+                            <Trash2 size={13} /> Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ── CENTER CLOSURES & HOLIDAYS — schedule full-day closures, SMS alerts sent ── */}
+              <div className="card glass-form-card" style={{ padding: 26 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <CalendarX size={20} color="#DC2626" />
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                      Schedule Center Closures &amp; Holidays
+                    </h3>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 650, marginTop: 4 }}>
+                    Emergency or planned closure for {deskCenterName ?? 'your clinic'}. Scheduling a closure automatically cancels affected patient bookings with SMS notifications, sends SMS alerts to assigned doctors, and prevents new bookings on that date.
+                  </div>
+                </div>
+
+                {/* Closure Form */}
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 14,
+                  padding: 16, borderRadius: 12, border: '1px solid var(--border-md)', background: 'var(--bg)', marginBottom: 20,
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>
+                        Closure Date <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        type="date"
+                        className="input"
+                        value={closureDate}
+                        min={new Date().toISOString().slice(0, 10)}
+                        onChange={e => setClosureDate(e.target.value)}
+                        disabled={closureSaving}
+                        style={{ height: 42, fontSize: 14 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>
+                        Reason for Closure (Optional)
+                      </label>
+                      <input
+                        className="input"
+                        placeholder="e.g. National Poya Holiday / Facility Sanitization"
+                        value={closureReason}
+                        onChange={e => setClosureReason(e.target.value)}
+                        disabled={closureSaving}
+                        style={{ height: 42, fontSize: 14 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, paddingTop: 4 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer', fontWeight: 600 }}>
+                      <input
+                        type="checkbox"
+                        checked={closurePostToNotices}
+                        onChange={e => setClosurePostToNotices(e.target.checked)}
+                        disabled={closureSaving}
+                        style={{ width: 16, height: 16, accentColor: 'var(--brand-teal)' }}
+                      />
+                      <span>Also broadcast to Public Notices on Patient Browse Centers</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleScheduleClosure}
+                      disabled={closureSaving || !closureDate}
+                      className="btn btn-primary"
+                      style={{
+                        gap: 8, height: 40, padding: '0 20px', fontSize: 13.5,
+                        background: '#DC2626', borderColor: '#DC2626',
+                        opacity: !closureDate ? 0.6 : 1
+                      }}
+                    >
+                      <CalendarX size={15} /> {closureSaving ? 'Scheduling Closure…' : 'Confirm & Close Center'}
+                    </button>
+                  </div>
+
+                  {closureError && (
+                    <div style={{
+                      background: '#fff1f1', border: '1px solid #fca5a5',
+                      borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#dc2626',
+                    }}>
+                      {closureError}
+                    </div>
+                  )}
+
+                  {closureSuccess && (
+                    <div style={{
+                      background: '#ecfdf5', border: '1px solid #6ee7b7',
+                      borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#047857',
+                      display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+                    }}>
+                      <CheckCircle2 size={16} /> {closureSuccess}
+                    </div>
+                  )}
+                </div>
+
+                {/* Scheduled Closures List */}
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-3)', marginBottom: 10 }}>
+                  Upcoming Scheduled Closures
+                </div>
+                {closuresLoading ? (
+                  <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-4)', fontSize: 13 }}>
+                    Loading center closures…
+                  </div>
+                ) : closures.length === 0 ? (
+                  <div style={{ padding: '18px', textAlign: 'center', color: 'var(--text-4)', fontSize: 12.5, background: 'rgba(0,0,0,0.02)', borderRadius: 10, border: '1px dashed var(--border-md)' }}>
+                    No upcoming closures scheduled. The clinic is operating on normal hours.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {closures.map(c => (
+                      <div key={c.id || c.closedDate || (c as any).date} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14,
+                        padding: '12px 16px', borderRadius: 10, border: '1px solid rgba(220, 38, 38, 0.25)',
+                        background: 'rgba(220, 38, 38, 0.03)', flexWrap: 'wrap',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{
+                            padding: '4px 10px', borderRadius: 6, background: '#FEE2E2',
+                            color: '#991B1B', fontWeight: 800, fontSize: 12,
+                          }}>
+                            📅 {c.closedDate || (c as any).date}
+                          </span>
+                          <span style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 600 }}>
+                            {c.reason || 'Full-Day Clinic Closure'}
+                          </span>
                         </div>
                         <button
                           type="button"
-                          onClick={() => handleDeleteNotice(notice)}
+                          onClick={() => handleDeleteClosure(c.closedDate || (c as any).date)}
                           className="btn btn-ghost btn-sm"
-                          style={{ gap: 5, color: '#ef4444', flexShrink: 0 }}
+                          style={{ gap: 5, color: '#2563EB', fontSize: 12 }}
                         >
-                          <Trash2 size={13} /> Remove
+                          <RotateCcw size={12} /> Re-open Center
                         </button>
                       </div>
                     ))}
@@ -2590,7 +3085,6 @@ export default function ReceptionistDesk() {
           {/* ADMIN COMMUNICATIONS TAB */}
           {activeTab === 'messages' && (() => {
             const generalMessages = centerMessages.filter(m => (m.category || 'general') === 'general')
-            const paymentMessages = centerMessages.filter(m => m.category === 'payment')
 
             const renderHistoryGroup = (msgsList: ApiCenterAdminMessage[], emptyLabel: string) => {
               if (loadingCenterMessages) {
@@ -2604,7 +3098,11 @@ export default function ReceptionistDesk() {
                 )
               }
 
-              const grouped = msgsList.reduce<Record<string, ApiCenterAdminMessage[]>>((acc, msg) => {
+              const sortedMsgs = [...msgsList].sort(
+                (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+              )
+
+              const grouped = sortedMsgs.reduce<Record<string, ApiCenterAdminMessage[]>>((acc, msg) => {
                 const d = msg.createdAt
                   ? new Date(msg.createdAt).toLocaleDateString('en-US', {
                       weekday: 'short',
@@ -2704,99 +3202,195 @@ export default function ReceptionistDesk() {
                                 </div>
                               )}
 
-                              {/* Admin message read/unread controls for receptionist (Blue Mark as Read, Navy Blue Mark as Unread) */}
-                              {isAdmin && (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, marginTop: 2, paddingTop: 4, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
-                                  {msg.isRead ? (
-                                    <>
-                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                                        <Check size={11} /> Read
+                              {/* Actions and Threaded Replies */}
+                              {isAdmin ? (
+                                <>
+                                  {/* 3 Action Buttons on Admin message for Receptionist: 1. Reply (Purple), 2. Mark as Read (Blue) / Read (Green), 3. Mark as Unread (Navy Blue) */}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 8, marginTop: 4, paddingTop: 6, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                                    {/* 1. Reply Button (Purple) */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReplyingToId(replyingToId === msg.id ? null : msg.id)
+                                        setReplyText('')
+                                        setReplyError(null)
+                                      }}
+                                      style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px',
+                                        borderRadius: 6, background: '#7C3AED', color: '#fff', fontSize: 11.5,
+                                        fontWeight: 700, border: 'none', cursor: 'pointer',
+                                        boxShadow: '0 2px 4px rgba(124, 58, 237, 0.2)'
+                                      }}
+                                    >
+                                      <CornerDownLeft size={12} /> Reply
+                                    </button>
+
+                                    {/* 2. Mark as Read (Blue) / Read (Green) */}
+                                    {msg.isRead ? (
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                        <Check size={12} /> Read
                                       </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkCenterMessageRead(msg.id, true)}
+                                        style={{
+                                          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 11px',
+                                          borderRadius: 6, background: '#2563EB', color: '#fff', fontSize: 11.5,
+                                          fontWeight: 700, border: 'none', cursor: 'pointer',
+                                          boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
+                                        }}
+                                      >
+                                        <Check size={12} /> Mark as Read
+                                      </button>
+                                    )}
+
+                                    {/* 3. Mark as Unread (Navy Blue) */}
+                                    {msg.isRead && (
                                       <button
                                         type="button"
                                         onClick={() => handleMarkCenterMessageRead(msg.id, false)}
                                         style={{
-                                          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
-                                          borderRadius: 6, background: '#1E3A8A', color: '#fff', fontSize: 11,
+                                          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 11px',
+                                          borderRadius: 6, background: '#1E3A8A', color: '#fff', fontSize: 11.5,
                                           fontWeight: 700, border: 'none', cursor: 'pointer',
                                           boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)'
                                         }}
                                       >
                                         <RotateCcw size={11} /> Mark as Unread
                                       </button>
-                                    </>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleMarkCenterMessageRead(msg.id, true)}
-                                      style={{
-                                        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px',
-                                        borderRadius: 6, background: '#2563EB', color: '#fff', fontSize: 11,
-                                        fontWeight: 700, border: 'none', cursor: 'pointer',
-                                        boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
-                                      }}
-                                    >
-                                      <Check size={11} /> Mark as Read
-                                    </button>
-                                  )}
-                                </div>
-                              )}
+                                    )}
+                                  </div>
 
-                              {/* Nested Admin Replies (Threaded inside clinic inquiry with blue border line, exactly as in Admin Panel) */}
-                              {msg.replies && msg.replies.length > 0 && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #60A5FA' }}>
-                                  {msg.replies.map(reply => (
-                                    <div key={reply.id} style={{
-                                      padding: '8px 12px', borderRadius: 8, background: 'rgba(59, 130, 246, 0.05)',
-                                      border: '1px solid rgba(59, 130, 246, 0.15)', display: 'flex', flexDirection: 'column', gap: 4
+                                  {/* Inline Reply Composer for Receptionist */}
+                                  {replyingToId === msg.id && (
+                                    <div style={{
+                                      marginTop: 8, padding: 12, borderRadius: 10,
+                                      background: '#F8FAFC', border: '1px solid #C7D2FE',
+                                      display: 'flex', flexDirection: 'column', gap: 8,
                                     }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                                        <span style={{ fontSize: 10.5, fontWeight: 800, color: '#2563EB', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                          🛡️ SENT BY ADMIN
-                                        </span>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                          <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
-                                            {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                                          </span>
-                                          {reply.isRead ? (
-                                            <>
-                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 6px', borderRadius: 5, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 10.5, fontWeight: 700 }}>
-                                                <Check size={11} /> Read
-                                              </span>
-                                              <button
-                                                type="button"
-                                                onClick={() => handleMarkCenterMessageRead(reply.id, false)}
-                                                style={{
-                                                  display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px',
-                                                  borderRadius: 5, background: '#1E3A8A', color: '#fff', fontSize: 10.5,
-                                                  fontWeight: 700, border: 'none', cursor: 'pointer'
-                                                }}
-                                              >
-                                                <RotateCcw size={10} /> Unread
-                                              </button>
-                                            </>
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={() => handleMarkCenterMessageRead(reply.id, true)}
-                                              style={{
-                                                display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px',
-                                                borderRadius: 5, background: '#2563EB', color: '#fff', fontSize: 10.5,
-                                                fontWeight: 700, border: 'none', cursor: 'pointer',
-                                                boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
-                                              }}
-                                            >
-                                              <Check size={11} /> Mark as Read
-                                            </button>
-                                          )}
-                                        </div>
+                                      <div style={{ fontSize: 11.5, fontWeight: 700, color: '#4338CA' }}>
+                                        Reply to System Admin:
                                       </div>
-                                      <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
-                                        {reply.message}
+                                      <textarea
+                                        className="input"
+                                        value={replyText}
+                                        onChange={e => setReplyText(e.target.value)}
+                                        placeholder="Type your reply to System Admin..."
+                                        style={{ minHeight: 65, fontSize: 12.5, resize: 'vertical', padding: '8px 10px', background: '#fff' }}
+                                      />
+                                      {replyError && (
+                                        <div style={{ fontSize: 11.5, color: '#DC2626' }}>{replyError}</div>
+                                      )}
+                                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => { setReplyingToId(null); setReplyText(''); setReplyError(null) }}
+                                          className="btn btn-ghost btn-xs"
+                                          style={{ fontSize: 11.5 }}
+                                        >
+                                          Cancel
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={!replyText.trim() || replySending}
+                                          onClick={() => handleSendReceptionistReply(msg)}
+                                          style={{
+                                            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                                            borderRadius: 6, background: '#7C3AED', color: '#fff', fontSize: 11.5,
+                                            fontWeight: 700, border: 'none', cursor: replySending ? 'not-allowed' : 'pointer',
+                                            opacity: !replyText.trim() || replySending ? 0.6 : 1
+                                          }}
+                                        >
+                                          <Send size={12} /> {replySending ? 'Sending…' : 'Send Reply'}
+                                        </button>
                                       </div>
                                     </div>
-                                  ))}
-                                </div>
+                                  )}
+
+                                  {/* Threaded Clinic Replies */}
+                                  {msg.replies && msg.replies.length > 0 && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #10B981' }}>
+                                      {msg.replies.map(reply => (
+                                        <div key={reply.id} style={{
+                                          padding: '8px 12px', borderRadius: 8, background: 'rgba(16, 185, 129, 0.05)',
+                                          border: '1px solid rgba(16, 185, 129, 0.2)', display: 'flex', flexDirection: 'column', gap: 4
+                                        }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                            <span style={{ fontSize: 10.5, fontWeight: 800, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                              🏥 Sent by You (Clinic Reply)
+                                            </span>
+                                            <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                                              {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                            </span>
+                                          </div>
+                                          <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                                            {reply.message}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  {/* Clinic's own outgoing message: Show Threaded Admin Replies received back */}
+                                  {msg.replies && msg.replies.length > 0 && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, marginLeft: 16, paddingLeft: 10, borderLeft: '3px solid #60A5FA' }}>
+                                      {msg.replies.map(reply => (
+                                        <div key={reply.id} style={{
+                                          padding: '8px 12px', borderRadius: 8, background: 'rgba(59, 130, 246, 0.05)',
+                                          border: '1px solid rgba(59, 130, 246, 0.15)', display: 'flex', flexDirection: 'column', gap: 4
+                                        }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                            <span style={{ fontSize: 10.5, fontWeight: 800, color: '#2563EB', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                              🛡️ SENT BY ADMIN
+                                            </span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                              <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                                                {reply.createdAt ? new Date(reply.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                              </span>
+                                              {reply.isRead ? (
+                                                <>
+                                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 6px', borderRadius: 5, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 10.5, fontWeight: 700 }}>
+                                                    <Check size={11} /> Read
+                                                  </span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleMarkCenterMessageRead(reply.id, false)}
+                                                    style={{
+                                                      display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px',
+                                                      borderRadius: 5, background: '#1E3A8A', color: '#fff', fontSize: 10.5,
+                                                      fontWeight: 700, border: 'none', cursor: 'pointer'
+                                                    }}
+                                                  >
+                                                    <RotateCcw size={10} /> Unread
+                                                  </button>
+                                                </>
+                                              ) : (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleMarkCenterMessageRead(reply.id, true)}
+                                                  style={{
+                                                    display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px',
+                                                    borderRadius: 5, background: '#2563EB', color: '#fff', fontSize: 10.5,
+                                                    fontWeight: 700, border: 'none', cursor: 'pointer',
+                                                    boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
+                                                  }}
+                                                >
+                                                  <Check size={11} /> Mark as Read
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                                            {reply.message}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                           )
@@ -2820,7 +3414,7 @@ export default function ReceptionistDesk() {
                       </h3>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 650, marginTop: 4 }}>
-                      Need administrative approvals, license renewals, quota updates, or monthly payment remittances? Choose a category, specify details, and upload documents directly to the System Admin.
+                      Need administrative approvals, license renewals, quota updates, or support? Send a direct message or inquiry to the System Admin.
                     </div>
                   </div>
 
@@ -2828,79 +3422,48 @@ export default function ReceptionistDesk() {
                     display: 'flex', flexDirection: 'column', gap: 14,
                     padding: 18, borderRadius: 12, border: '1px solid var(--border-md)', background: 'var(--bg)',
                   }}>
-                    {/* Field 1: Category Selection (Mandatory first step) */}
-                    <div>
-                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                        Inquiry Category <span style={{ color: '#ef4444' }}>*</span>
-                      </label>
-                      <select
-                        className="input"
-                        value={adminInquiryCategory}
-                        onChange={e => setAdminInquiryCategory(e.target.value as '' | 'general' | 'payment')}
-                        disabled={adminInquirySending}
-                        style={{ height: 42, fontSize: 14, background: '#fff', fontWeight: adminInquiryCategory ? 600 : 400 }}
-                      >
-                        <option value="">-- Select Category (Required to proceed) --</option>
-                        <option value="general">General Inquiries &amp; Support Requests</option>
-                        <option value="payment">Monthly Payment Remittance &amp; Billing Inquiries</option>
-                      </select>
-                      {!adminInquiryCategory && (
-                        <div style={{ fontSize: 11.5, color: '#D97706', marginTop: 4, fontWeight: 600 }}>
-                          ⚠️ Please select whether this is a General inquiry or Monthly Payment message to enable the form fields below.
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Field 2: Inquiry Subject / Heading */}
+                    {/* Inquiry Subject / Heading */}
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
                         Message Heading / Subject <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <input
                         className="input"
-                        placeholder={
-                          adminInquiryCategory === 'payment'
-                            ? "e.g. October 2026 Monthly Subscription Payment Slip"
-                            : "e.g. License renewal submission / Quota extension request"
-                        }
+                        placeholder="e.g. License renewal submission / Quota extension request"
                         value={adminInquiryTitle}
                         onChange={e => setAdminInquiryTitle(e.target.value)}
-                        disabled={adminInquirySending || !adminInquiryCategory}
-                        style={{ height: 42, fontSize: 14, opacity: !adminInquiryCategory ? 0.6 : 1 }}
+                        disabled={adminInquirySending}
+                        style={{ height: 42, fontSize: 14 }}
                       />
                     </div>
 
-                    {/* Field 3: Message Details */}
+                    {/* Message Details */}
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
                         Message / Request Details <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <textarea
                         className="input"
-                        placeholder={
-                          adminInquiryCategory === 'payment'
-                            ? "Provide payment bank details, reference transaction numbers, amount transferred, and remarks for invoice reconciliation…"
-                            : "Explain your inquiry, compliance update, or request for the System Admin…"
-                        }
+                        placeholder="Explain your inquiry, compliance update, or request for the System Admin…"
                         value={adminInquiryMessage}
                         onChange={e => setAdminInquiryMessage(e.target.value)}
-                        disabled={adminInquirySending || !adminInquiryCategory}
+                        disabled={adminInquirySending}
                         rows={4}
-                        style={{ fontSize: 13.5, padding: 12, resize: 'vertical', opacity: !adminInquiryCategory ? 0.6 : 1 }}
+                        style={{ fontSize: 13.5, padding: 12, resize: 'vertical' }}
                       />
                     </div>
 
-                    {/* Field 4: Attachment upload */}
+                    {/* Attachment upload */}
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6, letterSpacing: '0.05em' }}>
-                        Upload Attachment / Document {adminInquiryCategory === 'payment' ? '(e.g. Bank Slip / Receipt)' : '(Optional)'}
+                        Upload Attachment / Document (Optional)
                       </label>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <label
                           className="btn btn-ghost btn-sm"
                           style={{
-                            gap: 6, cursor: !adminInquiryCategory || adminInquirySending ? 'not-allowed' : 'pointer',
-                            fontSize: 12, opacity: !adminInquiryCategory ? 0.6 : 1
+                            gap: 6, cursor: adminInquirySending ? 'not-allowed' : 'pointer',
+                            fontSize: 12,
                           }}
                         >
                           <FileText size={14} /> {adminInquiryFile ? 'Change Attachment' : 'Choose File (PDF, Image, Doc)'}
@@ -2909,7 +3472,7 @@ export default function ReceptionistDesk() {
                             accept=".pdf,image/*,.doc,.docx"
                             onChange={e => setAdminInquiryFile(e.target.files?.[0] ?? null)}
                             style={{ display: 'none' }}
-                            disabled={adminInquirySending || !adminInquiryCategory}
+                            disabled={adminInquirySending}
                           />
                         </label>
                         {adminInquiryFile && (
@@ -2951,11 +3514,11 @@ export default function ReceptionistDesk() {
                       <button
                         type="button"
                         onClick={handleSendAdminInquiry}
-                        disabled={adminInquirySending || adminInquiryUploading || !adminInquiryCategory || !adminInquiryTitle.trim() || !adminInquiryMessage.trim()}
+                        disabled={adminInquirySending || adminInquiryUploading || !adminInquiryTitle.trim() || !adminInquiryMessage.trim()}
                         className="btn btn-primary"
                         style={{
                           gap: 8, height: 42, padding: '0 22px', fontSize: 14,
-                          opacity: !adminInquiryCategory || !adminInquiryTitle.trim() || !adminInquiryMessage.trim() ? 0.6 : 1
+                          opacity: !adminInquiryTitle.trim() || !adminInquiryMessage.trim() ? 0.6 : 1
                         }}
                       >
                         <Send size={15} /> {adminInquirySending ? 'Sending to Admin…' : 'Send Message to Admin'}
@@ -2964,65 +3527,285 @@ export default function ReceptionistDesk() {
                   </div>
                 </div>
 
-                {/* Bottom: 2-Column Split Communications History (Left: General Inquiries, Right: Payment Remittances) */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 20 }}>
-                  {/* Left Column: General Communications */}
-                  <div className="card glass-form-card" style={{ padding: 22 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                          <MessageSquare size={17} color="#2563EB" />
-                          <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
-                            General Communications &amp; Inquiries
-                          </h3>
-                        </div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
-                          Administrative support, licenses &amp; technical inquiries
-                        </div>
+                {/* Bottom: General Communications History (Full Width) */}
+                <div className="card glass-form-card" style={{ padding: 22 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <MessageSquare size={17} color="#2563EB" />
+                        <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                          General Communications &amp; Inquiries
+                        </h3>
                       </div>
-                      <button
-                        type="button"
-                        onClick={fetchCenterAdminMessages}
-                        className="btn btn-ghost btn-sm"
-                        style={{ gap: 5, fontSize: 11.5 }}
-                      >
-                        <RefreshCw size={12} className={loadingCenterMessages ? 'spin' : ''} /> Refresh
-                      </button>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
+                        Official communication records, administrative approvals &amp; technical inquiries
+                      </div>
                     </div>
-
-                    {renderHistoryGroup(generalMessages, 'No general messages logged yet.')}
+                    <button
+                      type="button"
+                      onClick={fetchCenterAdminMessages}
+                      className="btn btn-ghost btn-sm"
+                      style={{ gap: 5, fontSize: 11.5 }}
+                    >
+                      <RefreshCw size={12} className={loadingCenterMessages ? 'spin' : ''} /> Refresh
+                    </button>
                   </div>
 
-                  {/* Right Column: Monthly Payment Remittances */}
-                  <div className="card glass-form-card" style={{ padding: 22 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                          <span style={{ fontSize: 16 }}>💳</span>
-                          <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
-                            Monthly Payment Remittances &amp; Inquiries
-                          </h3>
-                        </div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 2 }}>
-                          Deposit slips, monthly billing submissions &amp; payment receipts
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={fetchCenterAdminMessages}
-                        className="btn btn-ghost btn-sm"
-                        style={{ gap: 5, fontSize: 11.5 }}
-                      >
-                        <RefreshCw size={12} className={loadingCenterMessages ? 'spin' : ''} /> Refresh
-                      </button>
-                    </div>
-
-                    {renderHistoryGroup(paymentMessages, 'No payment remittance messages logged yet.')}
-                  </div>
+                  {renderHistoryGroup(generalMessages, 'No general messages logged yet.')}
                 </div>
               </div>
             )
           })()}
+
+          {/* ── PAYMENTS & BILLING TAB (Dedicated tab for subscriptions & slip submissions) ── */}
+          {activeTab === 'payments' && (
+            <div style={{ padding: '18px 24px 28px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+              {/* Header Info */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <CreditCard size={22} color="var(--brand-teal)" />
+                    Monthly Payments &amp; Billing
+                  </h2>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-4)', marginTop: 4 }}>
+                    Manage {deskCenterName ?? 'your clinic'}'s platform subscription, submit bank deposit slips, and review billing history.
+                  </div>
+                </div>
+              </div>
+
+              {/* Top Row: Current Plan & Subscription Status Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+                <div className="card glass-form-card" style={{ padding: 20, borderLeft: '4px solid var(--brand-teal)' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Active Subscription Tier
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', marginTop: 6 }}>
+                    MediQueue Professional Tier
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--brand-teal)', fontWeight: 700, marginTop: 4 }}>
+                    LKR 15,000 / Month (Standard Medical Center)
+                  </div>
+                  <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 20, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11.5, fontWeight: 700 }}>
+                    <CheckCircle2 size={13} /> Active &amp; Operational
+                  </div>
+                </div>
+
+                <div className="card glass-form-card" style={{ padding: 20, borderLeft: '4px solid #3B82F6' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Current Billing Cycle
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', marginTop: 6 }}>
+                    October 2026 Cycle
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
+                    Next Invoice Renewal: <strong style={{ color: 'var(--text-1)' }}>01 Nov 2026</strong>
+                  </div>
+                  <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 20, background: 'rgba(59, 130, 246, 0.1)', color: '#2563EB', fontSize: 11.5, fontWeight: 700 }}>
+                    📅 Monthly Billing (Bank Transfer / Cheque)
+                  </div>
+                </div>
+
+                <div className="card glass-form-card" style={{ padding: 20, borderLeft: '4px solid #8B5CF6' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Official Bank Transfer Info
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8, lineHeight: 1.5 }}>
+                    <strong>Bank:</strong> Commercial Bank of Ceylon PLC<br />
+                    <strong>Account Name:</strong> MediQueue Digital Health Ltd<br />
+                    <strong>Account Number:</strong> 8009214412 (Kollupitiya Branch)
+                  </div>
+                </div>
+              </div>
+
+              {/* Upload Deposit / Bank Slip Card */}
+              <div className="card glass-form-card" style={{ padding: 24 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                    Submit Monthly Bank Deposit Slip / Remittance
+                  </h3>
+                  <div style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 4 }}>
+                    Upload your bank transfer receipt or cash deposit slip for Admin verification. Your billing ledger will be updated once approved.
+                  </div>
+                </div>
+
+                <form onSubmit={handleSubmitPaymentSlip} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                        Billing Period / Month <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <select
+                        className="input"
+                        value={paymentMonth}
+                        onChange={e => setPaymentMonth(e.target.value)}
+                        style={{ height: 42, fontSize: 14 }}
+                      >
+                        <option value="October 2026">October 2026 (Current)</option>
+                        <option value="November 2026">November 2026 (Upcoming)</option>
+                        <option value="September 2026">September 2026</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                        Amount Paid (LKR) <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        className="input"
+                        value={paymentAmount}
+                        onChange={e => setPaymentAmount(e.target.value)}
+                        style={{ height: 42, fontSize: 14 }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                        Bank Reference / Transaction ID <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        className="input"
+                        placeholder="e.g. TXN-BOC-849201"
+                        value={paymentRefNumber}
+                        onChange={e => setPaymentRefNumber(e.target.value)}
+                        style={{ height: 42, fontSize: 14 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                      Deposit Slip Attachment (Photo / PDF)
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <label
+                        className="btn btn-ghost btn-sm"
+                        style={{ gap: 6, cursor: 'pointer', fontSize: 12 }}
+                      >
+                        <FileText size={14} /> {paymentSlipFile ? 'Change Slip File' : 'Choose Deposit Slip File'}
+                        <input
+                          type="file"
+                          accept=".pdf,image/*"
+                          onChange={e => setPaymentSlipFile(e.target.files?.[0] ?? null)}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                      {paymentSlipFile && (
+                        <span style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>
+                          {paymentSlipFile.name} ({(paymentSlipFile.size / 1024).toFixed(0)} KB)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+                      Remarks / Notes (Optional)
+                    </label>
+                    <input
+                      className="input"
+                      placeholder="e.g. Transferred via online banking from Commercial Bank Account ***4410"
+                      value={paymentNotes}
+                      onChange={e => setPaymentNotes(e.target.value)}
+                      style={{ height: 42, fontSize: 13.5 }}
+                    />
+                  </div>
+
+                  {paymentSuccessMsg && (
+                    <div style={{
+                      background: '#ecfdf5', border: '1px solid #6ee7b7',
+                      borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#047857',
+                      display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+                    }}>
+                      <CheckCircle2 size={16} /> {paymentSuccessMsg}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                    <button
+                      type="submit"
+                      disabled={paymentSubmitting || !paymentRefNumber.trim()}
+                      className="btn btn-primary"
+                      style={{ gap: 8, height: 42, padding: '0 24px', fontSize: 14 }}
+                    >
+                      <CreditCard size={15} /> {paymentSubmitting ? 'Submitting Remittance…' : 'Submit Bank Deposit Slip'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Payment History & Receipts Table */}
+              <div className="card glass-form-card" style={{ padding: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>
+                      Payment History &amp; Official Receipts
+                    </h3>
+                    <div style={{ fontSize: 12, color: 'var(--text-4)', marginTop: 2 }}>
+                      Monthly billing statements and verified transaction ledger for {deskCenterName ?? 'your clinic'}.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1.5px solid var(--border-md)', color: 'var(--text-4)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        <th style={{ padding: '12px 14px' }}>Billing Period</th>
+                        <th style={{ padding: '12px 14px' }}>Date Submitted</th>
+                        <th style={{ padding: '12px 14px' }}>Reference No</th>
+                        <th style={{ padding: '12px 14px' }}>Amount</th>
+                        <th style={{ padding: '12px 14px' }}>Status</th>
+                        <th style={{ padding: '12px 14px', textAlign: 'right' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentHistory.map(row => (
+                        <tr key={row.id} style={{ borderBottom: '1px solid var(--border-md)' }}>
+                          <td style={{ padding: '14px', fontWeight: 700, color: 'var(--text-1)' }}>
+                            {row.month}
+                          </td>
+                          <td style={{ padding: '14px', color: 'var(--text-3)' }}>
+                            {row.dateSubmitted}
+                          </td>
+                          <td style={{ padding: '14px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--text-2)' }}>
+                            {row.refNo}
+                          </td>
+                          <td style={{ padding: '14px', fontWeight: 700, color: 'var(--brand-teal)' }}>
+                            {row.amount}
+                          </td>
+                          <td style={{ padding: '14px' }}>
+                            {row.status === 'verified' ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 6, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                <Check size={12} /> Verified
+                              </span>
+                            ) : row.status === 'pending' ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 6, background: 'rgba(245, 158, 11, 0.12)', color: '#D97706', fontSize: 11.5, fontWeight: 700, border: '1px solid rgba(245, 158, 11, 0.25)' }}>
+                                <Clock size={12} /> Pending Approval
+                              </span>
+                            ) : (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 6, background: 'rgba(239, 68, 68, 0.1)', color: '#DC2626', fontSize: 11.5, fontWeight: 700 }}>
+                                Overdue
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '14px', textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              onClick={() => alert(`Viewing receipt for ${row.month} (Ref: ${row.refNo})`)}
+                              className="btn btn-ghost btn-sm"
+                              style={{ fontSize: 12, gap: 5, color: '#2563EB' }}
+                            >
+                              <FileText size={13} /> {row.status === 'verified' ? 'Download Receipt' : 'View Slip'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* UNIFIED DOCTORS TAB — Roster + Management merged */}
           {activeTab === 'doctors' && (() => {

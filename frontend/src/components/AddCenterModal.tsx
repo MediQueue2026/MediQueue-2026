@@ -340,18 +340,13 @@ export default function AddCenterModal({
       } else {
         // Create new center (Admin direct creation or receptionist request)
         const res = await api.createCenter(payload)
-        if (res?.credentials) {
-          setCreatedCredentials(res.credentials)
-        }
         if (onAdd) await onAdd(res.center || payload)
         setSubmitted(true)
         setSubmitting(false)
-        if (!res?.credentials) {
-          setTimeout(() => {
-            setSubmitted(false)
-            handleClose()
-          }, 900)
-        }
+        setTimeout(() => {
+          setSubmitted(false)
+          handleClose()
+        }, 900)
       }
     } catch (err) {
       console.error('Failed to save medical center', err)

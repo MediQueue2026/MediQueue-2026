@@ -443,9 +443,9 @@ export function BookAppointmentModal({
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
     }}>
       <div className="card glass-form-card" style={{
-        width: '100%', maxWidth: 540, maxHeight: '88vh', overflowY: 'auto',
+        width: '100%', maxWidth: 640, maxHeight: '88vh', overflowY: 'auto',
         background: '#ffffff', borderRadius: 16,
-        padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.25)', position: 'relative'
+        padding: 28, boxShadow: '0 20px 50px rgba(0,0,0,0.25)', position: 'relative'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

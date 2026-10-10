@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, ArrowRight, Eye, EyeOff, Lock, Mail, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { AlertCircle, ArrowLeft, ArrowRight, Eye, EyeOff, Lock, Mail, ShieldAlert } from 'lucide-react'
 import { ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'
 import ForgotPasswordModal from '../../components/ForgotPasswordModal'

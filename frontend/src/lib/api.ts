@@ -350,6 +350,7 @@ export interface ApiCenterClosure {
   centerId: string
   /** YYYY-MM-DD */
   closedDate: string
+  date?: string
   reason: string
   /** Appointments cancelled by the sweep when this closure was created. */
   cancelledCount: number
@@ -886,7 +887,10 @@ export const api = {
       body: JSON.stringify({ hours, maxAppointmentsPerHour, advanceBookingDays, centerId }),
     }),
 
-  getCenters: () => request<{ centers: ApiCenter[] }>('/centers'),
+  getCenters: (params?: { all?: boolean; includePending?: boolean }) => {
+    const qs = params ? new URLSearchParams(Object.entries(params).filter(([_, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : ''
+    return request<{ centers: ApiCenter[] }>(`/centers${qs ? `?${qs}` : ''}`)
+  },
   getPublicBoard: () =>
     rawRequest<{ board: ApiBoardEntry[]; migrationPending?: boolean }>('/queue/board'),
 
@@ -969,7 +973,7 @@ export const api = {
 
   /** Mark a day closed — the backend cancels that day's appointments and SMSes
    *  the patients, returning how many of each. Idempotent per (center, date). */
-  createCenterClosure: (centerId: string, input: { date: string; reason?: string }) =>
+  createCenterClosure: (centerId: string, input: { date: string; reason?: string; postToNotices?: boolean }) =>
     request<{ closure: ApiCenterClosure; cancelledCount: number; notifiedCount: number; alreadyClosed?: boolean }>(
       `/centers/${centerId}/closures`,
       { method: 'POST', body: JSON.stringify(input) },
