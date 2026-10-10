@@ -8,7 +8,8 @@ const __dirname = path.dirname(__filename);
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
 // Ensure local upload directories exist for local disk fallback
-['center-documents', 'health-records', 'general'].forEach(subDir => {
+// Ensure local upload directories exist for local disk fallback
+['center-documents', 'health-records', 'notifications-and-promotions', 'general'].forEach(subDir => {
   const targetDir = path.join(UPLOADS_DIR, subDir);
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
@@ -18,7 +19,7 @@ const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 /**
  * Uploads a binary file buffer to Supabase Storage with local filesystem fallback
  * @param {Object} params
- * @param {string} params.bucket - Target bucket ('center-documents' | 'health-records' | 'general')
+ * @param {string} params.bucket - Target bucket ('center-documents' | 'health-records' | 'notifications-and-promotions' | 'general')
  * @param {Buffer} params.fileBuffer - Raw binary file buffer
  * @param {string} params.fileName - Original or target filename
  * @param {string} params.mimeType - MIME type (e.g. 'application/pdf', 'image/png')
@@ -26,7 +27,15 @@ const UPLOADS_DIR = path.join(__dirname, '../../uploads');
  */
 export async function uploadFileToStorage({ bucket = 'general', fileBuffer, fileName, mimeType }) {
   const sanitizedName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  const targetBucket = ['center-documents', 'health-records'].includes(bucket) ? bucket : 'general';
+  const validBuckets = ['center-documents', 'health-records', 'notifications-and-promotions'];
+  let normalizedBucket = bucket;
+  if (bucket === 'center-notices' || bucket === 'center-images') {
+    normalizedBucket = 'notifications-and-promotions';
+  } else if (bucket === 'general') {
+    // If it's an image or notice, route to notifications-and-promotions; otherwise center-documents
+    normalizedBucket = (mimeType && mimeType.startsWith('image/')) ? 'notifications-and-promotions' : 'center-documents';
+  }
+  const targetBucket = validBuckets.includes(normalizedBucket) ? normalizedBucket : 'notifications-and-promotions';
 
   // 1. Attempt Supabase Storage Upload
   try {

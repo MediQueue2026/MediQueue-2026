@@ -304,7 +304,7 @@ export async function createCenter(req, res, next) {
 
         if (plainPhone) {
           try {
-            const smsText = `Welcome to MediQueue! ${cleanCenterName} has been created by System Admin. Receptionist Login Email: ${receptionistEmail} | Temporary Password: ${tempPassword}. Please log in at your earliest.`;
+            const smsText = `Welcome to MediQueue! ${cleanCenterName} has been created by System Admin. Receptionist Login Email: ${receptionistEmail} | Temporary Password: ${tempPassword}. Sign in at mediqueue.lk/login`;
             await notificationProvider.sendSMS(plainPhone, smsText);
           } catch (smsErr) {
             console.warn('[createCenter] Failed to dispatch receptionist SMS:', smsErr?.message);
@@ -417,20 +417,20 @@ export async function updateCenter(req, res, next) {
 
     const updated = data && data[0] ? mapDbCenterToPublic(data[0]) : { id, ...updates };
 
-    if (isAdmin && typeof req.body.status === 'string') {
+    if (isAdmin && typeof req.body.status === 'string' && req.body.status === 'maintenance') {
       await writeAuditLog({
         actorName: req.user?.fullName || req.user?.email || 'System Admin',
         actorRole: req.user?.role || 'admin',
-        eventType: req.body.status === 'maintenance' ? 'center_suspend' : 'center_edit',
-        action: `Medical center ${req.body.status === 'maintenance' ? 'suspended' : 'updated'}: ${updated.name || 'Center'}`,
+        eventType: 'center_suspend',
+        action: `Medical center suspended: ${updated.name || 'Center'}`,
         centerName: updated.name || 'Center',
         status: 'completed',
       });
-    } else if (!isAdmin) {
+    } else {
       await writeAuditLog({
-        actorName: req.user?.fullName || req.user?.email || 'Receptionist',
-        actorRole: req.user?.role || 'receptionist',
-        eventType: 'center_edit',
+        actorName: req.user?.fullName || req.user?.email || (isAdmin ? 'System Administrator' : 'Receptionist'),
+        actorRole: req.user?.role || (isAdmin ? 'admin' : 'receptionist'),
+        eventType: 'profile_updated',
         action: `Medical center profile updated: ${updated.name || 'Center'}`,
         centerName: updated.name || 'Center',
         status: 'completed',
@@ -694,7 +694,11 @@ async function flipAndNotify(appts, centerId, date, buildMsg) {
     const phone = a.patient?.phone || profilePhone.get(a.patient_id) || null;
     if (!phone) continue;
     notifiedCount++;
-    notificationProvider.sendSMS(phone, buildMsg(a)).catch(e => console.warn('[SCHEDULE SMS NOTICE]', e));
+    try {
+      await notificationProvider.sendSMS(phone, buildMsg(a));
+    } catch (e) {
+      console.warn('[SCHEDULE SMS NOTICE]', e);
+    }
   }
 
   return { cancelledCount: ids.length, notifiedCount };
@@ -714,7 +718,7 @@ async function cancelAppointmentsForClosure(centerId, date, centerName, reason) 
   if (error) return { cancelledCount: 0, notifiedCount: 0 };
 
   return flipAndNotify(appts, centerId, date, a =>
-    `MediQueue Notice: ${centerName || 'The medical center'} is CLOSED on ${date}${reason ? ` (${reason})` : ''}. Your appointment (Token #${a.queue_number}) has been cancelled. Please re-book another day.`,
+    `MediQueue: ${centerName || 'Medical Center'} is CLOSED on ${date}${reason ? ` due to ${reason}` : ''}. Your appointment (Token #${a.queue_number}) is cancelled. Please re-book at mediqueue.lk.`,
   );
 }
 
@@ -878,6 +882,55 @@ export async function createCenterClosure(req, res, next) {
       centerName: center.name,
       status: 'completed',
     });
+
+    // Send SMS notice to doctors registered/assigned to this medical center
+    try {
+      const { data: assignments } = await supabase
+        .from('doctor_center_assignments')
+        .select('doctor_id, doctor:doctors(id, user_id, user:users(phone, full_name))')
+        .eq('center_id', centerId);
+
+      // Also directly lookup any doctors associated with the center if user_id links directly
+      const { data: centerDocs } = await supabase
+        .from('doctors')
+        .select('id, user_id, user:users(phone, full_name)')
+        .eq('center_id', centerId);
+      
+      const docMsg = `MediQueue: ${center.name} is CLOSED on ${date}${cleanReason ? ` due to ${cleanReason}` : ''}. No clinic sessions on this date. Details at mediqueue.lk.`;
+      const sentDocPhones = new Set();
+      const allDoctors = [...(assignments?.map(a => a.doctor) || []), ...(centerDocs || [])];
+
+      for (const doc of allDoctors) {
+        if (!doc) continue;
+        const docPhone = doc.phone || doc.user?.phone;
+        if (docPhone && !sentDocPhones.has(docPhone)) {
+          sentDocPhones.add(docPhone);
+          try {
+            await notificationProvider.sendSMS(docPhone, docMsg);
+          } catch (smsErr) {
+            console.warn('[DOCTOR CLOSURE SMS NOTICE ERROR]', smsErr);
+          }
+        }
+      }
+    } catch (docNotifyErr) {
+      console.warn('[DOCTOR CLOSURE NOTIFY ERROR]', docNotifyErr);
+    }
+
+    // Optionally post to center_notices if requested so it appears on Patient Portal
+    if (req.body.postToNotices) {
+      try {
+        await supabase.from('center_notices').insert([{
+          center_id: centerId,
+          title: `Center Closed on ${date}`,
+          message: cleanReason
+            ? `Please note that our medical center will be closed on ${date} (${cleanReason}). Appointments cannot be booked on this date.`
+            : `Please note that our medical center will be closed on ${date}. Appointments cannot be booked on this date.`,
+          created_by: req.user?.id || null,
+        }]);
+      } catch (noticeInsertErr) {
+        console.warn('[CENTER NOTICE AUTO-POST ERROR]', noticeInsertErr);
+      }
+    }
 
     res.status(201).json({ closure: mapClosure(inserted), cancelledCount, notifiedCount });
   } catch (err) {
@@ -1409,7 +1462,7 @@ export async function getCenterConversation(req, res, next) {
       .from('center_admin_messages')
       .select('*')
       .eq('center_id', centerId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false });
 
     if (category) {
       query = query.eq('category', category);
@@ -1463,7 +1516,7 @@ export async function getCenterConversation(req, res, next) {
       .select('id, center_id, document_type, document_name, file_url, created_at')
       .eq('center_id', centerId)
       .eq('document_type', 'admin_message')
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false });
 
     if (docErr) return res.status(500).json({ error: docErr.message });
 

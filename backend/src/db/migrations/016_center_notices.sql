@@ -11,3 +11,6 @@ CREATE TABLE IF NOT EXISTS public.center_notices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_center_notices_center ON public.center_notices(center_id);
+
+GRANT ALL PRIVILEGES ON public.center_notices TO anon, authenticated, service_role, postgres;
+ALTER TABLE public.center_notices DISABLE ROW LEVEL SECURITY;

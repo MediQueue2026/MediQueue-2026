@@ -38,15 +38,15 @@ export default function CleanDatePicker({
       setDropdownAlign(align)
     } else if (open && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
-      const modalParent = containerRef.current.closest('.modal-card, dialog, [role="dialog"]')
+      const modalParent = containerRef.current.closest('.modal-card, dialog, [role="dialog"], .card, .glass-form-card')
       if (modalParent) {
         const modalRect = modalParent.getBoundingClientRect()
-        if (modalRect.right - rect.left < 285) {
+        if (modalRect.right - rect.left < 295) {
           setDropdownAlign('right')
           return
         }
       }
-      if (window.innerWidth - rect.left < 285) {
+      if (window.innerWidth - rect.left < 295) {
         setDropdownAlign('right')
       } else {
         setDropdownAlign('left')

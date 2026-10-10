@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { writeAuditLog } from '../services/auditService.js';
 
 // Get Patient Profile (Users JOIN Patient Profiles)
 export async function getPatientProfile(req, res, next) {
@@ -131,6 +132,19 @@ export async function updatePatientProfile(req, res, next) {
 
     if (pError) {
       console.warn('patient_profiles save error:', pError.message);
+    } else {
+      try {
+        await writeAuditLog({
+          actorName: req.user?.fullName || fullName || 'Patient',
+          actorRole: req.user?.role || 'patient',
+          eventType: 'profile_updated',
+          action: `Patient profile updated: ${fullName || req.user?.fullName || 'Patient'}`,
+          centerName: 'Platform',
+          status: 'completed',
+        });
+      } catch (auditErr) {
+        console.warn('[updatePatientProfile audit log error]', auditErr?.message);
+      }
     }
 
     res.json({

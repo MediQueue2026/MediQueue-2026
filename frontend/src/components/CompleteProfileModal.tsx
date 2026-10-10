@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   HeartPulse,
   Phone,
-  ShieldCheck,
   User,
   X
 } from 'lucide-react'

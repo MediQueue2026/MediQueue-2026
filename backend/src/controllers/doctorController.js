@@ -2,6 +2,7 @@ import { supabase } from '../config/supabase.js';
 import { resolveDoctor, nextSeriesLetterForCenter, formatDoctorFullName } from '../services/doctorLookup.js';
 import { publishDelayAlert } from '../services/delayAlertService.js';
 import { genderInitial, parseNic } from '../services/nicService.js';
+import { writeAuditLog } from '../services/auditService.js';
 
 /**
  * PUT|PATCH /doctors/:doctorId/status
@@ -235,6 +236,19 @@ export async function updateDoctor(req, res, next) {
     const assignments = Array.isArray(d?.doctor_center_assignments) ? d.doctor_center_assignments : [];
     const centersList = assignments.map(mapAssignment);
     const postingObj = centersList.find(c => c.centerId === centerId) ?? centersList[0] ?? null;
+
+    try {
+      await writeAuditLog({
+        actorName: req.user?.fullName || req.user?.email || 'Staff',
+        actorRole: req.user?.role || 'receptionist',
+        eventType: 'profile_updated',
+        action: `Doctor profile updated: ${d?.users?.full_name || d?.name || 'Doctor'}`,
+        centerName: postingObj?.centerName || 'Platform',
+        status: 'completed',
+      });
+    } catch (auditErr) {
+      console.warn('[updateDoctor audit log error]', auditErr?.message);
+    }
 
     res.json({ message: 'Doctor updated successfully', doctor: mapDoctor(d, postingObj, centersList) });
   } catch (err) {

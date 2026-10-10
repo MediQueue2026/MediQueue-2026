@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Volume2, Bell, Clock, ShieldCheck, Stethoscope, Users, Wifi, Building2 } from 'lucide-react'
+import { X, Volume2, Bell, Clock, ShieldCheck, Users, Wifi, Building2 } from 'lucide-react'
 import { entryToken } from '../lib/receptionQueue'
 import type { QueueEntry, ReceptionDoctor } from '../lib/receptionQueue'
 

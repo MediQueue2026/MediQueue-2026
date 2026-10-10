@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google'
 
 interface GoogleAuthButtonProps {
