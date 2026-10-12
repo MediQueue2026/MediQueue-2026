@@ -19,42 +19,106 @@ const PORT = process.env.PORT || 5000;
 
 // Security & Logging Middleware
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
 }));
 
 /**
- * The refresh-token cookie only travels on credentialed requests, and the CORS
- * spec forbids pairing `credentials: true` with a wildcard origin — so the
- * allowed origins have to be listed explicitly. Override in .env with a
- * comma-separated ALLOWED_ORIGINS when the frontend moves off localhost.
+ * Configure allowed origins for CORS.
+ * Checks ALLOWED_ORIGINS, ALLOW_ORIGINS, CORS_ORIGIN, and defaults to include
+ * the company domain (theinnovibe.com and all subdomains) and local dev ports.
  */
-const ALLOWED_ORIGINS = (
-  process.env.ALLOWED_ORIGINS ||
-  'http://localhost:8443,http://localhost:5173,http://localhost:3000,http://localhost:4173'
-)
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
+const rawEnvOrigins = [
+  process.env.ALLOWED_ORIGINS,
+  process.env.ALLOW_ORIGINS,
+  process.env.CORS_ORIGIN,
+  process.env.CORS_ORIGINS,
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL,
+]
+  .filter(Boolean)
+  .join(',');
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      // Allow server-to-server calls, wildcard '*', Vercel/Render subdomains, explicit origins, or local dev ports
+const configuredOrigins = new Set([
+  'http://localhost:8443',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:4173',
+  'https://mediqueue.theinnovibe.com',
+  'http://mediqueue.theinnovibe.com',
+  'https://theinnovibe.com',
+]);
+
+const registerOrigin = (val) => {
+  if (!val) return;
+  const cleaned = val.trim().replace(/\/+$/, '');
+  if (!cleaned) return;
+  configuredOrigins.add(cleaned);
+  if (!/^https?:\/\//i.test(cleaned)) {
+    configuredOrigins.add(`https://${cleaned}`);
+    configuredOrigins.add(`http://${cleaned}`);
+  }
+};
+
+if (rawEnvOrigins) {
+  rawEnvOrigins.split(',').forEach(registerOrigin);
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser calls (Postman, curl, server-to-server)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const cleanOrigin = origin.trim().replace(/\/+$/, '');
+
+    // Allow configured origins or wildcard
+    if (configuredOrigins.has('*') || configuredOrigins.has(cleanOrigin)) {
+      return callback(null, true);
+    }
+
+    // Dynamic hostname regex matching:
+    // 1. Any subdomain of theinnovibe.com or theinnovibe.com apex
+    // 2. Any *.vercel.app deployment
+    // 3. Any *.onrender.com deployment
+    // 4. Any localhost / 127.0.0.1 port
+    try {
+      const url = new URL(cleanOrigin);
+      const hostname = url.hostname.toLowerCase();
+
       if (
-        !origin ||
-        ALLOWED_ORIGINS.includes('*') ||
-        ALLOWED_ORIGINS.includes(origin) ||
-        /\.vercel\.app$/i.test(origin) ||
-        /\.onrender\.com$/i.test(origin) ||
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+        hostname === 'theinnovibe.com' ||
+        hostname.endsWith('.theinnovibe.com') ||
+        hostname.endsWith('.vercel.app') ||
+        hostname.endsWith('.onrender.com') ||
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1'
       ) {
         return callback(null, true);
       }
-      callback(new Error(`Origin ${origin} is not allowed by CORS`));
-    },
-    credentials: true,
-  }),
-);
+    } catch {
+      // Fallback regex matching if URL parsing fails
+      if (
+        /\.theinnovibe\.com$/i.test(cleanOrigin) ||
+        /\.vercel\.app$/i.test(cleanOrigin) ||
+        /\.onrender\.com$/i.test(cleanOrigin) ||
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(cleanOrigin)
+      ) {
+        return callback(null, true);
+      }
+    }
+
+    console.warn(`[CORS Disallowed] ${origin}. Configured origins:`, Array.from(configuredOrigins));
+    return callback(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 app.use(cookieParser());
