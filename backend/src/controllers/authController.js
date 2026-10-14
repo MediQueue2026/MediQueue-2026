@@ -18,6 +18,7 @@ import {
   refresh,
   register,
   requestPasswordReset,
+  verifyResetOtp,
   resetPasswordWithToken,
 } from '../services/authService.js';
 
@@ -124,7 +125,24 @@ export async function loginGoogleUser(req, res, next) {
 export async function forgotPasswordUser(req, res, next) {
   try {
     const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '');
-    const result = await requestPasswordReset({ email: req.body?.email, origin }, req);
+    const result = await requestPasswordReset({
+      identifier: req.body?.identifier || req.body?.email,
+      email: req.body?.email,
+      origin
+    }, req);
+    res.json(result);
+  } catch (err) {
+    fail(res, err, next);
+  }
+}
+
+export async function verifyResetOtpUser(req, res, next) {
+  try {
+    const result = await verifyResetOtp({
+      identifier: req.body?.identifier || req.body?.email,
+      email: req.body?.email,
+      otp: req.body?.otp
+    }, req);
     res.json(result);
   } catch (err) {
     fail(res, err, next);
@@ -133,7 +151,11 @@ export async function forgotPasswordUser(req, res, next) {
 
 export async function resetPasswordUser(req, res, next) {
   try {
-    const result = await resetPasswordWithToken(req.body, req);
+    const result = await resetPasswordWithToken({
+      token: req.body?.token,
+      resetToken: req.body?.resetToken,
+      newPassword: req.body?.newPassword
+    }, req);
     res.json(result);
   } catch (err) {
     fail(res, err, next);

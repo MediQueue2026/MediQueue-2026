@@ -4,6 +4,7 @@ import {
   AlertCircle, ArrowLeft, ArrowRight, Building2, CloudOff, FlaskConical,
 } from 'lucide-react'
 import AddCenterModal from '../../components/AddCenterModal'
+import ForgotPasswordModal from '../../components/ForgotPasswordModal'
 import { api, ApiError, ApiOfflineError } from '../../lib/api'
 import { HOME_PATH, useAuth } from '../../context/AuthContext'
 import type { UserRole } from '../../context/AuthContext'
@@ -88,6 +89,7 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
   const [error, setError] = useState('')
   const [offline, setOffline] = useState(backendOffline)
   const [showRequestCenter, setShowRequestCenter] = useState(false)
+  const [showForgotModal, setShowForgotModal] = useState(false)
 
   /** Back to where they were headed before the guard bounced them, else the role's home. */
   const destinationFor = (signedInRole: Role) =>
@@ -145,6 +147,11 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
         onClose={() => setShowRequestCenter(false)}
         mode="request"
         onAdd={async (centerData) => { await api.registerCenterPublic(centerData) }}
+      />
+      <ForgotPasswordModal
+        isOpen={showForgotModal}
+        onClose={() => setShowForgotModal(false)}
+        initialIdentifier={email}
       />
       <div className="auth-card">
 
@@ -222,10 +229,14 @@ export default function LoginPage({ forcedRole }: LoginPageProps) {
             <div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
                 <label className="auth-field-label" htmlFor="auth-password">Password</label>
-                <button type="button" style={{
-                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                  fontSize: 11.5, color: 'var(--text-4)', marginBottom: 6,
-                }}>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(true)}
+                  style={{
+                    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                    fontSize: 11.5, color: '#0D9488', fontWeight: 700, marginBottom: 6,
+                  }}
+                >
                   Forgot?
                 </button>
               </div>

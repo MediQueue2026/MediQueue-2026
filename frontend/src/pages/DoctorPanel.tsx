@@ -439,7 +439,7 @@ export default function DoctorPanel() {
       )}
 
       {/* ── TOP BAR ── */}
-      <div className="topbar doctor-topbar" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+      <div className="topbar doctor-topbar" style={{ justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0, minWidth: 0 }}>
           <img src="/logo.png" alt="MediQueue" style={{ height: 24, width: 'auto', objectFit: 'contain', flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
@@ -665,7 +665,7 @@ export default function DoctorPanel() {
 
       {/* ── ASSIGNED CENTERS STRIP ── */}
       {centersList && centersList.length > 0 && (
-        <div style={{
+        <div className="doctor-centers-strip" style={{
           margin: '14px 24px 0', padding: '10px 18px',
           background: 'rgba(255, 255, 255, 0.45)', backdropFilter: 'blur(12px)',
           border: '1px solid var(--border-md)', borderRadius: 14,
@@ -729,7 +729,7 @@ export default function DoctorPanel() {
       )}
 
       {/* ── STATS STRIP ── */}
-      <div style={{
+      <div className="doctor-stats-strip" style={{
         margin: '14px 24px 0', padding: '10px 22px',
         background: 'rgba(160, 236, 205, 0.65)', backdropFilter: 'blur(12px)',
         border: '1px solid var(--border-md)', borderRadius: 14,
@@ -753,7 +753,7 @@ export default function DoctorPanel() {
       </div>
 
       {/* ── MAIN GRID ── */}
-      <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, padding: '16px 24px' }}>
+      <div className="responsive-grid-2 doctor-main-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, padding: '16px 24px' }}>
 
         {/* LEFT — Active patient panel */}
         <div>
