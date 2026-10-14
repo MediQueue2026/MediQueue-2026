@@ -326,9 +326,7 @@ export default function DoctorHoursModal({
                   : [{ startTime: h.startTime, endTime: h.endTime }]
 
                 return (
-                  <div key={h.dayOfWeek} style={{
-                    display: 'grid',
-                    gridTemplateColumns: '100px 1fr auto',
+                  <div key={h.dayOfWeek} className="doctor-hours-day-row" style={{
                     alignItems: 'start',
                     gap: 12,
                     padding: '14px 16px',

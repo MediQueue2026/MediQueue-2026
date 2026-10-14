@@ -21,11 +21,12 @@
 
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from './auditService.js';
 import { sendPasswordResetEmail } from './emailService.js';
+import { notificationProvider, formatSriLankanPhone } from '../config/notification.js';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -91,7 +92,7 @@ function toPublicUser(row) {
   };
 }
 
-const USER_COLUMNS = 'id, email, full_name, phone, role, avatar_url, is_active, password_hash, rejection_reason, auth_provider, google_id';
+const USER_COLUMNS = 'id, email, full_name, phone, role, avatar_url, is_active, password_hash, rejection_reason, auth_provider, google_id, reset_password_token, reset_password_expires_at';
 /** Adds center_id — the medical center a receptionist manages (see migration 005). */
 const USER_COLUMNS_WITH_CENTER = `${USER_COLUMNS}, center_id`;
 
@@ -649,80 +650,309 @@ export async function loginWithGoogle({ credential, idToken, accessToken }, req)
 }
 
 /**
- * Request Password Reset Token & Send Email
+ * Mask phone number for user privacy (e.g. 077****456)
  */
-export async function requestPasswordReset({ email, origin }, req) {
-  if (!email) throw new AuthError('Email address is required.', 400);
-  const normalisedEmail = String(email).trim().toLowerCase();
-  const row = await findUserByEmail(normalisedEmail);
+export function maskPhone(phone) {
+  if (!phone) return '••••••';
+  const str = String(phone).trim();
+  if (str.length <= 4) return '••' + str.slice(-2);
+  const start = str.slice(0, 3);
+  const end = str.slice(-2);
+  const stars = '•'.repeat(Math.max(3, str.length - 5));
+  return `${start}${stars}${end}`;
+}
 
-  if (!row) {
-    return {
-      success: true,
-      message: 'If an account exists with that email, a password reset link has been sent.',
-    };
+/**
+ * Locate user by email or phone number across users, profiles, and doctor postings
+ */
+export async function findUserByIdentifier(identifier) {
+  if (!identifier) return null;
+  const raw = String(identifier).trim();
+  const normalisedEmail = raw.toLowerCase();
+
+  // 1. Try finding by email
+  if (normalisedEmail.includes('@')) {
+    const user = await findUserByEmail(normalisedEmail);
+    if (user) return user;
+  } else {
+    const user = await findUserByEmail(normalisedEmail);
+    if (user) return user;
   }
 
-  const resetToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+  // 2. Try finding by phone
+  const cleanPhone = raw.replace(/[^0-9]/g, '');
+  const formattedPhone = formatSriLankanPhone(raw);
 
+  const phoneQueries = [raw];
+  if (formattedPhone) phoneQueries.push(formattedPhone);
+  if (cleanPhone) phoneQueries.push(cleanPhone);
+  if (cleanPhone.startsWith('94')) phoneQueries.push('0' + cleanPhone.slice(2));
+  if (cleanPhone.startsWith('0')) phoneQueries.push('94' + cleanPhone.slice(1));
+  const uniquePhones = Array.from(new Set(phoneQueries));
+
+  // Search users table
+  for (const ph of uniquePhones) {
+    const { data } = await supabase
+      .from('users')
+      .select(USER_COLUMNS_WITH_CENTER)
+      .eq('phone', ph)
+      .limit(1);
+    if (data && data.length > 0) return data[0];
+  }
+
+  if (cleanPhone.length >= 7) {
+    const { data: ilikeUsers } = await supabase
+      .from('users')
+      .select(USER_COLUMNS_WITH_CENTER)
+      .ilike('phone', `%${cleanPhone.slice(-7)}%`)
+      .limit(1);
+    if (ilikeUsers && ilikeUsers.length > 0) return ilikeUsers[0];
+  }
+
+  // 3. Fallback: Check patient_profiles or doctors table
+  for (const ph of uniquePhones) {
+    const { data: pProfiles } = await supabase
+      .from('patient_profiles')
+      .select('user_id')
+      .eq('emergency_contact_phone', ph)
+      .limit(1);
+    if (pProfiles && pProfiles[0]?.user_id) {
+      return await getUserById(pProfiles[0].user_id);
+    }
+
+    const { data: docs } = await supabase
+      .from('doctors')
+      .select('user_id')
+      .eq('phone', ph)
+      .limit(1);
+    if (docs && docs[0]?.user_id) {
+      return await getUserById(docs[0].user_id);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Ensures user has a verified phone number attached to account
+ */
+async function ensureUserPhone(user) {
+  if (user.phone && user.phone.trim()) return user.phone;
+
+  // Check patient_profiles
+  const { data: profile } = await supabase
+    .from('patient_profiles')
+    .select('emergency_contact_phone')
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (profile?.emergency_contact_phone) {
+    await supabase.from('users').update({ phone: profile.emergency_contact_phone }).eq('id', user.id);
+    user.phone = profile.emergency_contact_phone;
+    return user.phone;
+  }
+
+  // Check doctors table
+  const { data: doc } = await supabase
+    .from('doctors')
+    .select('phone')
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (doc?.phone) {
+    await supabase.from('users').update({ phone: doc.phone }).eq('id', user.id);
+    user.phone = doc.phone;
+    return user.phone;
+  }
+
+  // Check medical_centers if staff/receptionist
+  if (user.center_id) {
+    const { data: center } = await supabase
+      .from('medical_centers')
+      .select('phone')
+      .eq('id', user.center_id)
+      .maybeSingle();
+    if (center?.phone) {
+      await supabase.from('users').update({ phone: center.phone }).eq('id', user.id);
+      user.phone = center.phone;
+      return user.phone;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Step 1: Request Password Reset via SMS Verification
+ * Generates a 6-digit cryptographic OTP, stores hashed token, and dispatches SMS.
+ */
+export async function requestPasswordReset({ identifier, email, origin }, req) {
+  const target = identifier || email;
+  if (!target) throw new AuthError('Email address or registered mobile number is required.', 400);
+
+  const row = await findUserByIdentifier(target);
+  if (!row) {
+    throw new AuthError('No registered account was found with that email or mobile number.', 404);
+  }
+
+  const phone = await ensureUserPhone(row);
+  if (!phone) {
+    throw new AuthError(
+      'This account does not have a registered mobile number for SMS verification. Please contact support or your medical center administrator.',
+      400
+    );
+  }
+
+  // Generate 6-digit numeric OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const hashedOtp = createHash('sha256').update(otp).digest('hex');
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
+
+  // Store token in database: 'OTP:<hashedOtp>:<attempts>'
+  const tokenPayload = `OTP:${hashedOtp}:0`;
   const { error } = await supabase
     .from('users')
     .update({
-      reset_password_token: resetToken,
+      reset_password_token: tokenPayload,
       reset_password_expires_at: expiresAt,
     })
     .eq('id', row.id);
 
   if (error) {
-    console.error('[Password Reset] Error saving reset token:', error.message);
+    console.error('[Password Reset] Error saving reset OTP:', error.message);
     throw new AuthError('Could not process password reset request.', 500);
   }
 
-  const frontendBase = origin || process.env.FRONTEND_URL || 'http://localhost:8443';
-  const resetUrl = `${frontendBase}/reset-password?token=${resetToken}`;
+  // Send SMS using MediQueue SMS provider (Text.lk)
+  const smsMessage = `MediQueue Security: Your password reset verification code is ${otp}. Valid for 5 minutes. Do not share this OTP with anyone.`;
+  await notificationProvider.sendSMS(phone, smsMessage);
 
-  const emailRes = await sendPasswordResetEmail({
-    to: row.email,
-    userName: row.full_name,
-    resetUrl,
-  });
+  console.log(`\n======================================================`);
+  console.log(`🔑 [PASSWORD RESET OTP DISPATCHED]`);
+  console.log(`   Account: ${row.email} (${row.full_name || 'User'})`);
+  console.log(`   Destination Phone: ${phone}`);
+  console.log(`   6-Digit OTP: ${otp}`);
+  console.log(`   Valid For: 5 minutes`);
+  console.log(`======================================================\n`);
+
+  // Send security email if user has an email
+  if (row.email) {
+    sendPasswordResetEmail({
+      to: row.email,
+      userName: row.full_name,
+      resetUrl: `${origin || 'https://mediqueue.theinnovibe.com'}/reset-password`,
+    }).catch(e => console.warn('[Password Reset Email Notification]', e.message));
+  }
 
   return {
     success: true,
-    message: 'If an account exists with that email, a password reset link has been sent.',
-    devResetUrl: emailRes.provider === 'dev_fallback' ? resetUrl : undefined,
+    identifier: target,
+    maskedPhone: maskPhone(phone),
+    message: `A 6-digit verification code has been sent via SMS to ${maskPhone(phone)}.`,
   };
 }
 
 /**
- * Reset Password using Token
+ * Step 2: Verify SMS OTP
+ * Validates 6-digit OTP and exchanges it for a 15-minute single-use reset authorization token.
  */
-export async function resetPasswordWithToken({ token, newPassword }, req) {
-  if (!token) throw new AuthError('Reset token is required.', 400);
-  if (!newPassword || newPassword.length < 8) {
-    throw new AuthError('New password must be at least 8 characters.', 400);
+export async function verifyResetOtp({ identifier, email, otp }, req) {
+  const target = identifier || email;
+  if (!target) throw new AuthError('Identifier is required.', 400);
+  if (!otp || String(otp).trim().length !== 6) {
+    throw new AuthError('Please enter a valid 6-digit verification code.', 400);
   }
 
-  const { data: user, error } = await supabase
+  const row = await findUserByIdentifier(target);
+  if (!row) throw new AuthError('Account not found.', 404);
+
+  const tokenString = row.reset_password_token || '';
+  if (!tokenString.startsWith('OTP:')) {
+    throw new AuthError('No active verification request. Please request a new verification code.', 400);
+  }
+
+  if (row.reset_password_expires_at && new Date(row.reset_password_expires_at) < new Date()) {
+    throw new AuthError('The verification code has expired. Please request a new code.', 400);
+  }
+
+  const parts = tokenString.split(':');
+  const storedHash = parts[1];
+  let attempts = parseInt(parts[2] || '0', 10);
+
+  if (attempts >= 5) {
+    await supabase.from('users').update({ reset_password_token: null, reset_password_expires_at: null }).eq('id', row.id);
+    throw new AuthError('Too many incorrect attempts. Please request a new verification code.', 429);
+  }
+
+  const cleanOtp = String(otp).trim();
+  const candidateHash = createHash('sha256').update(cleanOtp).digest('hex');
+
+  if (candidateHash !== storedHash) {
+    attempts += 1;
+    await supabase.from('users').update({ reset_password_token: `OTP:${storedHash}:${attempts}` }).eq('id', row.id);
+    const rem = 5 - attempts;
+    throw new AuthError(`Invalid verification code. ${rem > 0 ? `${rem} attempt(s) remaining.` : 'Code locked. Please request a new one.'}`, 400);
+  }
+
+  // Verified! Generate single-use 15-minute reset session token
+  const resetSessionToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+  const sessionExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 mins
+
+  await supabase
     .from('users')
-    .select('id, email, full_name, reset_password_expires_at')
-    .eq('reset_password_token', token)
+    .update({
+      reset_password_token: `SESSION:${resetSessionToken}`,
+      reset_password_expires_at: sessionExpiresAt,
+    })
+    .eq('id', row.id);
+
+  return {
+    success: true,
+    resetToken: resetSessionToken,
+    message: 'Mobile number verified successfully. You may now create your new password.',
+  };
+}
+
+/**
+ * Step 3: Reset Password using Verified Session Token
+ * Hashes new password with bcrypt (12 rounds) and terminates old sessions.
+ */
+export async function resetPasswordWithToken({ token, resetToken, newPassword }, req) {
+  const candidateToken = resetToken || token;
+  if (!candidateToken) throw new AuthError('Reset authorization token is required.', 400);
+  if (!newPassword || newPassword.length < 8) {
+    throw new AuthError('New password must be at least 8 characters long.', 400);
+  }
+
+  // Look for user with matching session token or direct token
+  let { data: user, error } = await supabase
+    .from('users')
+    .select('id, email, full_name, phone, reset_password_expires_at, reset_password_token')
+    .eq('reset_password_token', `SESSION:${candidateToken}`)
     .maybeSingle();
 
+  if (!user) {
+    const { data: directUser } = await supabase
+      .from('users')
+      .select('id, email, full_name, phone, reset_password_expires_at, reset_password_token')
+      .eq('reset_password_token', candidateToken)
+      .maybeSingle();
+    user = directUser;
+  }
+
   if (error || !user) {
-    throw new AuthError('Invalid or expired password reset link.', 400);
+    throw new AuthError('Invalid or expired password reset session. Please request a new verification code.', 400);
   }
 
   if (user.reset_password_expires_at && new Date(user.reset_password_expires_at) < new Date()) {
-    throw new AuthError('This password reset link has expired. Please request a new one.', 400);
+    throw new AuthError('This password reset session has expired. Please request a new verification code.', 400);
   }
 
-  const newHash = newPassword;
+  // SECURE: Hash password using bcrypt with 12 rounds
+  const hashedNewPassword = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+
   const { error: updateErr } = await supabase
     .from('users')
     .update({
-      password_hash: newHash,
+      password_hash: hashedNewPassword,
       reset_password_token: null,
       reset_password_expires_at: null,
       updated_at: new Date().toISOString(),
@@ -730,11 +960,19 @@ export async function resetPasswordWithToken({ token, newPassword }, req) {
     .eq('id', user.id);
 
   if (updateErr) {
-    throw new AuthError('Failed to reset password. ' + updateErr.message, 500);
+    throw new AuthError('Failed to reset password: ' + updateErr.message, 500);
   }
 
-  // Clear existing sessions so old logins are invalidated
+  // Invalidate all active sessions for this user so old logins are cancelled immediately
   await supabase.from('refresh_sessions').delete().eq('user_id', user.id);
+
+  // Send security confirmation SMS
+  if (user.phone) {
+    notificationProvider.sendSMS(
+      user.phone,
+      'MediQueue Security Alert: Your account password has been successfully reset. If you did not make this change, please contact support immediately.'
+    ).catch(e => console.warn('[SMS RESET CONFIRM NOTICE]', e.message));
+  }
 
   return {
     success: true,

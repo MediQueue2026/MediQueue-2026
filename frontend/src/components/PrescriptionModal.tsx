@@ -124,7 +124,7 @@ export function PrescriptionModal({
       backdropFilter: 'blur(12px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
     }}>
-      <div className="fade-in modal-card" style={{
+      <div className="fade-in modal-card rx-modal-card" style={{
         width: '100%', maxWidth: showPreview ? 820 : 680, maxHeight: '90vh',
         background: 'rgba(255, 255, 255, 0.92)',
         backdropFilter: 'blur(20px)',
@@ -194,7 +194,7 @@ export function PrescriptionModal({
               </div>
 
               {/* Patient details line */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, background: 'rgba(18, 198, 186, 0.08)', padding: '12px 16px', borderRadius: 10, fontSize: 13, marginBottom: 20 }}>
+              <div className="rx-patient-details-grid" style={{ gap: 10, background: 'rgba(18, 198, 186, 0.08)', padding: '12px 16px', borderRadius: 10, fontSize: 13, marginBottom: 20 }}>
                 <div><strong>Patient:</strong> {patientName}</div>
                 <div><strong>Age/Gender:</strong> 47y / Male</div>
                 <div><strong>Token:</strong> {patientToken}</div>
@@ -212,26 +212,28 @@ export function PrescriptionModal({
                 <div style={{ fontSize: 15, fontWeight: 900, color: 'var(--blue)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Stethoscope size={18} /> Rx (Medications)
                 </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ background: 'rgba(18, 198, 186, 0.1)', textAlign: 'left' }}>
-                      <th style={{ padding: 10 }}>Medication</th>
-                      <th style={{ padding: 10 }}>Dosage</th>
-                      <th style={{ padding: 10 }}>Frequency</th>
-                      <th style={{ padding: 10 }}>Duration</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drugs.map((d, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <td style={{ padding: 10, fontWeight: 700 }}>{d.name}</td>
-                        <td style={{ padding: 10 }}>{d.dosage}</td>
-                        <td style={{ padding: 10 }}>{d.freq}</td>
-                        <td style={{ padding: 10 }}>{d.duration}</td>
+                <div style={{ overflowX: 'auto', width: '100%', WebkitOverflowScrolling: 'touch' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 420 }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(18, 198, 186, 0.1)', textAlign: 'left' }}>
+                        <th style={{ padding: 10 }}>Medication</th>
+                        <th style={{ padding: 10 }}>Dosage</th>
+                        <th style={{ padding: 10 }}>Frequency</th>
+                        <th style={{ padding: 10 }}>Duration</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {drugs.map((d, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                          <td style={{ padding: 10, fontWeight: 700 }}>{d.name}</td>
+                          <td style={{ padding: 10 }}>{d.dosage}</td>
+                          <td style={{ padding: 10 }}>{d.freq}</td>
+                          <td style={{ padding: 10 }}>{d.duration}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* Advice */}
@@ -314,8 +316,8 @@ export function PrescriptionModal({
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {drugs.map((d, index) => (
-                  <div key={index} style={{
-                    display: 'grid', gridTemplateColumns: '2fr 1fr 1.5fr 1fr 34px', gap: 8, alignItems: 'center',
+                  <div key={index} className="rx-drug-grid" style={{
+                    gap: 8, alignItems: 'center',
                     background: 'rgba(18, 198, 186, 0.04)', padding: 10, borderRadius: 12, border: '1px solid var(--border)'
                   }}>
                     <input

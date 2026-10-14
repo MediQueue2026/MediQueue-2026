@@ -1054,6 +1054,41 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
   color: var(--text-4);
 }
 
+.auth-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.05);
+  padding: 4px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.auth-tab {
+  flex: 1;
+  text-align: center;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-decoration: none;
+  border-radius: 7px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.auth-tab:hover {
+  color: var(--text-1);
+}
+
+.auth-tab.active {
+  background: #ffffff;
+  color: var(--text-1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
 @media (max-width: 820px) {
   .auth-screen { padding: 16px 12px; }
   .auth-card {
@@ -2729,5 +2764,121 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
   .marketing-page .hero-grid-pattern,
   .marketing-page .hero-image-overlay {
     display: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Platform-Wide Device Responsiveness & Modal Protections
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Prescription Medication Grid */
+.rx-drug-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.5fr 1fr 34px;
+}
+
+.rx-patient-details-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.doctor-hours-day-row {
+  display: grid;
+  grid-template-columns: 100px 1fr auto;
+}
+
+@media (max-width: 768px) {
+  /* Prevent any modal clipping on tablets and smartphones */
+  .modal-card,
+  .glass-form-card,
+  .book-modal-card,
+  .rx-modal-card,
+  .drawer-card {
+    max-width: 95vw !important;
+  }
+
+  /* Doctor Panel responsiveness */
+  .doctor-topbar {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    height: auto !important;
+    padding: 8px 12px !important;
+  }
+
+  .doctor-centers-strip,
+  .doctor-stats-strip {
+    margin: 10px 12px 0 !important;
+    padding: 8px 14px !important;
+  }
+
+  .doctor-main-grid {
+    padding: 12px 12px !important;
+    gap: 14px !important;
+  }
+
+  .doctor-hours-day-row {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Modal padding & sizing on smartphones */
+  .modal-card,
+  .glass-form-card,
+  .book-modal-card,
+  .rx-modal-card,
+  .drawer-card {
+    padding: 18px 14px !important;
+    border-radius: 16px !important;
+  }
+
+  /* Prescription Modal drug inputs on mobile: stack into neat 2-col inputs */
+  .rx-drug-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+  .rx-drug-grid > input:first-child {
+    grid-column: span 2 !important;
+  }
+  .rx-drug-grid > button:last-child {
+    grid-column: span 2 !important;
+    justify-self: end !important;
+  }
+
+  /* Patient details 4-col summary becomes 2-col on small screens */
+  .rx-patient-details-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+
+  /* Appointment slot buttons grid */
+  .slot-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+  }
+
+  /* Prevent text clipping / overlapping across tables and headers */
+  .responsive-table-wrapper {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  /* Ensure text doesn't overlap on very narrow screens */
+  h1, h2, h3, h4, .eyebrow {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+}
+
+@media (max-width: 440px) {
+  .slot-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .rx-patient-details-grid {
+    grid-template-columns: 1fr !important;
   }
 }

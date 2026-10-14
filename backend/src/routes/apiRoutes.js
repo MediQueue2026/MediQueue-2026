@@ -11,6 +11,7 @@ import {
   refreshSession,
   registerUser,
   resetPasswordUser,
+  verifyResetOtpUser,
 } from '../controllers/authController.js';
 
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
@@ -113,6 +114,7 @@ router.get('/db-check', async (req, res) => {
 router.post('/auth/login', loginUser);
 router.post('/auth/google', loginGoogleUser);
 router.post('/auth/forgot-password', forgotPasswordUser);
+router.post('/auth/verify-reset-otp', verifyResetOtpUser);
 router.post('/auth/reset-password', resetPasswordUser);
 router.post('/auth/register', registerUser);
 router.post('/auth/refresh', refreshSession);

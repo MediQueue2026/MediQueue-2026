@@ -599,16 +599,31 @@ export const api = {
       body: JSON.stringify(isAccessToken ? { accessToken: credentialOrToken } : { credential: credentialOrToken }),
     }),
 
-  forgotPassword: (email: string) =>
-    rawRequest<{ success: boolean; message: string; devResetUrl?: string }>('/auth/forgot-password', {
+  forgotPassword: (identifier: string) =>
+    rawRequest<{
+      success: boolean;
+      identifier: string;
+      maskedPhone: string;
+      message: string;
+    }>('/auth/forgot-password', {
       method: 'POST',
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ identifier, email: identifier }),
     }),
 
-  resetPassword: (token: string, newPassword: string) =>
+  verifyResetOtp: (identifier: string, otp: string) =>
+    rawRequest<{
+      success: boolean;
+      resetToken: string;
+      message: string;
+    }>('/auth/verify-reset-otp', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, otp }),
+    }),
+
+  resetPassword: (resetToken: string, newPassword: string) =>
     rawRequest<{ success: boolean; message: string }>('/auth/reset-password', {
       method: 'POST',
-      body: JSON.stringify({ token, newPassword }),
+      body: JSON.stringify({ resetToken, token: resetToken, newPassword }),
     }),
 
   register: (input: {

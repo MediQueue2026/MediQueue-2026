@@ -442,7 +442,7 @@ export function BookAppointmentModal({
       background: 'rgba(7, 21, 20, 0.65)', backdropFilter: 'blur(8px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
     }}>
-      <div className="card glass-form-card" style={{
+      <div className="card glass-form-card book-modal-card" style={{
         width: '100%', maxWidth: 640, maxHeight: '88vh', overflowY: 'auto',
         background: '#ffffff', borderRadius: 16,
         padding: 28, boxShadow: '0 20px 50px rgba(0,0,0,0.25)', position: 'relative'
@@ -626,7 +626,7 @@ export function BookAppointmentModal({
                       }}>
                         <Clock size={13} color="var(--blue-dark)" /> {sLabel}
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div className="slot-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                         {sessionSlots.map(s => {
                           const isSelected = slotHour === s.hour
                           const isFull = s.rem === 0
