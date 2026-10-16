@@ -328,8 +328,6 @@ export function BookAppointmentModal({
     }
   }, [isOpen, selectedDoctorId, selectedCenterId, appointmentDate, centerClosedDates, centerDayHours])
 
-  if (!isOpen) return null
-
   // Filter doctors assigned to selected center
   const assignedDoctors = useMemo(() => {
     if (!selectedCenterId) return allDoctors
@@ -451,6 +449,8 @@ export function BookAppointmentModal({
 
     executeBooking()
   }
+
+  if (!isOpen) return null
 
   return (
     <div style={{
