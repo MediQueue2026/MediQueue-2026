@@ -132,7 +132,11 @@ export async function updateDoctor(req, res, next) {
     if (typeof req.body.nic === 'string') docUpdates.nic = req.body.nic.trim();
 
     if (Object.keys(docUpdates).length > 0) {
-      await supabase.from('doctors').update(docUpdates).eq('id', doctorId);
+      const { error: docErr } = await supabase.from('doctors').update(docUpdates).eq('id', doctorId);
+      if (docErr) {
+        console.error('[doctorController:updateDoctor] doctors update error:', docErr);
+        return res.status(500).json({ error: 'Failed to update doctor profile: ' + docErr.message });
+      }
     }
 
     // User account updates.
@@ -141,7 +145,6 @@ export async function updateDoctor(req, res, next) {
       userUpdates.full_name = formatDoctorFullName(req.body.fullName);
     }
     if (typeof req.body.phone === 'string') userUpdates.phone = req.body.phone.trim();
-    if (typeof req.body.nic === 'string') userUpdates.nic = req.body.nic.trim();
 
     if (typeof req.body.email === 'string') {
       const newEmail = req.body.email.trim();
@@ -160,7 +163,11 @@ export async function updateDoctor(req, res, next) {
     if (Object.keys(userUpdates).length > 0) {
       const { data: docData } = await supabase.from('doctors').select('user_id').eq('id', doctorId).maybeSingle();
       if (docData?.user_id) {
-        await supabase.from('users').update(userUpdates).eq('id', docData.user_id);
+        const { error: userErr } = await supabase.from('users').update(userUpdates).eq('id', docData.user_id);
+        if (userErr) {
+          console.error('[doctorController:updateDoctor] users update error:', userErr);
+          return res.status(500).json({ error: 'Failed to update doctor user account: ' + userErr.message });
+        }
       }
     }
 
@@ -902,7 +909,7 @@ async function resolveHoursAssignment(doctorId, centerId) {
   }
   if (!data || data.length === 0) return null;
   if (data.length === 1) return data[0];
-  return centerId ? data[0] : null;
+  return centerId ? data[0] : (data.find(a => a.center_id) || data[0]);
 }
 
 export async function getDoctorHours(req, res, next) {

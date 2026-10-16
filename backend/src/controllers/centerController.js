@@ -248,12 +248,13 @@ export async function createCenter(req, res, next) {
     const finalCenter = createdCenter ? mapDbCenterToPublic({ ...createdCenter }) : { ...payload, approvalStatus };
 
     // Link the requesting receptionist to the center they're setting up, as
-    // its manager and sync the phone number to their user record.
+    // its manager and sync the phone number and medical center name to their user record.
     if (!isAdmin && req.user?.id && createdCenter?.id) {
       try {
         const updatePayload = {
           center_id: createdCenter.id,
           rejection_reason: null,
+          full_name: (name || 'Medical Center').trim(),
         };
         if (phone) {
           updatePayload.phone = String(phone).trim();
@@ -283,12 +284,13 @@ export async function createCenter(req, res, next) {
             password_hash: tempPassword,
             center_id: createdCenter.id,
             role: 'receptionist',
+            full_name: cleanCenterName,
             phone: plainPhone || undefined,
           }).eq('id', existingUser.id);
         } else {
           await supabase.from('users').insert([{
             email: receptionistEmail,
-            full_name: `${cleanCenterName} Receptionist`,
+            full_name: cleanCenterName,
             phone: plainPhone,
             role: 'receptionist',
             password_hash: tempPassword,
@@ -416,6 +418,18 @@ export async function updateCenter(req, res, next) {
     }
 
     const updated = data && data[0] ? mapDbCenterToPublic(data[0]) : { id, ...updates };
+
+    if (updates.name) {
+      try {
+        await supabase
+          .from('users')
+          .update({ full_name: updates.name.trim() })
+          .eq('center_id', id)
+          .eq('role', 'receptionist');
+      } catch (syncErr) {
+        console.warn('[updateCenter] Failed to sync receptionist full_name:', syncErr?.message);
+      }
+    }
 
     if (isAdmin && typeof req.body.status === 'string' && req.body.status === 'maintenance') {
       await writeAuditLog({
@@ -590,7 +604,7 @@ export async function approveCenter(req, res, next) {
             }
           }
         } else if (existingUser.role === 'receptionist') {
-          await supabase.from('users').update({ center_id: updated.id }).eq('id', existingUser.id);
+          await supabase.from('users').update({ center_id: updated.id, full_name: updated.name }).eq('id', existingUser.id);
         }
       } catch (userProvisionErr) {
         console.warn('Receptionist provisioning notice:', userProvisionErr.message);

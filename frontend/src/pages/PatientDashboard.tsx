@@ -903,7 +903,12 @@ export default function PatientDashboard() {
                             <button
                               type="button"
                               className="btn btn-primary btn-sm"
-                              onClick={() => { setSelectedDoctorForBooking(doc.id); setShowBookModal(true) }}
+                              onClick={() => {
+                                const targetCenter = doc.centerId || doc.centers?.[0]?.centerId || ''
+                                setSelectedCenterForBooking(targetCenter)
+                                setSelectedDoctorForBooking(doc.id)
+                                setShowBookModal(true)
+                              }}
                             >
                               Book Slot
                             </button>

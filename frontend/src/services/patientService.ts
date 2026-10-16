@@ -386,9 +386,12 @@ export async function bookAppointment(booking: {
   };
 }
 
-export async function fetchDoctorHours(doctorId: string): Promise<{ hours: any[]; maxAppointmentsPerHour: number; advanceBookingDays: number }> {
+export async function fetchDoctorHours(doctorId: string, centerId?: string | null): Promise<{ hours: any[]; maxAppointmentsPerHour: number; advanceBookingDays: number }> {
   try {
-    const res = await fetch(`${API_BASE}/doctors/${doctorId}/hours`);
+    const url = centerId
+      ? `${API_BASE}/doctors/${doctorId}/hours?centerId=${encodeURIComponent(centerId)}`
+      : `${API_BASE}/doctors/${doctorId}/hours`;
+    const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
       return {

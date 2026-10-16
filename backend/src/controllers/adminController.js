@@ -50,7 +50,7 @@ export async function getUsers(req, res, next) {
   try {
     const { data: usersData, error } = await supabase
       .from('users')
-      .select('id, email, full_name, phone, role, avatar_url, created_at, is_active')
+      .select('id, email, full_name, phone, role, avatar_url, created_at, is_active, center_id, medical_centers(id, name)')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -131,7 +131,9 @@ export async function getUsers(req, res, next) {
         ? (patientExtras.get(u.id) || {})
         : u.role === 'doctor'
           ? (doctorExtras.get(u.id) || {})
-          : {};
+          : u.role === 'receptionist' && u.medical_centers?.name
+            ? { medicalCenters: [u.medical_centers.name] }
+            : {};
       return mapDbUserToPublic(u, extra);
     });
 
