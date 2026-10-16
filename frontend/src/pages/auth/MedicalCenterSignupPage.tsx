@@ -30,8 +30,7 @@ export default function MedicalCenterSignupPage() {
 
     setSubmitting(true)
     try {
-      const name = email.trim().split('@')[0] || 'Medical Center Receptionist'
-      await register({ email: email.trim(), password, fullName: name, role: 'receptionist' })
+      await register({ email: email.trim(), password, fullName: 'Medical Center Receptionist', role: 'receptionist' })
       navigate('/receptionist', { replace: true })
     } catch (err) {
       if (err instanceof ApiOfflineError) setError('Cannot reach the MediQueue server. Start the backend and try again.')

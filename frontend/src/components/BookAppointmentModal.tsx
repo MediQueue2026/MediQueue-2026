@@ -30,6 +30,16 @@ function addDaysIso(base: Date, days: number): string {
   return toLocalIso(new Date(base.getFullYear(), base.getMonth(), base.getDate() + days))
 }
 
+/** Checks if a doctor belongs to a given medical center either by primary centerId or assignment list */
+function isDoctorInCenter(d: any, centerId: string): boolean {
+  if (!centerId) return true
+  if (d.centerId === centerId || d.center_id === centerId) return true
+  if (Array.isArray(d.centers)) {
+    return d.centers.some((c: any) => c.centerId === centerId || c.center_id === centerId || c.id === centerId)
+  }
+  return false
+}
+
 export function BookAppointmentModal({
   isOpen,
   onClose,
@@ -132,11 +142,13 @@ export function BookAppointmentModal({
       const initialCenter = preselectedCenter || (cList[0] ? cList[0].id : '')
       setSelectedCenterId(initialCenter)
       
-      const filtered = dList.filter((d: any) => !initialCenter || d.centerId === initialCenter || d.center_id === initialCenter)
-      if (filtered.length > 0) {
-        setSelectedDoctorId(preselectedDoctor || filtered[0].id)
-      } else if (dList.length > 0) {
-        setSelectedDoctorId(dList[0].id)
+      const filtered = dList.filter((d: any) => isDoctorInCenter(d, initialCenter))
+      if (preselectedDoctor && filtered.some((d: any) => d.id === preselectedDoctor)) {
+        setSelectedDoctorId(preselectedDoctor)
+      } else if (filtered.length > 0) {
+        setSelectedDoctorId(filtered[0].id)
+      } else {
+        setSelectedDoctorId('')
       }
     }
     if (isOpen) {
@@ -178,7 +190,7 @@ export function BookAppointmentModal({
       setLoadingSlots(true)
       try {
         const [hoursRes, apptsRes] = await Promise.all([
-          fetchDoctorHours(selectedDoctorId),
+          fetchDoctorHours(selectedDoctorId, selectedCenterId),
           fetchAllAppointments()
         ])
         setAllApptsList(apptsRes || [])
@@ -314,14 +326,15 @@ export function BookAppointmentModal({
     if (isOpen && selectedDoctorId) {
       loadDynamicSlots()
     }
-  }, [isOpen, selectedDoctorId, appointmentDate, centerClosedDates, centerDayHours])
+  }, [isOpen, selectedDoctorId, selectedCenterId, appointmentDate, centerClosedDates, centerDayHours])
 
   if (!isOpen) return null
 
   // Filter doctors assigned to selected center
-  const assignedDoctors = allDoctors.filter(d => 
-    !selectedCenterId || d.centerId === selectedCenterId || d.center_id === selectedCenterId || allDoctors.length <= 2
-  )
+  const assignedDoctors = useMemo(() => {
+    if (!selectedCenterId) return allDoctors
+    return allDoctors.filter(d => isDoctorInCenter(d, selectedCenterId))
+  }, [allDoctors, selectedCenterId])
 
   // No placeholder objects here. These used to fall back to a fictional
   // "MediQueue Central Clinic" with no id and a fictional "Dr. Aisha Patel"
@@ -329,13 +342,16 @@ export function BookAppointmentModal({
   // posted a booking for a doctor and center that don't exist. `null` instead,
   // and the Confirm button stays disabled until there is a real selection.
   const selectedCenter = centers.find(c => c.id === selectedCenterId) ?? centers[0] ?? null
-  const selectedDoc = assignedDoctors.find(d => d.id === selectedDoctorId) ?? assignedDoctors[0] ?? null
+  const selectedDoc = assignedDoctors.find(d => d.id === selectedDoctorId) ?? (assignedDoctors.length > 0 ? assignedDoctors[0] : null)
 
   const handleCenterChange = (cId: string) => {
     setSelectedCenterId(cId)
-    const filtered = allDoctors.filter(d => d.centerId === cId || d.center_id === cId)
+    const filtered = allDoctors.filter(d => isDoctorInCenter(d, cId))
     if (filtered.length > 0) {
-      setSelectedDoctorId(filtered[0].id)
+      const match = filtered.find(d => d.id === selectedDoctorId)
+      setSelectedDoctorId(match ? match.id : filtered[0].id)
+    } else {
+      setSelectedDoctorId('')
     }
   }
 
@@ -499,11 +515,15 @@ export function BookAppointmentModal({
               style={{ height: 42, fontSize: 13.5 }}
             >
               {assignedDoctors.length > 0 ? (
-                assignedDoctors.map(d => (
-                  <option key={d.id} value={d.id}>
-                    👨‍⚕️ {d.name} ({d.spec}) — {d.room || 'Consultation Room'}
-                  </option>
-                ))
+                assignedDoctors.map(d => {
+                  const centerPosting = Array.isArray(d.centers) ? d.centers.find((c: any) => c.centerId === selectedCenterId) : null
+                  const room = centerPosting?.room || d.room || 'Consultation Room'
+                  return (
+                    <option key={d.id} value={d.id}>
+                      👨‍⚕️ {d.name} ({d.spec || d.specialization || 'Doctor'}) — {room}
+                    </option>
+                  )
+                })
               ) : (
                 <option value="">No doctors assigned to this center yet</option>
               )}
