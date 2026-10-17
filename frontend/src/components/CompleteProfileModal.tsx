@@ -5,7 +5,7 @@ import {
   HeartPulse,
   Phone,
   User,
-  X
+
 } from 'lucide-react'
 import DateOfBirthInput from './DateOfBirthInput'
 import type { PatientProfile } from '../types/patient'

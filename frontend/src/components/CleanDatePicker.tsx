@@ -17,6 +17,7 @@ interface CleanDatePickerProps {
   style?: React.CSSProperties
   required?: boolean
   align?: 'left' | 'right'
+  iconOnly?: boolean
 }
 
 export default function CleanDatePicker({
@@ -28,6 +29,7 @@ export default function CleanDatePicker({
   style,
   required,
   align,
+  iconOnly = false,
 }: CleanDatePickerProps) {
   const [open, setOpen] = useState(false)
   const [dropdownAlign, setDropdownAlign] = useState<'left' | 'right'>(align || 'left')
@@ -144,52 +146,79 @@ export default function CleanDatePicker({
   const selectedD = parsedDate?.getDate()
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', ...style }}>
-      {/* Input box */}
-      <div
-        onClick={() => setOpen(prev => !prev)}
-        style={{
-          width: '100%',
-          height: 42,
-          padding: '0 12px',
-          background: '#ffffff',
-          border: open ? '1.5px solid var(--blue, #3b82f6)' : '1px solid var(--border-md, #cbd5e1)',
-          borderRadius: 10,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          cursor: 'pointer',
-          boxShadow: open ? '0 0 0 3px rgba(59, 130, 246, 0.12)' : 'none',
-          transition: 'all 0.15s ease',
-          userSelect: 'none',
-        }}
-      >
-        <span style={{ fontSize: 13.5, color: value ? '#1e293b' : 'var(--text-4, #94a3b8)', fontWeight: value ? 600 : 400 }}>
-          {value || placeholder}
-        </span>
+    <div ref={containerRef} style={{ position: 'relative', width: iconOnly ? 'auto' : '100%', flexShrink: 0, ...style }}>
+      {/* Trigger element: compact button for iconOnly, or standard full input box */}
+      {iconOnly ? (
+        <button
+          type="button"
+          onClick={() => setOpen(prev => !prev)}
+          title="Pick date from calendar"
+          aria-label="Pick date from calendar"
+          style={{
+            width: 40,
+            height: 42,
+            minWidth: 40,
+            padding: 0,
+            background: '#ffffff',
+            border: open ? '1.5px solid var(--blue, #3b82f6)' : '1px solid var(--border-md, #cbd5e1)',
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: open ? '0 0 0 3px rgba(59, 130, 246, 0.12)' : 'none',
+            transition: 'all 0.15s ease',
+            flexShrink: 0,
+          }}
+        >
+          <CalendarIcon size={17} color="var(--blue, #3b82f6)" />
+        </button>
+      ) : (
+        <div
+          onClick={() => setOpen(prev => !prev)}
+          style={{
+            width: '100%',
+            height: 42,
+            padding: '0 12px',
+            background: '#ffffff',
+            border: open ? '1.5px solid var(--blue, #3b82f6)' : '1px solid var(--border-md, #cbd5e1)',
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            cursor: 'pointer',
+            boxShadow: open ? '0 0 0 3px rgba(59, 130, 246, 0.12)' : 'none',
+            transition: 'all 0.15s ease',
+            userSelect: 'none',
+          }}
+        >
+          <span style={{ fontSize: 13.5, color: value ? '#1e293b' : 'var(--text-4, #94a3b8)', fontWeight: value ? 600 : 400 }}>
+            {value || placeholder}
+          </span>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {value && (
-            <button
-              type="button"
-              onClick={handleClear}
-              title="Clear date"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                padding: 2,
-                cursor: 'pointer',
-                color: '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
-              <X size={14} />
-            </button>
-          )}
-          <CalendarIcon size={16} color="var(--blue, #3b82f6)" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {value && (
+              <button
+                type="button"
+                onClick={handleClear}
+                title="Clear date"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 2,
+                  cursor: 'pointer',
+                  color: '#94a3b8',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={14} />
+              </button>
+            )}
+            <CalendarIcon size={16} color="var(--blue, #3b82f6)" />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Hidden input for HTML form validation */}
       {required && (
