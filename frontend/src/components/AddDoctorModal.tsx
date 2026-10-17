@@ -69,7 +69,7 @@ function FlexibleDateInput({
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
       <input
         className="input"
         type="number"
@@ -78,7 +78,7 @@ function FlexibleDateInput({
         max={maxYear}
         value={yearVal ? parseInt(yearVal, 10) : ''}
         onChange={e => handleYearChange(e.target.value)}
-        style={{ ...inputStyle, width: 70, padding: '0 6px', textAlign: 'center' }}
+        style={{ ...inputStyle, width: 68, padding: '0 6px', textAlign: 'center' }}
         title="Type birth year"
       />
       <select
@@ -101,19 +101,18 @@ function FlexibleDateInput({
         max={31}
         value={dayVal ? parseInt(dayVal, 10) : ''}
         onChange={e => handleDayChange(e.target.value)}
-        style={{ ...inputStyle, width: 50, padding: '0 4px', textAlign: 'center' }}
+        style={{ ...inputStyle, width: 48, padding: '0 4px', textAlign: 'center' }}
         title="Type birth day"
       />
-      <div style={{ width: 85, flexShrink: 0 }}>
-        <CleanDatePicker
-          value={value}
-          onChange={onChange}
-          minYear={minYear}
-          maxYear={maxYear}
-          placeholder="Pick"
-          align={align}
-        />
-      </div>
+      <CleanDatePicker
+        value={value}
+        onChange={onChange}
+        minYear={minYear}
+        maxYear={maxYear}
+        placeholder="Pick"
+        align={align}
+        iconOnly
+      />
     </div>
   )
 }
@@ -447,7 +446,7 @@ export default function AddDoctorModal({
       padding: 16,
     }}>
       <div className="fade-in modal-card" style={{
-        width: '100%', maxWidth: 660, maxHeight: '92vh',
+        width: '100%', maxWidth: 720, maxHeight: '92vh',
         background: 'rgba(255,255,255,0.96)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
@@ -559,7 +558,7 @@ export default function AddDoctorModal({
               <input className="input" value={editName} onChange={e => setEditName(e.target.value)} required style={inputStyle} />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Gender</label>
                 <select className="input" value={editGender} onChange={e => setEditGender(e.target.value)} style={inputStyle}>
@@ -572,7 +571,7 @@ export default function AddDoctorModal({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>NIC Number</label>
                 <input className="input" placeholder="e.g. 198512345678" value={editNic} onChange={e => setEditNic(e.target.value)} style={inputStyle} />
@@ -637,7 +636,7 @@ export default function AddDoctorModal({
               <Building2 size={14} color="var(--blue)" /> Center Assignment & Posting
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Consultation Room</label>
                 <input className="input" placeholder="e.g. Room 04" value={roomNumber} onChange={e => setRoomNumber(e.target.value)} style={inputStyle} />
@@ -655,7 +654,7 @@ export default function AddDoctorModal({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Center Joined Date</label>
                 <CleanDatePicker
@@ -714,7 +713,7 @@ export default function AddDoctorModal({
             </div>
 
             {/* Doctor Phone (Editable) and Work Email */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Phone Number</label>
                 <input
@@ -738,7 +737,7 @@ export default function AddDoctorModal({
             </div>
 
             {/* Room + Auto-generated Token Series */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Consultation Room Number</label>
                 <input className="input" placeholder="e.g. Room 04" value={roomNumber} onChange={e => setRoomNumber(e.target.value)} style={inputStyle} />
@@ -794,7 +793,7 @@ export default function AddDoctorModal({
               <input className="input" placeholder="e.g. Dr. Amila Perera" value={newDoctorName} onChange={e => setNewDoctorName(e.target.value)} required style={inputStyle} />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Gender</label>
                 <select className="input" value={newGender} onChange={e => setNewGender(e.target.value)} style={inputStyle}>
@@ -807,7 +806,7 @@ export default function AddDoctorModal({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>NIC Number</label>
                 <input className="input" placeholder="e.g. 199012345678" value={newNic} onChange={e => setNewNic(e.target.value)} style={inputStyle} />
@@ -873,7 +872,7 @@ export default function AddDoctorModal({
               <Building2 size={14} color="var(--blue)" /> Center Assignment
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Consultation Room</label>
                 <input className="input" placeholder="e.g. Room 04" value={newRoomNumber} onChange={e => setNewRoomNumber(e.target.value)} style={inputStyle} />
@@ -889,7 +888,7 @@ export default function AddDoctorModal({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="doctor-modal-grid-2">
               <div>
                 <label style={labelStyle}>Token Series (A–Z)</label>
                 <input

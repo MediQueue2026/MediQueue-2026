@@ -2882,3 +2882,17 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Responsive 2-column form grids in doctor modals */
+.doctor-modal-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .doctor-modal-grid-2 {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+}
