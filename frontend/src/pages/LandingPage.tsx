@@ -4,7 +4,7 @@ import {
   Activity, ArrowRight, Bell, CalendarDays, Check, CheckCircle2, ChevronRight,
   HeartPulse, LayoutDashboard, Menu, MessageSquare, MonitorPlay, ShieldCheck,
   Smartphone, Stethoscope, UserRoundCheck, Users, X, Clock3, BarChart3,
-  PhoneCall, Mail, MapPin, Star,
+  PhoneCall, Mail, MapPin,
 } from 'lucide-react'
 import heroBackground from '../imports/mediqueue_hero_background.png'
 import MolecularParticles from '../components/MolecularParticles'
@@ -32,6 +32,9 @@ const doctorBenefits = [
   'Access patient history securely',
   'Spend more time caring for patients',
 ]
+
+/** Patient journey line (520×480 stage). Keep in sync with `.jd-traveller` offset-path in index.css. */
+const JOURNEY_PATH = 'M 262 0 C 262 30, 262 50, 262 75 C 215 110, 205 190, 250 230 C 240 290, 240 350, 265 400 C 280 430, 262 455, 262 480'
 
 function FeatureList({ items, green = false }: { items: string[]; green?: boolean }) {
   return (
@@ -72,10 +75,10 @@ export default function LandingPage() {
   useEffect(() => {
     const revealTargets = document.querySelectorAll<HTMLElement>(
       '.marketing-section, .marketing-cta, .contact-strip, .marketing-footer, ' +
-      '.audience-card, .step-card, .feature-detail-grid article, .story-card, .metric-band > div',
+      '.audience-card, .step-card, .feature-detail-grid article, .metric-band > div',
     )
     const staggerGroups = document.querySelectorAll<HTMLElement>(
-      '.audience-grid, .steps-grid, .feature-detail-grid, .stories-grid, .metric-band',
+      '.audience-grid, .steps-grid, .feature-detail-grid, .metric-band',
     )
 
     revealTargets.forEach((element) => element.classList.add('scroll-reveal'))
@@ -145,7 +148,6 @@ export default function LandingPage() {
           <button type="button" onClick={() => navTo('clinics')}>For Clinics</button>
           <button type="button" onClick={() => navTo('doctors')}>For Doctors</button>
           <button type="button" onClick={() => navTo('solutions')}>Features</button>
-          <button type="button" onClick={() => navTo('stories')}>Testimonials</button>
           <button type="button" onClick={() => navTo('contact')}>Contact</button>
         </nav>
 
@@ -175,7 +177,6 @@ export default function LandingPage() {
             ['doctors', 'For Doctors'],
             ['solutions', 'Features'],
             ['pricing', 'Pricing'],
-            ['stories', 'Testimonials'],
             ['contact', 'Contact'],
           ].map(([id, label]) => (
             <button key={id} type="button" onClick={() => navTo(id)}>{label}</button>
@@ -308,54 +309,61 @@ export default function LandingPage() {
           <FeatureList items={patientBenefits} />
           <div className="store-buttons">
             <span><Smartphone size={17} /> Available on web</span>
-            <span><MessageSquare size={16} /> WhatsApp & SMS updates</span>
+            <span><MessageSquare size={16} />SMS updates</span>
           </div>
           <Link to="/register" className="marketing-primary compact">Create patient account <ArrowRight size={15} /></Link>
         </div>
 
-        <div className="phone-demo" aria-label="MediQueue patient app preview">
-          <div className="phone-stage">
-            <div className="phone-shell phone-primary">
-              <div className="phone-top">MediQueue <span>9:41</span></div>
-              <div className="phone-greeting">Good morning,<br /><b>Tharushi Silva</b></div>
-              <div className="phone-search">Search doctors or specialties...</div>
-              <div className="phone-action-grid">
-                <div><CalendarDays size={18} /><small>Book appointment</small></div>
-                <div><Users size={18} /><small>Join live queue</small></div>
-                <div><Clock3 size={18} /><small>My appointments</small></div>
-                <div><MapPin size={18} /><small>Find a clinic</small></div>
-              </div>
-              <div className="phone-panel">
-                <small>UPCOMING APPOINTMENT</small>
-                <b>Dr. Aisha Patel</b>
-                <span>Today · 10:30 AM</span>
-                <div className="phone-progress"><span /></div>
-                <em>Arrive in about 25 min</em>
-              </div>
-            </div>
+        <div className="journey-demo" aria-label="MediQueue patient journey preview">
+          <div className="jd-stage">
+            <svg className="jd-path" viewBox="0 0 520 480" aria-hidden="true">
+              <defs>
+                <linearGradient id="jdPathGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor="#5549eb" />
+                  <stop offset="1" stopColor="#13b879" />
+                </linearGradient>
+              </defs>
+              <path className="jd-path-glow" d={JOURNEY_PATH} />
+              <path className="jd-path-track" d={JOURNEY_PATH} />
+            </svg>
 
-            <div className="phone-shell phone-secondary">
-              <div className="phone-top"><span>‹</span><b>Live Queue</b><span>•••</span></div>
-              <div className="queue-clinic">
-                <span className="queue-clinic-icon"><Activity size={15} /></span>
+            <span className="jd-traveller" aria-hidden="true" />
+            <span className="jd-node jd-node-1" aria-hidden="true"><CalendarDays size={15} /></span>
+            <span className="jd-node jd-node-2" aria-hidden="true"><Users size={15} /></span>
+            <span className="jd-node jd-node-3" aria-hidden="true"><Bell size={15} /></span>
+
+            <article className="jd-card jd-card-book">
+              <div className="jd-card-head">
+                <span className="jd-icon"><CalendarDays size={14} /></span>
+                <small>Upcoming appointment</small>
+              </div>
+              <b>Dr. Aisha Patel</b>
+              <span className="jd-muted">Today · 10:30 AM</span>
+              <div className="jd-progress"><span /></div>
+              <em>Arrive in about 25 min</em>
+            </article>
+
+            <article className="jd-card jd-card-queue">
+              <div className="jd-clinic">
+                <span className="jd-icon"><Activity size={14} /></span>
                 <div><b>City Care Medical Center</b><small>Dr. Aisha Patel · General Medicine</small></div>
               </div>
-              <div className="queue-serving">
-                <small>Currently serving</small>
-                <strong>A19</strong>
-                <span>5<br /><small>patients waiting</small></span>
+              <div className="jd-serving">
+                <div><small><i className="jd-live" /> Currently serving</small><strong>A19</strong></div>
+                <span><b>5</b><small>patients waiting</small></span>
               </div>
-              <div className="queue-tokens"><span>A20</span><span>A21</span><span>A22</span><span>A23</span><span>A24</span></div>
-              <div className="queue-estimate">
-                <Bell size={14} />
+              <div className="jd-tokens"><span>A20</span><span>A21</span><span>A22</span><span>A23</span><span>A24</span></div>
+              <div className="jd-estimate">
+                <Clock3 size={13} />
                 <span>Estimated waiting time<strong>~ 35–45 minutes</strong></span>
               </div>
-              <small className="queue-hint">You'll receive a notification when you're 2 patients away.</small>
-            </div>
-          </div>
+            </article>
 
-          <div className="phone-queue"><Users size={17} /><b>Live Queue</b><strong>A19</strong><small>~ 35–45 min</small></div>
-          <div className="patient-whatsapp-card"><MessageSquare size={15} /><span><b>You're next!</b><small>Please proceed to your doctor's room.</small></span></div>
+            <article className="jd-card jd-card-next">
+              <span className="jd-icon green"><MessageSquare size={15} /></span>
+              <span><b>You're next!</b><small>Please proceed to your doctor's room.</small></span>
+            </article>
+          </div>
           <div className="demo-caption"><span className="demo-pulse" /> Live patient experience</div>
           <div className="demo-steps"><span><b>01</b>Book</span><span><b>02</b>Join queue</span><span><b>03</b>Arrive on time</span></div>
         </div>
@@ -468,12 +476,6 @@ export default function LandingPage() {
             </div>
           ))}
         </div>
-        <div className="metric-band">
-          <div><b>50+</b><span>Medical centers</span></div>
-          <div><b>25,000+</b><span>Patients served</span></div>
-          <div><b>40%</b><span>Less waiting time</span></div>
-          <div><b>30%</b><span>Better doctor utilization</span></div>
-        </div>
       </section>
 
       {/* FEATURES */}
@@ -491,29 +493,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* TESTIMONIALS */}
-      <section id="stories" className="marketing-section stories-section">
-        <div className="section-heading">
-          <div className="eyebrow centered">Testimonials</div>
-          <h2>What our users say</h2>
-          <p>Designed around patients and healthcare teams who want a calmer experience.</p>
-        </div>
-        <div className="stories-grid">
-          {[
-            ['I can book my appointment and check the queue from home. No more long waits at the clinic.', 'Tharushi Silva', 'Patient'],
-            ['MediQueue gives our team a much clearer view of appointments, queues and the day ahead.', 'Dr. Nimal Perera', 'Medical Center'],
-            ['Simple, effective, and exactly what a small clinic needs to keep the daily workflow organized.', 'Kasun Fernando', 'Clinic Owner'],
-          ].map(([quote, name, role]) => (
-            <article className="story-card" key={name}>
-              <div className="quote-mark">“</div>
-              <p>{quote}</p>
-              <div className="story-stars"><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /></div>
-              <div className="story-person"><div className="person-avatar">{name.split(' ').map(part => part[0]).join('').slice(0, 2)}</div><span><b>{name}</b><small>{role}</small></span></div>
-            </article>
-          ))}
-        </div>
-      </section>
-
       {/* CONTACT / CTA */}
       <section id="contact" className="marketing-cta">
         <div>
@@ -522,15 +501,15 @@ export default function LandingPage() {
           <p>Whether you are a patient or a medical center, MediQueue helps you save time, reduce waiting, and make every visit better.</p>
           <div className="marketing-actions">
             <Link to="/register" className="marketing-light-button">Get started now <ArrowRight size={15} /></Link>
-            <a href="mailto:hello@mediqueue.io" className="marketing-outline-button">Talk to our team</a>
+            <a href="mailto:theinnovibe@gmail.com" className="marketing-outline-button">Talk to our team</a>
           </div>
         </div>
         <div className="cta-illustration"><HeartPulse size={108} strokeWidth={1} /><Activity size={52} /></div>
       </section>
 
       <section className="contact-strip">
-        <div><PhoneCall size={18} /><span><b>Need help?</b><small>Talk to our team</small></span></div>
-        <div><Mail size={18} /><span><b>hello@mediqueue.io</b><small>Email support</small></span></div>
+        <div><PhoneCall size={18} /><span><b>+76 793 7055</b><small>Talk to our team</small></span></div>
+        <div><Mail size={18} /><span><b>theinnovibe@gmail.com</b><small>Email support</small></span></div>
         <div><MapPin size={18} /><span><b>Sri Lanka</b><small>Built for local healthcare</small></span></div>
       </section>
 
@@ -541,7 +520,7 @@ export default function LandingPage() {
             <img src="/logo.png" alt="MediQueue" style={{ height: 30, width: 'auto', objectFit: 'contain' }} />
             <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em' }}>Medi<span>Queue</span></span>
           </Link>
-          <p>A modern healthcare platform connecting patients and medical teams through appointments and live queues.</p>
+          <p>A modern healthcare platform connecting patients, doctors, and clinics through appointments and live queues.</p>
           <span className="footer-status"><i /> Healthcare workflow, thoughtfully connected</span>
         </div>
         <div>
@@ -550,25 +529,23 @@ export default function LandingPage() {
           <button type="button" onClick={() => navTo('clinics')}>For medical centers</button>
           <button type="button" onClick={() => navTo('doctors')}>For doctors</button>
           <button type="button" onClick={() => navTo('solutions')}>Features</button>
-          <button type="button" onClick={() => navTo('pricing')}>Pricing</button>
+          <button type="button" onClick={() => navTo('contact')}>Contact</button>
         </div>
         <div>
           <b>Portals</b>
           <Link to="/login">Patient sign in</Link>
           <Link to="/register">Create patient account</Link>
-          <Link to="/staff/login">Staff portal</Link>
-          <Link to="/staff/register/medical-center">Register a center</Link>
-          <a href="mailto:hello@mediqueue.io">Contact us</a>
+          <Link to="/staff/login">Staff & doctor portal</Link>
+          <Link to="/staff/register/medical-center">Register a medical center</Link>
+          <a href="mailto:theinnovibe@gmail.com">theinnovibe@gmail.com</a>
         </div>
-        <div>
-          <b>Quick actions</b>
-          <Link to="/login?new=1">Book appointment</Link>
-          <Link to="/login?new=1">Join live queue</Link>
-          <Link to="/staff/login">Doctor / staff login</Link>
-          <p className="footer-muted">Built for calmer, kinder healthcare.</p>
-          <div className="footer-social"><span>f</span><span>in</span><span>◎</span></div>
+        <div className="footer-bottom">
+          <span>© 2026 MediQueue. All rights reserved.</span>
+          <span className="footer-dev-credit">
+            Developed by <strong>TheInnoVibe</strong>
+          </span>
+          <span className="footer-legal">Privacy · Terms</span>
         </div>
-        <div className="footer-bottom">© 2026 MediQueue. All rights reserved. <span>Privacy · Terms</span></div>
       </footer>
     </main>
   )

@@ -1400,6 +1400,7 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
     linear-gradient(115deg, #111743 0%, #1c2258 48%, #0d3e49 100%);
   border-top: 1px solid rgba(71, 205, 178, .28);
   box-shadow: 0 -18px 45px rgba(24, 28, 83, .08);
+  grid-template-columns: 2fr 1fr 1fr !important;
 }
 
 .marketing-footer .marketing-brand {
@@ -1430,14 +1431,34 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
 }
 
 .marketing-footer .footer-bottom {
-  border-top-color: rgba(194, 199, 231, .16);
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  border-top: 1px solid rgba(194, 199, 231, .16);
+  padding-top: 20px;
   color: #8991b3;
+  font-size: 11px;
 }
 
-.marketing-footer .footer-social span {
-  color: #c7c2ff;
-  border-color: rgba(194, 199, 231, .25);
-  background: rgba(255, 255, 255, .04);
+.marketing-footer .footer-bottom span {
+  float: none !important;
+}
+
+.marketing-footer .footer-dev-credit {
+  color: #aeb5d2;
+}
+
+.marketing-footer .footer-dev-credit strong {
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.marketing-footer .footer-legal {
+  color: #7b83a6;
 }
 
 /* Patient portal overview composition */
@@ -2747,6 +2768,358 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
 @keyframes landing-card-float {
   0%, 100% { transform: translate3d(0, 0, 0); }
   50% { transform: translate3d(0, -12px, 0); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Patient section — animated patient journey
+   A dot travels along the journey line; each stop (Book → Join queue →
+   You're next) lights up as it arrives. One synced 9s loop:
+     card 1 active at 10–24%, card 2 at 40–54%, card 3 at 70–84%.
+   ══════════════════════════════════════════════════════════════════════════ */
+.journey-demo {
+  --jd-s: 1;
+  --jd-loop: 9s;
+  position: relative;
+  min-width: 0;
+  padding: 26px 0 6px;
+  container-type: inline-size;
+  isolation: isolate;
+}
+
+/* Branded backdrop panel */
+.journey-demo::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 62px;
+  z-index: -2;
+  border-radius: 36px;
+  border: 1px solid rgba(85, 73, 235, .08);
+  background:
+    radial-gradient(55% 50% at 25% 22%, rgba(85, 73, 235, .15), transparent 70%),
+    radial-gradient(50% 50% at 80% 78%, rgba(19, 184, 121, .14), transparent 70%),
+    linear-gradient(165deg, #f8f8ff 0%, #f2f6ff 100%);
+}
+
+/* Dot-grid texture fading toward the edges */
+.journey-demo::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 62px;
+  z-index: -1;
+  border-radius: 36px;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(85, 73, 235, .2) 1px, transparent 1.6px);
+  background-size: 18px 18px;
+  -webkit-mask-image: radial-gradient(70% 65% at 50% 45%, #000, transparent);
+  mask-image: radial-gradient(70% 65% at 50% 45%, #000, transparent);
+}
+
+.jd-stage {
+  position: relative;
+  left: 50%;
+  width: 520px;
+  height: 480px;
+  margin-left: -260px;
+  margin-bottom: calc(480px * (var(--jd-s) - 1));
+  transform: scale(var(--jd-s));
+  transform-origin: top center;
+}
+
+/* Journey line */
+.jd-path {
+  position: absolute;
+  inset: 0;
+  width: 520px;
+  height: 480px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.jd-path path { fill: none; stroke-linecap: round; }
+.jd-path-glow { stroke: url(#jdPathGradient); stroke-width: 8; opacity: .12; }
+.jd-path-track { stroke: url(#jdPathGradient); stroke-width: 2; stroke-dasharray: 2 9; opacity: .75; }
+
+/* Travelling dot */
+.jd-traveller {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #8b82ff, #5549eb 60%);
+  border: 2.5px solid #fff;
+  box-shadow: 0 0 0 6px rgba(85, 73, 235, .16), 0 6px 14px rgba(85, 73, 235, .45);
+  offset-path: path('M 262 0 C 262 30, 262 50, 262 75 C 215 110, 205 190, 250 230 C 240 290, 240 350, 265 400 C 280 430, 262 455, 262 480');
+  offset-rotate: 0deg;
+  offset-distance: 0%;
+  opacity: 0;
+}
+
+/* Stop markers on the line */
+.jd-node {
+  position: absolute;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #8a90b0;
+  background: #fff;
+  border: 1.5px solid #e1e3fa;
+  box-shadow: 0 6px 14px -6px rgba(40, 40, 130, .25);
+}
+.jd-node-1 { left: 245px; top: 58px; }
+.jd-node-2 { left: 233px; top: 213px; }
+.jd-node-3 { left: 248px; top: 383px; }
+
+/* Cards */
+.jd-card {
+  position: absolute;
+  z-index: 4;
+  padding: 16px;
+  color: #171956;
+  background: #fff;
+  border: 1px solid rgba(85, 73, 235, .1);
+  border-radius: 18px;
+  box-shadow:
+    0 26px 44px -24px rgba(40, 40, 130, .38),
+    0 6px 14px -8px rgba(40, 40, 130, .16);
+}
+
+/* Highlight ring shown while a card is the active stop */
+.jd-card::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px rgba(85, 73, 235, .55), 0 0 0 8px rgba(85, 73, 235, .1);
+  opacity: 0;
+}
+
+.jd-card b,
+.jd-card small,
+.jd-card strong { display: block; }
+
+.jd-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: #5549eb;
+  background: #eeedff;
+}
+.jd-icon.green { color: #11a26d; background: #e2f8ee; }
+
+/* 1 · Book */
+.jd-card-book { left: 0; top: 8px; width: 214px; display: grid; gap: 5px; }
+.jd-card-head { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.jd-card-head small { color: #8b91a8; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.jd-card-book > b { font-size: 15px; letter-spacing: -.02em; }
+.jd-muted { color: #737a96; font-size: 11px; }
+.jd-progress { height: 5px; margin-top: 6px; border-radius: 5px; background: #ebebff; overflow: hidden; }
+.jd-progress span { display: block; width: 65%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6f64ff, #5549eb); transform-origin: left center; }
+.jd-card-book em { color: #737a96; font-size: 10.5px; font-style: normal; }
+
+/* 2 · Join queue */
+.jd-card-queue { right: 0; top: 132px; width: 244px; display: grid; gap: 10px; }
+.jd-clinic { display: flex; align-items: center; gap: 9px; }
+.jd-clinic b { font-size: 11.5px; }
+.jd-clinic small { color: #7c849b; font-size: 9.5px; margin-top: 2px; }
+.jd-serving {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f6f6ff, #eef0ff);
+}
+.jd-serving small { display: flex; align-items: center; gap: 5px; color: #7f87a0; font-size: 9px; }
+.jd-serving strong { font-size: 30px; line-height: 1.05; letter-spacing: -.04em; color: #15194f; }
+.jd-serving > span { text-align: right; }
+.jd-serving > span b { font-size: 17px; color: #15194f; }
+.jd-serving > span small { display: block; }
+.jd-live {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #13b879;
+}
+.jd-tokens { display: flex; gap: 5px; }
+.jd-tokens span {
+  flex: 1;
+  padding: 5px 0;
+  text-align: center;
+  border-radius: 8px;
+  color: #5148e8;
+  background: #f1f2ff;
+  font-size: 9.5px;
+  font-weight: 800;
+}
+.jd-tokens span:first-child { color: #fff; background: #5549eb; }
+.jd-estimate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  color: #0ca56e;
+  background: #e8faef;
+  font-size: 9.5px;
+}
+.jd-estimate strong { font-size: 12px; margin-top: 1px; }
+
+/* 3 · You're next */
+.jd-card-next {
+  left: 12px;
+  top: 368px;
+  width: 226px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 16px 13px 13px;
+}
+.jd-card-next b { font-size: 12.5px; }
+.jd-card-next small { color: #858ca4; font-size: 10px; margin-top: 2px; line-height: 1.35; }
+
+/* Caption + stepper */
+.journey-demo .demo-caption {
+  width: fit-content;
+  margin: 2px auto 0;
+  padding: 8px 15px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e8e9fb;
+  box-shadow: 0 8px 18px -10px rgba(40, 40, 130, .25);
+}
+.journey-demo .demo-steps { gap: 14px; margin-top: 12px; }
+.journey-demo .demo-steps span {
+  position: relative;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #6c7390;
+}
+.journey-demo .demo-steps span + span::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -12px;
+  width: 10px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: #d6d9f2;
+}
+
+/* ── Motion: starts once the section is revealed ── */
+.patient-split.is-visible .jd-card { animation: jd-enter .8s cubic-bezier(.22, 1, .36, 1) both; }
+.patient-split.is-visible .jd-card-queue { animation-delay: .15s; }
+.patient-split.is-visible .jd-card-next { animation-delay: .3s; }
+
+.patient-split.is-visible .jd-traveller {
+  animation: jd-travel var(--jd-loop) ease-in-out .6s infinite;
+}
+
+/* Per-stop sync: delay = stop arrival time within the loop (+ .6s start) */
+.patient-split.is-visible .jd-card-book::after,
+.patient-split.is-visible .jd-node-1,
+.patient-split.is-visible .journey-demo .demo-steps span:nth-child(1) { --jd-at: 1.5s; }
+.patient-split.is-visible .jd-card-queue::after,
+.patient-split.is-visible .jd-node-2,
+.patient-split.is-visible .journey-demo .demo-steps span:nth-child(2) { --jd-at: 4.2s; }
+.patient-split.is-visible .jd-card-next::after,
+.patient-split.is-visible .jd-node-3,
+.patient-split.is-visible .journey-demo .demo-steps span:nth-child(3) { --jd-at: 6.9s; }
+
+.patient-split.is-visible .jd-card::after { animation: jd-ring var(--jd-loop) ease-out var(--jd-at) infinite; }
+.patient-split.is-visible .jd-node { animation: jd-node-on var(--jd-loop) ease-out var(--jd-at) infinite; }
+.patient-split.is-visible .journey-demo .demo-steps span { animation: jd-step var(--jd-loop) ease-out var(--jd-at) infinite; }
+
+.patient-split.is-visible .jd-progress span { animation: jd-progress var(--jd-loop) cubic-bezier(.65, 0, .35, 1) 1.5s infinite; }
+.patient-split.is-visible .jd-tokens span:first-child { animation: jd-token var(--jd-loop) ease-in-out 4.2s infinite; }
+.patient-split.is-visible .jd-card-next .jd-icon { animation: jd-buzz var(--jd-loop) ease-in-out 6.9s infinite; }
+.patient-split.is-visible .jd-live { animation: jd-live 2s ease-out infinite; }
+
+@keyframes jd-enter {
+  from { opacity: 0; translate: 0 28px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes jd-travel {
+  0% { offset-distance: 0%; opacity: 0; }
+  4% { opacity: 1; }
+  10%, 24% { offset-distance: 15%; }
+  40%, 54% { offset-distance: 49%; }
+  70%, 84% { offset-distance: 83%; }
+  95% { offset-distance: 100%; opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+@keyframes jd-ring {
+  0% { opacity: 0; }
+  3%, 13% { opacity: 1; }
+  18%, 100% { opacity: 0; }
+}
+
+@keyframes jd-node-on {
+  0% { scale: 1; color: #8a90b0; border-color: #e1e3fa; }
+  3% { scale: 1.18; color: #5549eb; border-color: #5549eb; }
+  6%, 13% { scale: 1; color: #5549eb; border-color: #5549eb; }
+  18%, 100% { scale: 1; color: #8a90b0; border-color: #e1e3fa; }
+}
+
+@keyframes jd-step {
+  0%, 13% { background: #eef0ff; color: #3f36d6; }
+  18%, 100% { background: transparent; color: #6c7390; }
+}
+
+@keyframes jd-progress {
+  0% { transform: scaleX(.12); }
+  14%, 100% { transform: scaleX(1); }
+}
+
+@keyframes jd-token {
+  0%, 14%, 100% { scale: 1; }
+  4% { scale: 1.12; }
+  8% { scale: 1; }
+}
+
+@keyframes jd-buzz {
+  0%, 12%, 100% { rotate: 0deg; }
+  2% { rotate: -14deg; }
+  4% { rotate: 12deg; }
+  6% { rotate: -8deg; }
+  8% { rotate: 4deg; }
+}
+
+@keyframes jd-live {
+  0% { box-shadow: 0 0 0 0 rgba(19, 184, 121, .5); }
+  80%, 100% { box-shadow: 0 0 0 7px rgba(19, 184, 121, 0); }
+}
+
+/* Fit the 520px composition to the column width */
+@container (max-width: 520px) { .jd-stage { --jd-s: .9; } }
+@container (max-width: 470px) { .jd-stage { --jd-s: .8; } }
+@container (max-width: 420px) { .jd-stage { --jd-s: .72; } }
+@container (max-width: 375px) { .jd-stage { --jd-s: .64; } }
+@container (max-width: 335px) { .jd-stage { --jd-s: .58; } }
+
+@media (max-width: 640px) {
+  .journey-demo { margin-top: 8px; }
+  .journey-demo .demo-steps { gap: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-demo *,
+  .journey-demo *::before,
+  .journey-demo *::after { animation: none !important; }
+  .jd-traveller { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
