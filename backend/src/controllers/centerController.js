@@ -82,15 +82,77 @@ export async function getCenters(req, res, next) {
       });
     }
 
-    // Only 'approved' centers are public. `approval_status` is checked
-    // explicitly: on a database that predates the column it reads as
-    // undefined, which is treated as NOT approved rather than assumed
-    // approved, so a pending center can't leak into the bookable list.
-    const visible = includePending
-      ? (data ?? [])
-      : (data ?? []).filter(c => c.approval_status === 'approved');
+    // Load center_settings to check is_listed_publicly and attach module configuration
+    let settingsMap = new Map();
+    try {
+      const { data: settingsData, error: settingsError } = await supabase
+        .from('center_settings')
+        .select('center_id, is_listed_publicly, features, custom_branding, printer_config');
+      if (!settingsError && Array.isArray(settingsData)) {
+        for (const s of settingsData) {
+          if (s.center_id) settingsMap.set(s.center_id, s);
+        }
+      }
+    } catch (_) {}
 
-    res.json({ centers: visible.map(mapDbCenterToPublic) });
+    const userRole = req.user?.role;
+    const userCenterId = req.user?.centerId;
+    const isPrivilegedStaff = userRole === 'admin' || userRole === 'receptionist' || userRole === 'doctor';
+
+    // For doctors, retrieve all centers where this doctor is assigned
+    let doctorCenterIds = new Set();
+    if (userRole === 'doctor' && req.user?.id) {
+      try {
+        const { data: docRow } = await supabase
+          .from('doctors')
+          .select('id, center_id')
+          .eq('user_id', req.user.id)
+          .maybeSingle();
+        if (docRow?.center_id) doctorCenterIds.add(docRow.center_id);
+        if (docRow?.id) {
+          const { data: assignments } = await supabase
+            .from('doctor_center_assignments')
+            .select('center_id')
+            .eq('doctor_id', docRow.id);
+          if (Array.isArray(assignments)) {
+            for (const a of assignments) {
+              if (a.center_id) doctorCenterIds.add(a.center_id);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Only 'approved' centers are public unless includePending / admin.
+    // Private centers (is_listed_publicly === false) are excluded from public directory
+    // searches unless requested by staff/admin of that center or a super admin.
+    const visible = (data ?? []).filter(c => {
+      if (!includePending && userRole !== 'admin' && c.approval_status !== 'approved') {
+        return false;
+      }
+
+      const settings = settingsMap.get(c.id);
+      if (settings && settings.is_listed_publicly === false) {
+        if (userRole === 'admin') return true;
+        if (userRole === 'receptionist' && userCenterId === c.id) return true;
+        if (userRole === 'doctor' && (userCenterId === c.id || doctorCenterIds.has(c.id))) return true;
+        return false;
+      }
+      return true;
+    });
+
+    const centersWithSettings = visible.map(c => {
+      const pub = mapDbCenterToPublic(c);
+      const s = settingsMap.get(c.id);
+      if (s) {
+        pub.settings = s;
+        pub.features = s.features;
+        pub.isListedPublicly = s.is_listed_publicly;
+      }
+      return pub;
+    });
+
+    res.json({ centers: centersWithSettings });
   } catch (err) {
     next(err);
   }
@@ -1800,6 +1862,107 @@ export async function getCenterMessagesUnreadCount(req, res, next) {
 
     // Fallback: 0
     res.json({ unreadCount: 0 });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /centers/:centerId/settings
+ * Fetch settings, feature flags, branding, and printer config for a medical center
+ */
+export async function getCenterSettings(req, res, next) {
+  try {
+    const { centerId } = req.params;
+
+    // Verify staff permission: receptionists are scoped to their assigned center
+    if (req.user?.role === 'receptionist' && req.user?.centerId && req.user.centerId !== centerId) {
+      return res.status(403).json({ error: 'You can only view settings for your own medical center.' });
+    }
+
+    const { data, error } = await supabase
+      .from('center_settings')
+      .select('*')
+      .eq('center_id', centerId)
+      .maybeSingle();
+
+    if (error && !isMissingColumnError(error) && error.code !== '42P01') {
+      console.warn('getCenterSettings error:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    const defaultSettings = {
+      center_id: centerId,
+      plan: 'standard',
+      is_listed_publicly: true,
+      features: {
+        walk_in_tokens: true,
+        online_booking: true,
+        health_records: true,
+        sms_notifications: true,
+        tv_display: true,
+        kiosk_checkin: false,
+        billing_invoicing: false,
+        pharmacy_inventory: false,
+      },
+      custom_branding: {
+        logo_url: null,
+        accent_color: '#0D9488',
+        ticket_header: 'MediQueue Clinic Token',
+        ticket_footer: 'Thank you for waiting patiently',
+      },
+      printer_config: {
+        auto_print: false,
+        paper_width: '80mm',
+      },
+    };
+
+    res.json({ settings: data || defaultSettings });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PUT /centers/:centerId/settings
+ * Update settings, feature flags, branding, and printer config for a medical center
+ */
+export async function updateCenterSettings(req, res, next) {
+  try {
+    const { centerId } = req.params;
+
+    // Verify staff permission: receptionist of this center, or super admin
+    if (req.user?.role !== 'admin' && (req.user?.role !== 'receptionist' || req.user?.centerId !== centerId)) {
+      return res.status(403).json({ error: 'You can only configure settings for your own medical center.' });
+    }
+
+    const { plan, is_listed_publicly, features, custom_branding, printer_config } = req.body;
+
+    const payload = {
+      center_id: centerId,
+      updated_at: new Date().toISOString(),
+    };
+    if (plan !== undefined) payload.plan = plan;
+    if (is_listed_publicly !== undefined) payload.is_listed_publicly = is_listed_publicly;
+    if (features !== undefined) payload.features = features;
+    if (custom_branding !== undefined) payload.custom_branding = custom_branding;
+    if (printer_config !== undefined) payload.printer_config = printer_config;
+
+    const { data, error } = await supabase
+      .from('center_settings')
+      .upsert(payload, { onConflict: 'center_id' })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Failed to update center settings:', error.message);
+      return res.status(500).json({ error: `Could not save center settings: ${error.message}` });
+    }
+
+    res.json({
+      message: 'Center settings updated successfully',
+      settings: data,
+    });
   } catch (err) {
     next(err);
   }

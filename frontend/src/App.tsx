@@ -32,14 +32,15 @@ export default function App() {
 function AppFrame() {
   const location = useLocation()
   const isLandingPage = location.pathname === '/'
+  const isTvDisplay = location.pathname === '/tv-display' || location.pathname === '/pair'
 
   useLayoutEffect(() => {
     window.scrollTo(0, 0)
   }, [location.pathname, location.search])
 
   return (
-    <div style={{ paddingTop: isLandingPage ? 0 : 46 }}>
-      {!isLandingPage && <DevNavbar />}
+    <div style={{ paddingTop: (isLandingPage || isTvDisplay) ? 0 : 46 }}>
+      {!isLandingPage && !isTvDisplay && <DevNavbar />}
       <GlobalMaintenanceGate>
         <Routes>
               <Route path="/" element={<LandingPage />} />
@@ -97,8 +98,9 @@ function AppFrame() {
                 }
               />
 
-              {/* Waiting-room board TV display */}
+              {/* Waiting-room board TV display & Screen Pairing */}
               <Route path="/tv-display" element={<TvDisplayPage />} />
+              <Route path="/pair" element={<TvDisplayPage defaultPairMode={true} />} />
         </Routes>
       </GlobalMaintenanceGate>
     </div>

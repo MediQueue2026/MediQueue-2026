@@ -184,3 +184,60 @@ ALTER TABLE public.patient_profiles
 ALTER TABLE public.patient_profiles
   ALTER COLUMN blood_group DROP DEFAULT;
 
+-- ── Center Settings & Feature Flags (migration 025) ──────────────────────────
+CREATE TABLE IF NOT EXISTS public.center_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  plan VARCHAR(50) DEFAULT 'standard',
+  is_listed_publicly BOOLEAN DEFAULT true,
+  features JSONB DEFAULT '{
+    "walk_in_tokens": true,
+    "online_booking": true,
+    "health_records": true,
+    "sms_notifications": true,
+    "tv_display": true,
+    "kiosk_checkin": false,
+    "billing_invoicing": false,
+    "pharmacy_inventory": false
+  }'::jsonb,
+  custom_branding JSONB DEFAULT '{
+    "logo_url": null,
+    "accent_color": "#0D9488",
+    "ticket_header": "MediQueue Clinic Token",
+    "ticket_footer": "Thank you for waiting patiently"
+  }'::jsonb,
+  printer_config JSONB DEFAULT '{
+    "auto_print": false,
+    "paper_width": "80mm"
+  }'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT uq_center_settings_center UNIQUE(center_id)
+);
+
+-- ── Enrolled Clinic Devices (migration 025) ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.center_devices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.medical_centers(id) ON DELETE CASCADE,
+  device_name VARCHAR(100) NOT NULL,
+  device_role VARCHAR(50) NOT NULL,
+  pairing_code VARCHAR(12) UNIQUE,
+  device_token VARCHAR(255) UNIQUE,
+  is_active BOOLEAN DEFAULT true,
+  last_heartbeat TIMESTAMPTZ DEFAULT now(),
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_center_settings_center ON public.center_settings(center_id);
+CREATE INDEX IF NOT EXISTS idx_center_devices_center ON public.center_devices(center_id);
+CREATE INDEX IF NOT EXISTS idx_center_devices_token ON public.center_devices(device_token);
+CREATE INDEX IF NOT EXISTS idx_center_devices_pairing ON public.center_devices(pairing_code);
+
+ALTER TABLE public.center_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.center_devices ENABLE ROW LEVEL SECURITY;
+
+GRANT ALL ON public.center_settings TO postgres, service_role;
+GRANT ALL ON public.center_devices TO postgres, service_role;
+GRANT SELECT ON public.center_settings TO anon, authenticated;
+

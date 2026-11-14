@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import type { UserRole } from '../context/AuthContext'
 import { ApiOfflineError } from '../lib/api'
 import { DEMO_ACCOUNTS, DEMO_PASSWORD } from '../lib/demoAccounts'
+import { PwaInstallPrompt } from './PwaInstallPrompt'
 
 interface DevPage {
   path: string
@@ -134,6 +135,8 @@ export function DevNavbar() {
           <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 10 }}>|</span>
           <button onClick={() => handleQuickDemo('admin', '/admin')} style={{ background: 'none', border: 'none', color: '#f87171', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: '2px 4px' }}>Admin</button>
         </div>
+
+        <PwaInstallPrompt compact />
 
         <button
           onClick={checkDatabaseConnection}
