@@ -4,10 +4,11 @@ import {
   Activity, AlertCircle, Bell, BellRing, Building2, Camera, Check, CheckCircle2, Clock, Hash, ImagePlus,
   Megaphone, Plus, Radio, Save, Search, Stethoscope, Ticket, Trash2, UserX, Users, Wifi, CalendarClock,
   Pencil, Menu, X, ChevronDown, ChevronRight, PhoneCall, RefreshCw, Timer, TriangleAlert, CalendarDays,
-  FileText, Send, MessageSquare, RotateCcw, CreditCard, CalendarX, CornerDownLeft
+  FileText, Send, MessageSquare, RotateCcw, CreditCard, CalendarX, CornerDownLeft, Printer, Sliders
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
+import CenterSettingsModal from '../components/CenterSettingsModal'
 import PublicTvDisplay from '../components/PublicTvDisplay'
 import AddDoctorModal from '../components/AddDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
@@ -15,6 +16,8 @@ import DoctorHoursModal from '../components/DoctorHoursModal'
 import DelayAlertModal from '../components/DelayAlertModal'
 import ServiceMultiSelect from '../components/ServiceMultiSelect'
 import LocationPickerMap from '../components/LocationPickerMap'
+import PwaInstallPrompt from '../components/PwaInstallPrompt'
+import ThermalTicketSlip, { type ThermalTicketData } from '../components/ThermalTicketSlip'
 import { Avatar, Badge, StatusBadge } from '../components/UIPrimitives'
 import { useReceptionQueue } from '../hooks/useReceptionQueue'
 import {
@@ -391,7 +394,7 @@ function WeeklyOpeningHoursEditor({
  * that matter at a counter: place in line and token number.
  */
 function QueueRow({
-  entry, tone, position, estWait, now, onCall, onDone, onNoShow,
+  entry, tone, position, estWait, now, onCall, onDone, onNoShow, onPrint,
 }: {
   entry: QueueEntry
   tone: 'live' | 'waiting' | 'closed'
@@ -401,6 +404,7 @@ function QueueRow({
   onCall?: () => void
   onDone?: () => void
   onNoShow?: () => void
+  onPrint?: () => void
 }) {
   const waited = minutesSince(entry.issuedAt, now)
   const accent =
@@ -506,6 +510,16 @@ function QueueRow({
       {/* Actions */}
       {tone !== 'closed' && (
         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {onPrint && (
+            <button
+              onClick={onPrint}
+              className="btn btn-ghost btn-sm"
+              style={{ gap: 4, color: 'var(--brand-teal, #0D9488)', border: '1px solid rgba(13, 148, 136, 0.3)' }}
+              title="Print / Reprint Thermal Ticket Slip"
+            >
+              <Printer size={12} /> Slip
+            </button>
+          )}
           {onCall && (
             <button
               onClick={onCall}
@@ -568,6 +582,7 @@ export default function ReceptionistDesk() {
   const [activeTab, setActiveTab] = useState<'checkin' | 'patients' | 'doctors' | 'profile' | 'messages' | 'payments'>('checkin')
 
   const [showTvDisplay, setShowTvDisplay] = useState(false)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const [showRequestCenter, setShowRequestCenter] = useState(false)
   const [centerRequestStatus, setCenterRequestStatus] = useState<'idle' | 'success' | 'error'>('idle')
@@ -697,6 +712,8 @@ export default function ReceptionistDesk() {
   const [formPhone, setFormPhone] = useState('')
   const [physicalToken, setPhysicalToken] = useState('')
   const [issued, setIssued] = useState<string | null>(null)
+  const [printedTicketData, setPrintedTicketData] = useState<ThermalTicketData | null>(null)
+  const [showPrintModal, setShowPrintModal] = useState(false)
 
   // Name-field autocomplete against patients already on record at this center,
   // so a returning walk-in's NIC and phone are filled from a past visit rather
@@ -760,11 +777,37 @@ export default function ReceptionistDesk() {
       tokenNumber: tokenSource === 'physical' ? Number(physicalToken) : undefined,
     })
     if (result.ok && result.entry) {
-      setIssued(entryToken(result.entry))
+      const token = entryToken(result.entry)
+      setIssued(token)
+      setPrintedTicketData({
+        tokenNumber: token,
+        patientName: formName,
+        doctorName: selectedDoctor?.name,
+        room: selectedDoctor?.room,
+        centerName: deskCenterName || 'MediQueue Medical Center',
+        dept: selectedDoctor?.dept,
+        phone: formPhone.trim(),
+        issuedAt: result.entry.issuedAt
+      })
+      setShowPrintModal(true)
       resetForm()
       nameInputRef.current?.focus()
-      setTimeout(() => setIssued(null), 3000)
+      setTimeout(() => setIssued(null), 4000)
     }
+  }
+
+  const handlePrintSlipForEntry = (entry: QueueEntry) => {
+    setPrintedTicketData({
+      tokenNumber: entryToken(entry),
+      patientName: entry.patientName,
+      doctorName: selectedDoctor?.name,
+      room: selectedDoctor?.room,
+      centerName: deskCenterName || 'MediQueue Medical Center',
+      dept: selectedDoctor?.dept,
+      phone: entry.phone,
+      issuedAt: entry.issuedAt,
+    })
+    setShowPrintModal(true)
   }
 
   /**
@@ -1399,6 +1442,22 @@ export default function ReceptionistDesk() {
         onCallNext={queue.callNext}
       />
 
+      <ThermalTicketSlip
+        isOpen={showPrintModal}
+        ticket={printedTicketData}
+        onClose={() => setShowPrintModal(false)}
+      />
+
+      {showSettingsModal && queue.centerId && (
+        <CenterSettingsModal
+          isOpen={showSettingsModal}
+          centerId={queue.centerId}
+          centerName={centerProfile?.name || queue.centerName || 'My Medical Center'}
+          canEditPlan={false}
+          onClose={() => setShowSettingsModal(false)}
+        />
+      )}
+
       <AddCenterModal
         isOpen={showRequestCenter}
         onClose={() => { setShowRequestCenter(false); setCenterRequestStatus('idle'); setCenterRequestMsg('') }}
@@ -1585,6 +1644,11 @@ export default function ReceptionistDesk() {
           <button onClick={() => { setShowTvDisplay(true); setShowMobileSidebar(false) }} className="btn btn-ghost" style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
             <Radio size={16} /> TV Display Board
           </button>
+          {queue.centerId && (
+            <button onClick={() => { setShowSettingsModal(true); setShowMobileSidebar(false) }} className="btn btn-ghost" style={{ justifyContent: 'flex-start', padding: '12px 14px' }}>
+              <Sliders size={16} /> Screens & Printers
+            </button>
+          )}
 
           {/* Center request — only if this receptionist has no center yet */}
           {!user?.centerId && (
@@ -1665,6 +1729,16 @@ export default function ReceptionistDesk() {
             >
               <Radio size={13} color="var(--blue)" /> Public TV Board
             </button>
+            {queue.centerId && (
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="btn btn-ghost btn-sm"
+                style={{ gap: 6, fontSize: 11.5, color: 'var(--text-3)', padding: '5px 11px', border: '1px solid var(--border-md)', background: '#ffffff' }}
+                title="Manage Thermal Printer & Waiting-Room TV Screens"
+              >
+                <Sliders size={13} color="var(--blue)" /> Screens & Printers
+              </button>
+            )}
             {/* Reflects the real connection state instead of always claiming
                 the queue is live. */}
             <div className="desktop-only" style={{ alignItems: 'center', gap: 6 }}>
@@ -1682,6 +1756,10 @@ export default function ReceptionistDesk() {
 
         {/* CONTENT SCROLL AREA */}
         <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
+
+          <div style={{ padding: '14px 24px 0' }}>
+            <PwaInstallPrompt />
+          </div>
 
           {/* CLINIC-WIDE STAT RIBBON — only on Issue Tokens & Queue tab */}
           {activeTab === 'checkin' && (
@@ -2241,6 +2319,7 @@ export default function ReceptionistDesk() {
                                 entry={entry}
                                 tone="live"
                                 now={queue.now}
+                                onPrint={() => handlePrintSlipForEntry(entry)}
                                 onDone={() => queue.setStatus(entry.id, 'completed')}
                                 onNoShow={() => queue.setStatus(entry.id, 'left')}
                               />
@@ -2272,6 +2351,7 @@ export default function ReceptionistDesk() {
                                 position={i + 1}
                                 estWait={queue.waitFor(entry)}
                                 now={queue.now}
+                                onPrint={() => handlePrintSlipForEntry(entry)}
                                 onCall={i === 0 ? queue.callNext : () => queue.setStatus(entry.id, 'called')}
                                 onDone={() => queue.setStatus(entry.id, 'completed')}
                                 onNoShow={() => queue.setStatus(entry.id, 'left')}
@@ -2454,11 +2534,31 @@ export default function ReceptionistDesk() {
 
               {/* ── PROFILE CARD — photo, location, contact, hours, services ── */}
               <div className="card glass-form-card" style={{ padding: 26 }}>
-                <div style={{ marginBottom: 18 }}>
-                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Medical Center Profile</h3>
-                  <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 620 }}>
-                    Keep {deskCenterName ?? 'your medical center'}'s public profile up to date — patients see this when browsing centers and booking appointments.
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-1)' }}>Medical Center Profile</h3>
+                    <div style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 620 }}>
+                      Keep {deskCenterName ?? 'your medical center'}'s public profile up to date — patients see this when browsing centers and booking appointments.
+                    </div>
                   </div>
+                  {queue.centerId && (
+                    <button
+                      type="button"
+                      onClick={() => setShowSettingsModal(true)}
+                      className="btn btn-sm"
+                      style={{
+                        background: 'rgba(13, 148, 136, 0.08)',
+                        color: '#0F766E',
+                        border: '1.5px solid rgba(13, 148, 136, 0.3)',
+                        fontWeight: 700,
+                        gap: 7,
+                        borderRadius: 10,
+                        padding: '7px 14px',
+                      }}
+                    >
+                      <Sliders size={14} /> Screens & Hardware Settings
+                    </button>
+                  )}
                 </div>
 
                 {profileLoading && !centerProfile ? (

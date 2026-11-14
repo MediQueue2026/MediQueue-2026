@@ -3269,3 +3269,92 @@ html:has(.marketing-page) { scroll-behavior:smooth; }
     gap: 12px !important;
   }
 }
+
+/* ── Thermal Slip Printing Styles (80mm & 58mm POS Printers) ─────────────── */
+@media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide everything except thermal slip if print container exists */
+  body.printing-thermal * {
+    visibility: hidden !important;
+  }
+
+  body.printing-thermal .thermal-modal-container {
+    position: static !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  body.printing-thermal .thermal-modal-card {
+    position: static !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  body.printing-thermal .thermal-slip-wrapper {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  body.printing-thermal #thermal-ticket-slip,
+  body.printing-thermal #thermal-ticket-slip * {
+    visibility: visible !important;
+  }
+
+  body.printing-thermal #thermal-ticket-slip {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
+
+.thermal-slip {
+  width: 78mm;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 14px 10px;
+  background: #ffffff;
+  color: #000000;
+  font-family: 'Courier New', Courier, monospace, system-ui;
+  text-align: center;
+  box-sizing: border-box;
+  border-radius: 4px;
+}
+
+.thermal-slip.slip-58mm {
+  width: 54mm;
+  padding: 8px 6px;
+  font-size: 11px;
+}
+

@@ -19,7 +19,7 @@ interface DoctorBoard {
 }
 
 export default function PublicTvDisplay({
-  isOpen, onClose, doctor, centerId, current, waiting, estimateWait, onCallNext,
+  isOpen, onClose, doctor, centerId, current, waiting, estimateWait, onCallNext, hideControls = false,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -29,6 +29,7 @@ export default function PublicTvDisplay({
   waiting?: QueueEntry[]
   estimateWait?: (entry: QueueEntry) => number
   onCallNext?: () => void
+  hideControls?: boolean
 }) {
   const [flash, setFlash] = useState(false)
   const [selectedDocId, setSelectedDocId] = useState('')
@@ -194,25 +195,29 @@ export default function PublicTvDisplay({
         )}
 
         {/* Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <button
-            onClick={handleCallNext}
-            className="btn btn-emerald"
-            style={{ gap: 7, fontSize: 'clamp(11px, 1.5vw, 14px)', padding: 'clamp(8px, 1.5vh, 12px) clamp(12px, 2vw, 20px)', borderRadius: 10 }}
-          >
-            <Bell size={16} /> Chime / Call Next
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)',
-              color: '#fff', borderRadius: '50%', width: 38, height: 38, flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-            }}
-          >
-            <X size={18} />
-          </button>
-        </div>
+        {!hideControls && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            {onCallNext && (
+              <button
+                onClick={handleCallNext}
+                className="btn btn-emerald"
+                style={{ gap: 7, fontSize: 'clamp(11px, 1.5vw, 14px)', padding: 'clamp(8px, 1.5vh, 12px) clamp(12px, 2vw, 20px)', borderRadius: 10 }}
+              >
+                <Bell size={16} /> Chime / Call Next
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              style={{
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)',
+                color: '#fff', borderRadius: '50%', width: 38, height: 38, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── MAIN CONTENT ── */}

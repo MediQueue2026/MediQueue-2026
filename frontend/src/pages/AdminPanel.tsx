@@ -7,12 +7,13 @@ import {
   Search, Ticket, Users, X, RefreshCw, CheckCircle2,
   AlertCircle, UserX, Stethoscope, ShieldCheck, MessageSquare, Send,
   Pencil, Pause, Play, Trash2, RotateCcw, Check, CornerDownLeft, Bell,
-  ChevronDown, CreditCard, Clock
+  ChevronDown, CreditCard, Clock, Sliders
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import AccountMenu from '../components/AccountMenu'
 import AddDoctorModal from '../components/AddDoctorModal'
 import AddCenterModal from '../components/AddCenterModal'
+import CenterSettingsModal from '../components/CenterSettingsModal'
 import { Avatar, StatCard, StatusBadge } from '../components/UIPrimitives'
 import { ViewReportModal } from '../components/ViewReportModal'
 import { api } from '../lib/api'
@@ -522,6 +523,7 @@ export default function AdminPanel() {
   const [centersLoading, setCentersLoading] = useState(false)
   const [editingCenter, setEditingCenter] = useState<ApiCenter | null>(null)
   const [deletingCenter, setDeletingCenter] = useState<ApiCenter | null>(null)
+  const [settingsCenter, setSettingsCenter] = useState<ApiCenter | null>(null)
   const [doctors, setDoctors] = useState<ApiDoctor[]>([])
   const [_doctorsLoading, setDoctorsLoading] = useState(false)
 
@@ -2418,6 +2420,13 @@ export default function AdminPanel() {
                           >
                             <Pencil size={14} /> Edit Center
                           </button>
+                          <button
+                            className="btn btn-sm"
+                            style={{ flex: 1, minWidth: 140, background: '#0D9488', color: '#fff', border: '1px solid #0F766E' }}
+                            onClick={() => setSettingsCenter(c)}
+                          >
+                            <Sliders size={14} /> Modules & Settings
+                          </button>
                         </div>
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <button
@@ -3496,6 +3505,16 @@ export default function AdminPanel() {
           refreshClinicsData()
         }}
       />
+
+      {settingsCenter && (
+        <CenterSettingsModal
+          isOpen={Boolean(settingsCenter)}
+          centerId={settingsCenter.id}
+          centerName={settingsCenter.name}
+          canEditPlan={true}
+          onClose={() => setSettingsCenter(null)}
+        />
+      )}
     </div>
   )
 }

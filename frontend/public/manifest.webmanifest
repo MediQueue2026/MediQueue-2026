@@ -1,0 +1,61 @@
+{
+  "name": "MediQueue Clinic System",
+  "short_name": "MediQueue",
+  "description": "On-Site Healthcare Queue Management & Clinic System",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0D9488",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["medical", "health", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Reception Desk",
+      "short_name": "Reception",
+      "description": "Open Reception Desk & Queue Management",
+      "url": "/receptionist",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Doctor Panel",
+      "short_name": "Doctor",
+      "description": "Open Doctor Consultation Console",
+      "url": "/doctor",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Waiting Room TV",
+      "short_name": "TV Display",
+      "description": "Launch Fullscreen TV Queue Board",
+      "url": "/tv-display",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -322,6 +322,48 @@ export interface ApiCenter {
   requestComment?: string | null
   created_at?: string
   documents?: ApiCenterDocument[]
+  settings?: ApiCenterSettings
+  isListedPublicly?: boolean
+  features?: Record<string, boolean>
+}
+
+export interface ApiCenterSettings {
+  center_id: string
+  plan: 'listing_only' | 'basic' | 'standard' | 'premium'
+  is_listed_publicly: boolean
+  features: {
+    walk_in_tokens: boolean
+    online_booking: boolean
+    health_records: boolean
+    sms_notifications: boolean
+    tv_display: boolean
+    kiosk_checkin: boolean
+    billing_invoicing: boolean
+    pharmacy_inventory: boolean
+  }
+  custom_branding: {
+    logo_url: string | null
+    accent_color: string
+    ticket_header: string
+    ticket_footer: string
+  }
+  printer_config: {
+    auto_print: boolean
+    paper_width: '80mm' | '58mm'
+  }
+}
+
+export interface ApiCenterDevice {
+  id: string
+  center_id: string
+  device_name: string
+  device_role: 'reception' | 'doctor' | 'tv_display' | 'kiosk'
+  pairing_code?: string | null
+  device_token?: string | null
+  is_active: boolean
+  last_heartbeat: string
+  metadata?: Record<string, unknown>
+  created_at: string
 }
 
 export interface ApiCenterAdminMessage {
@@ -1191,4 +1233,35 @@ export const api = {
     
     return res.json()
   },
+
+  getCenterSettings: (centerId: string) =>
+    request<{ settings: ApiCenterSettings }>(`/centers/${centerId}/settings`),
+
+  updateCenterSettings: (centerId: string, payload: Partial<ApiCenterSettings>) =>
+    request<{ message: string; settings: ApiCenterSettings }>(`/centers/${centerId}/settings`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  generateDevicePairingCode: (input: { centerId: string; deviceName?: string; deviceRole?: string }) =>
+    request<{ message: string; pairingCode: string; device: ApiCenterDevice }>('/devices/generate-code', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  pairDevice: (pairingCode: string, metadata?: Record<string, unknown>) =>
+    rawRequest<{ message: string; deviceToken: string; centerId: string; centerName: string; deviceName: string; deviceRole: string }>('/devices/pair', {
+      method: 'POST',
+      body: JSON.stringify({ pairingCode, metadata }),
+    }),
+
+  getCenterDevices: (centerId: string) =>
+    request<{ devices: ApiCenterDevice[] }>(`/devices/center/${centerId}`),
+
+  sendDeviceHeartbeat: (deviceToken: string) =>
+    rawRequest<{ status: string; lastHeartbeat: string; centerId: string }>('/devices/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ deviceToken }),
+    }),
 }
+

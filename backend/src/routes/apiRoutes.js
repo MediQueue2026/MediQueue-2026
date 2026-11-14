@@ -16,7 +16,8 @@ import {
 
 import { authMiddleware, optionalAuth } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
-import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter, getCenterClosures, createCenterClosure, deleteCenterClosure, getCenterDayHours, putCenterDateHours, deleteCenterDateHours, putDoctorDateHours, deleteDoctorDateHours, getCenterNotices, createCenterNotice, deleteCenterNotice, createCenterMessage, createCenterMessageToAdmin, getCenterMessagesToAdmin, getCenterConversation, markCenterMessageRead, getAdminMessagesUnreadCount, getCenterMessagesUnreadCount } from '../controllers/centerController.js';
+import { getCenters, createCenter, updateCenter, deleteCenter, getPendingCenters, approveCenter, rejectCenter, getCenterClosures, createCenterClosure, deleteCenterClosure, getCenterDayHours, putCenterDateHours, deleteCenterDateHours, putDoctorDateHours, deleteDoctorDateHours, getCenterNotices, createCenterNotice, deleteCenterNotice, createCenterMessage, createCenterMessageToAdmin, getCenterMessagesToAdmin, getCenterConversation, markCenterMessageRead, getAdminMessagesUnreadCount, getCenterMessagesUnreadCount, getCenterSettings, updateCenterSettings } from '../controllers/centerController.js';
+import { generateDevicePairingCode, pairDevice, getCenterDevices, recordDeviceHeartbeat } from '../controllers/deviceController.js';
 import { createAppointment, getAppointments, getPatientAppointments, cancelAppointment } from '../controllers/appointmentController.js';
 import { updateDoctorStatus, getDoctors, updateDoctor, createDoctor, getDoctorHours, upsertDoctorHours, getDoctorSummary, getPendingDoctors, approveDoctor, rejectDoctor } from '../controllers/doctorController.js';
 import { getQueue, getPublicBoard, issueWalkinToken, callNextPatient, updateQueueEntryStatus } from '../controllers/queueController.js';
@@ -131,7 +132,7 @@ router.post('/subscriptions/toggle', toggleDoctorSubscription);
 // ── Public Routes ───────────────────────────────────────────────────────────
 // NOTE: Specific sub-paths MUST be declared before generic param routes.
 router.get('/centers/pending', authMiddleware, requireRole(['admin']), getPendingCenters);
-router.get('/centers', getCenters);
+router.get('/centers', optionalAuth, getCenters);
 router.get('/doctors/pending', authMiddleware, requireRole(['admin']), getPendingDoctors);
 router.get('/doctors', getDoctors);
 router.get('/queue/board', getPublicBoard);
@@ -140,6 +141,10 @@ router.get('/queue/board', getPublicBoard);
 // A signed-in receptionist may submit a new center (goes in 'pending'); only
 // an admin creates one that's immediately 'approved'.
 router.post('/centers', authMiddleware, requireRole(['receptionist', 'admin']), createCenter);
+
+// Center Settings & Feature Flags (Migration 025)
+router.get('/centers/:centerId/settings', authMiddleware, requireRole(['receptionist', 'doctor', 'admin']), getCenterSettings);
+router.put('/centers/:centerId/settings', authMiddleware, requireRole(['receptionist', 'admin']), updateCenterSettings);
 
 // Per-date closures (migration 012). Read is public like GET /centers so the
 // patient booking modal can grey out closed days; writing is staff-only and a
@@ -246,6 +251,12 @@ router.patch('/doctor-requests/:id/decline', authMiddleware, requireRole(['docto
 // Admin-level approval for CREATE_NEW doctor requests
 router.patch('/doctor-requests/:id/admin-approve', authMiddleware, requireRole(['admin']), approveAdminDoctorRequest);
 router.patch('/doctor-requests/:id/admin-reject', authMiddleware, requireRole(['admin']), rejectAdminDoctorRequest);
+
+// ── Clinic Device Enrollment & Pairing Routes ───────────────────────────────
+router.post('/devices/generate-code', authMiddleware, requireRole(['receptionist', 'admin']), generateDevicePairingCode);
+router.post('/devices/pair', pairDevice);
+router.get('/devices/center/:centerId', authMiddleware, requireRole(['receptionist', 'admin']), getCenterDevices);
+router.post('/devices/heartbeat', recordDeviceHeartbeat);
 
 // ── Upload Routes ────────────────────────────────────────────────────────────
 router.post('/uploads', upload.single('file'), uploadFile);

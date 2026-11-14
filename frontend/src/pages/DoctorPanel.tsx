@@ -8,6 +8,7 @@ import PatientHistoryDrawer from '../components/PatientHistoryDrawer'
 import PrescriptionModal from '../components/PrescriptionModal'
 import DelayAlertModal from '../components/DelayAlertModal'
 import MolecularParticles from '../components/MolecularParticles'
+import PwaInstallPrompt from '../components/PwaInstallPrompt'
 import { Badge, Dot, StatusBadge } from '../components/UIPrimitives'
 import { useAuth } from '../context/AuthContext'
 import { ApiError, api } from '../lib/api'
@@ -559,6 +560,10 @@ export default function DoctorPanel() {
           </div>
           <AccountMenu specialization={doctor.specialization ?? undefined} series={doctor.series} />
         </div>
+      </div>
+
+      <div style={{ margin: '14px 24px 0' }}>
+        <PwaInstallPrompt />
       </div>
 
       {/* Live delay banner, so the doctor can see what patients were told */}

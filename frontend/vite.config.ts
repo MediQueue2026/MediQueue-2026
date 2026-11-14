@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
+      mediQueuePwaPlugin(),
       figmaSiteConfiguration(siteConfiguration),
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
@@ -352,6 +353,29 @@ function figmaMakeKitPlugin(options: { storiesGlob: string | string[] }): Plugin
           next(err as Error)
         }
       })
+    },
+  }
+}
+
+/** Injects PWA manifest links, Apple web app meta tags, and theme colors into index.html */
+function mediQueuePwaPlugin(): Plugin {
+  return {
+    name: 'mediqueue-pwa',
+    transformIndexHtml(html) {
+      const pwaTags: HtmlTagDescriptor[] = [
+        { tag: 'link', attrs: { rel: 'manifest', href: '/manifest.webmanifest' }, injectTo: 'head' },
+        { tag: 'meta', attrs: { name: 'theme-color', content: '#0D9488' }, injectTo: 'head' },
+        { tag: 'meta', attrs: { name: 'apple-mobile-web-app-capable', content: 'yes' }, injectTo: 'head' },
+        { tag: 'meta', attrs: { name: 'apple-mobile-web-app-status-bar-style', content: 'default' }, injectTo: 'head' },
+        { tag: 'meta', attrs: { name: 'apple-mobile-web-app-title', content: 'MediQueue Clinic System' }, injectTo: 'head' },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/icon-192.png' }, injectTo: 'head' },
+        { tag: 'link', attrs: { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/icon-192.png' }, injectTo: 'head' },
+        { tag: 'link', attrs: { rel: 'icon', type: 'image/png', sizes: '512x512', href: '/icon-512.png' }, injectTo: 'head' },
+      ]
+      return {
+        html,
+        tags: pwaTags,
+      }
     },
   }
 }
